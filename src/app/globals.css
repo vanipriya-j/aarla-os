@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+:root {
+  --aarla-red: #b60426;
+  --deep-navy: #17365d;
+  --warm-cream: #f6eedc;
+  --soft-beige: #e8d8bc;
+  --mustard: #e5ad2f;
+  --warm-orange: #d97732;
+  --muted-green: #a9b98e;
+  --charcoal: #292622;
+  --white: #ffffff;
+  --pale-cream: #fbf7ef;
+  --border: #e2d5bf;
+  --border-strong: #d4c4a8;
+  --shadow: 0 1px 3px rgba(41, 38, 34, 0.06), 0 4px 12px rgba(41, 38, 34, 0.04);
+  --shadow-md: 0 2px 8px rgba(41, 38, 34, 0.08), 0 8px 24px rgba(41, 38, 34, 0.06);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+}
+
+@theme inline {
+  --color-aarla-red: var(--aarla-red);
+  --color-deep-navy: var(--deep-navy);
+  --color-warm-cream: var(--warm-cream);
+  --color-soft-beige: var(--soft-beige);
+  --color-mustard: var(--mustard);
+  --color-warm-orange: var(--warm-orange);
+  --color-muted-green: var(--muted-green);
+  --color-charcoal: var(--charcoal);
+  --color-pale-cream: var(--pale-cream);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --font-serif: var(--font-dm-serif);
+  --font-sans: var(--font-inter);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--warm-cream);
+  color: var(--charcoal);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-dm-serif), Georgia, serif;
+  color: var(--deep-navy);
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--aarla-red) 20%, transparent);
+  color: var(--deep-navy);
+}
+
+/* Subtle paper texture */
+.app-bg {
+  background-color: var(--warm-cream);
+  background-image:
+    radial-gradient(ellipse at 0% 0%, rgba(232, 216, 188, 0.55) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 0%, rgba(169, 185, 142, 0.12) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 100%, rgba(229, 173, 47, 0.08) 0%, transparent 45%);
+}
+
+.card-surface {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-surface-pale {
+  background: var(--pale-cream);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+.stagger-2 {
+  animation-delay: 0.1s;
+}
+.stagger-3 {
+  animation-delay: 0.15s;
+}
+.stagger-4 {
+  animation-delay: 0.2s;
+}
+.stagger-5 {
+  animation-delay: 0.25s;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--soft-beige);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
