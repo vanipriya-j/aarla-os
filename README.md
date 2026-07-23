@@ -18,6 +18,7 @@ npm run build   # production build
 npm run start   # serve production build
 npm run lint    # eslint
 npm test        # Vitest unit + integration + RTL (Phase 0–1)
+npm run build && npm start  # production server for Playwright
 npm run test:e2e  # Playwright smoke (manufacture → receive → transfer → sale → registration)
 npm run test:all  # Vitest + Playwright
 ```

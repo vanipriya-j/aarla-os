@@ -56,11 +56,13 @@ Stock Movement Ledger (append-only, LocalStorage)
 Frameworks: **Vitest** (domain + LocalStorage integration), **React Testing Library** (screen-consistency harness), **Playwright** (critical browser smoke).
 
 ```bash
-npm test          # vitest run
-npm run test:e2e  # playwright test
-npm run test:all  # both
+npm test              # Vitest unit + integration + RTL (Phase 0–1)
+npm run build && npm start   # production server (needed for Playwright)
+npm run test:e2e      # Playwright smoke (manufacture → receive → transfer → sale → registration)
+npm run test:all      # Vitest + Playwright
 ```
 
+Playwright uses `next start` (see `playwright.config.ts`). Run `npm run build` first; `next dev` may not hydrate reliably in some environments.
 Fixtures/builders live in `src/test/fixtures/builders.ts`. Ledger tests inject deterministic movement IDs via `setMovementIdGenerator` and reset storage with `resetLedgerStorage`.
 
 Coverage targets the Phase 0–1 invariants (single catalog/ledger, receive/damage/transfer/sale, derived inventory & journey, idempotent writers, non-negative stock, seed-once, corrupt LocalStorage recovery, screen consistency).
