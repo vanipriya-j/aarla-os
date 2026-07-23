@@ -394,7 +394,7 @@ export function deriveInventorySnapshots(movements: StockMovement[]): InventoryS
     );
     const channelStock = Math.max(balanceAt(balances, p.id, LOC.shopify), 0);
     const damaged = Math.max(balanceAt(balances, p.id, LOC.damage), 0);
-    const reserved = channelStock; // Shopify pool treated as reserved for fulfilment
+    const reserved = channelStock; // D2C channel pool reserved for fulfilment (ledger-derived)
     const available = studioStock;
     const totalOnHand = studioStock + partnerStock + channelStock;
 

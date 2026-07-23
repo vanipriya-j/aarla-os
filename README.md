@@ -56,20 +56,21 @@ docs/                  # Product & design context
 - **Stock Movement Ledger** in `src/lib/domain/ledger.ts` (LocalStorage)
 - Inventory balances, partner stock, journey, and capital-in-inventory are **derived**
 - Manufacture writes Purchase Orders; Receive / Partner Transfer / Partner Sale write ledger movements
+- **Aarla OS is the system of record**; Shopify (and other commerce platforms) are future **channel adapters** only — see `docs/architecture.md`
 
 See `docs/architecture.md` and `docs/product-network.md`.
 
 ## Current limitations (v0.2)
 
 - Mock data + LocalStorage only — no auth, database, or API routes
-- No live Shopify, Delhivery, email, or WhatsApp integrations (previews are simulated)
+- No live Shopify, Delhivery, email, or WhatsApp integrations (previews / fixtures are simulated)
 - Charts are CSS-based mock visualisations
 - Desktop-first; mobile uses a collapsible nav
 
 ## Suggested next steps
 
 1. Persist projects / POs / content tasks locally (e.g. IndexedDB) before adding a backend
-2. Real Shopify order sync and inventory webhooks
+2. Implement a replaceable commerce adapter that imports Shopify → `SalesOrder` and writes stock only via the ledger
 3. Vendor email / WhatsApp send with audit trail
 4. Barcode print via label printer drivers
 5. Role-aware views if a small team grows beyond a single founder

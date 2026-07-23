@@ -21,6 +21,7 @@ const steps = [
 ];
 
 export default function DispatchPage() {
+  // Fixture list only — not the commerce SoR. Canonical orders will be SalesOrders via adapters.
   const [orders, setOrders] = useState(shopifyOrders);
   const [selected, setSelected] = useState<ShopifyOrder | null>(null);
   const [step, setStep] = useState(0);
@@ -62,7 +63,7 @@ export default function DispatchPage() {
     <>
       <Header
         title="Dispatch Orders"
-        subtitle="Pending Shopify orders — pack, label and hand to courier."
+        subtitle="Pack and dispatch channel orders. Demo list is a fixture — Aarla OS SalesOrders are the future source of truth."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         {!selected ? (

@@ -30,6 +30,9 @@ Unchanged: Customer pays; User owns/uses; registration creates known User; other
 
 ### Still deferred
 
-- Shopify / Delhivery adapters
+- Live Shopify (or other) commerce adapter **implementation** — port exists at `src/lib/adapters/commerce`
+- Delhivery / messaging adapters
 - Party / ProductInstance abstractions
 - Full ops persistence beyond ledger + people/registrations
+
+Aarla OS remains the system of record; Shopify is a future channel adapter only. See `docs/architecture.md`.

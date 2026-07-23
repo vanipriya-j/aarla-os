@@ -27,6 +27,7 @@ export type LifecycleStatus =
 export type MovementType =
   | "Purchase Receipt"
   | "Transfer"
+  /** Sale from the D2C channel location pool. Named historically; channel adapters must still write via the ledger. */
   | "Shopify Sale"
   | "Partner Sale"
   | "Studio Sale"
@@ -234,4 +235,71 @@ export interface JourneyStage {
   detail: string;
   href?: string;
   tone?: "default" | "accent" | "muted" | "success" | "warning";
+}
+
+/**
+ * Commerce channel id (Shopify is one possible adapter, not the SoR).
+ * Prefer stable string ids so new channels can be added without domain churn.
+ */
+export type CommerceChannelId = "shopify" | "whatsapp" | "wholesale" | "manual" | (string & {});
+
+export type SalesOrderStatus =
+  | "Open"
+  | "Paid"
+  | "PartiallyFulfilled"
+  | "Fulfilled"
+  | "Cancelled";
+
+/** Line on a canonical SalesOrder — always references Aarla OS product IDs. */
+export interface SalesOrderLine {
+  productId: string;
+  variantId?: string;
+  quantity: number;
+  unitPrice: number;
+  titleSnapshot?: string;
+}
+
+/**
+ * Canonical sales order — system of record for D2C / channel sales.
+ * External platforms (e.g. Shopify) import into this shape; they do not own it.
+ */
+export interface SalesOrder {
+  id: string;
+  channelId: CommerceChannelId;
+  /** External platform order id (e.g. Shopify order gid / number). */
+  externalOrderId?: string;
+  /** May be unknown at sale time — registration later creates a known User. */
+  customerPersonId?: string;
+  customerNameSnapshot?: string;
+  lines: SalesOrderLine[];
+  orderedAt: string;
+  status: SalesOrderStatus;
+  fulfilmentStatus?: string;
+  currency: "INR";
+  total: number;
+  notes?: string;
+}
+
+/** Maps an external channel catalog row onto a canonical Product / Variant. */
+export interface ChannelProductMapping {
+  channelId: CommerceChannelId;
+  externalProductId: string;
+  externalVariantId?: string;
+  productId: string;
+  variantId?: string;
+}
+
+/**
+ * Visible, auditable conflict when channel data disagrees with Aarla OS.
+ * Screens must surface these — never silently prefer the channel.
+ */
+export interface CommerceSyncConflict {
+  id: string;
+  channelId: CommerceChannelId;
+  entityType: "Product" | "Order" | "Inventory" | "Fulfilment";
+  externalId: string;
+  canonicalId?: string;
+  detectedAt: string;
+  summary: string;
+  status: "Open" | "Resolved" | "Ignored";
 }
