@@ -51,8 +51,23 @@ Stock Movement Ledger (append-only, LocalStorage)
 - Workflow pages under `src/app/*`
 - Network pages: people, partners, inventory, products, register, registrations
 
+## Testing (Phase 0–1)
+
+Frameworks: **Vitest** (domain + LocalStorage integration), **React Testing Library** (screen-consistency harness), **Playwright** (critical browser smoke).
+
+```bash
+npm test          # vitest run
+npm run test:e2e  # playwright test
+npm run test:all  # both
+```
+
+Fixtures/builders live in `src/test/fixtures/builders.ts`. Ledger tests inject deterministic movement IDs via `setMovementIdGenerator` and reset storage with `resetLedgerStorage`.
+
+Coverage targets the Phase 0–1 invariants (single catalog/ledger, receive/damage/transfer/sale, derived inventory & journey, idempotent writers, non-negative stock, seed-once, corrupt LocalStorage recovery, screen consistency).
+
 ## Not yet
 
 - Shopify / Delhivery / messaging adapters
 - Party / ProductInstance abstractions
 - Full LocalStorage for all ops entities
+- Phase 2 feature work

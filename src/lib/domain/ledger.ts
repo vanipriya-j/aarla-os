@@ -16,6 +16,13 @@ import type {
 
 const MOVEMENTS_KEY = "aarla-os-ledger-movements-v1";
 const POS_KEY = "aarla-os-purchase-orders-v1";
+const SEED_FLAG_KEY = "aarla-os-ledger-seeded-v1";
+
+export const LEDGER_STORAGE_KEYS = {
+  movements: MOVEMENTS_KEY,
+  purchaseOrders: POS_KEY,
+  seeded: SEED_FLAG_KEY,
+} as const;
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -29,13 +36,70 @@ function subscribe(listener: Listener) {
   return () => listeners.delete(listener);
 }
 
-function readJson<T>(key: string, fallback: T): T {
+let idSeq = 0;
+let idGenerator: () => string = () => {
+  idSeq += 1;
+  return `mv-${Date.now()}-${idSeq}`;
+};
+
+/** Inject deterministic IDs in tests. */
+export function setMovementIdGenerator(fn: (() => string) | null) {
+  idSeq = 0;
+  idGenerator = fn ?? (() => {
+    idSeq += 1;
+    return `mv-${Date.now()}-${idSeq}`;
+  });
+}
+
+function isStockMovementArray(value: unknown): value is StockMovement[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (m) =>
+        m &&
+        typeof m === "object" &&
+        typeof (m as StockMovement).id === "string" &&
+        typeof (m as StockMovement).productId === "string" &&
+        typeof (m as StockMovement).quantity === "number" &&
+        typeof (m as StockMovement).fromLocationId === "string" &&
+        typeof (m as StockMovement).toLocationId === "string" &&
+        typeof (m as StockMovement).movementType === "string" &&
+        typeof (m as StockMovement).reference === "string",
+    )
+  );
+}
+
+function isPurchaseOrderArray(value: unknown): value is PurchaseOrder[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (p) =>
+        p &&
+        typeof p === "object" &&
+        typeof (p as PurchaseOrder).id === "string" &&
+        typeof (p as PurchaseOrder).productId === "string" &&
+        typeof (p as PurchaseOrder).vendorId === "string",
+    )
+  );
+}
+
+function readJson<T>(key: string, fallback: T, validate?: (v: unknown) => v is T): T {
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const parsed: unknown = JSON.parse(raw);
+    if (validate && !validate(parsed)) {
+      window.localStorage.removeItem(key);
+      return fallback;
+    }
+    return parsed as T;
   } catch {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
     return fallback;
   }
 }
@@ -43,6 +107,15 @@ function readJson<T>(key: string, fallback: T): T {
 function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, JSON.stringify(value));
+  emit();
+}
+
+/** Reset LocalStorage ledger keys — for tests. */
+export function resetLedgerStorage() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(MOVEMENTS_KEY);
+  window.localStorage.removeItem(POS_KEY);
+  window.localStorage.removeItem(SEED_FLAG_KEY);
   emit();
 }
 
@@ -428,7 +501,7 @@ export function registrationsFromPartner(partnerId: string, regCountFallback: nu
 }
 
 function newMovementId() {
-  return `mv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return idGenerator();
 }
 
 export interface AppendMovementInput {
@@ -444,31 +517,81 @@ export interface AppendMovementInput {
   date?: string;
 }
 
+function movementFingerprint(m: Pick<StockMovement, "movementType" | "reference" | "productId" | "fromLocationId" | "toLocationId" | "quantity">) {
+  return `${m.movementType}|${m.reference}|${m.productId}|${m.fromLocationId}|${m.toLocationId}|${m.quantity}`;
+}
+
+/** Ensure seed movements are written once; never re-seed over existing ledger. */
+export function ensureSeededMovements(): StockMovement[] {
+  if (typeof window === "undefined") return movementsSeed;
+  const flagged = window.localStorage.getItem(SEED_FLAG_KEY);
+  const existing = readJson<StockMovement[] | null>(MOVEMENTS_KEY, null, (v): v is StockMovement[] => isStockMovementArray(v));
+  if (existing && existing.length > 0) {
+    if (!flagged) window.localStorage.setItem(SEED_FLAG_KEY, "1");
+    return existing;
+  }
+  if (flagged === "1" && existing && existing.length === 0) {
+    return existing;
+  }
+  writeJson(MOVEMENTS_KEY, movementsSeed);
+  window.localStorage.setItem(SEED_FLAG_KEY, "1");
+  return movementsSeed;
+}
+
 export function getMovements(): StockMovement[] {
-  return readJson(MOVEMENTS_KEY, movementsSeed);
+  return ensureSeededMovements();
 }
 
 export function getPurchaseOrders(): PurchaseOrder[] {
-  return readJson(POS_KEY, purchaseOrdersSeed);
+  return readJson(POS_KEY, purchaseOrdersSeed, isPurchaseOrderArray);
 }
 
+/**
+ * Append movements with idempotency on (type, reference, product, from, to, qty)
+ * and reject writes that would drive any location balance negative.
+ */
 export function appendMovements(entries: AppendMovementInput[]): StockMovement[] {
+  if (!entries.length) return [];
   const current = getMovements();
-  const created: StockMovement[] = entries.map((e) => ({
-    id: newMovementId(),
-    date: e.date ?? new Date().toISOString().slice(0, 10),
-    productId: e.productId,
-    variantId: e.variantId,
-    batchId: e.batchId,
-    quantity: e.quantity,
-    fromLocationId: e.fromLocationId,
-    toLocationId: e.toLocationId,
-    movementType: e.movementType,
-    reference: e.reference,
-    notes: e.notes,
-  }));
-  const next = [...created, ...current];
-  writeJson(MOVEMENTS_KEY, next);
+  const existingFingerprints = new Set(current.map(movementFingerprint));
+  const balances = deriveBalances(current);
+  const balMap = new Map(balances.map((b) => [`${b.productId}::${b.locationId}`, b.quantity]));
+
+  const created: StockMovement[] = [];
+  for (const e of entries) {
+    if (e.quantity <= 0) continue;
+    const fp = movementFingerprint(e);
+    if (existingFingerprints.has(fp)) continue;
+
+    const fromKey = `${e.productId}::${e.fromLocationId}`;
+    const toKey = `${e.productId}::${e.toLocationId}`;
+    const fromBal = balMap.get(fromKey) ?? 0;
+    const nextFrom = fromBal - e.quantity;
+    if (e.fromLocationId !== LOC.external && nextFrom < 0) {
+      continue;
+    }
+
+    const movement: StockMovement = {
+      id: newMovementId(),
+      date: e.date ?? new Date().toISOString().slice(0, 10),
+      productId: e.productId,
+      variantId: e.variantId,
+      batchId: e.batchId,
+      quantity: e.quantity,
+      fromLocationId: e.fromLocationId,
+      toLocationId: e.toLocationId,
+      movementType: e.movementType,
+      reference: e.reference,
+      notes: e.notes,
+    };
+    created.push(movement);
+    existingFingerprints.add(fp);
+    balMap.set(fromKey, nextFrom);
+    balMap.set(toKey, (balMap.get(toKey) ?? 0) + e.quantity);
+  }
+
+  if (!created.length) return [];
+  writeJson(MOVEMENTS_KEY, [...created, ...current]);
   return created;
 }
 
@@ -479,6 +602,42 @@ export function upsertPurchaseOrder(po: PurchaseOrder) {
     idx >= 0 ? current.map((p, i) => (i === idx ? po : p)) : [po, ...current];
   writeJson(POS_KEY, next);
   return po;
+}
+
+/** Create a manufacturing PO, or return an existing matching open PO (idempotent Approve). */
+export function createOrGetManufacturingPO(input: {
+  vendorId: string;
+  productId: string;
+  quantity: number;
+  unitCost: number;
+  requiredDate: string;
+  id?: string;
+}): PurchaseOrder {
+  const existing = getPurchaseOrders().find(
+    (p) =>
+      (input.id ? p.id === input.id : false) ||
+      (p.vendorId === input.vendorId &&
+        p.productId === input.productId &&
+        p.quantityOrdered === input.quantity &&
+        p.unitCost === input.unitCost &&
+        p.requiredDate === input.requiredDate &&
+        p.quantityReceived === 0 &&
+        ["Draft", "Sent"].includes(p.status)),
+  );
+  if (existing) return existing;
+
+  const id = input.id ?? `PO-${Date.now().toString().slice(-6)}`;
+  return upsertPurchaseOrder({
+    id,
+    vendorId: input.vendorId,
+    productId: input.productId,
+    quantityOrdered: input.quantity,
+    quantityReceived: 0,
+    unitCost: input.unitCost,
+    status: "Sent",
+    requiredDate: input.requiredDate,
+    orderedDate: new Date().toISOString().slice(0, 10),
+  });
 }
 
 export function receiveAgainstPO(input: {
@@ -523,7 +682,13 @@ export function receiveAgainstPO(input: {
   }
 
   const created = movements.length ? appendMovements(movements) : [];
-  const quantityReceived = po.quantityReceived + input.accepted;
+  if (!created.length && movements.length) {
+    return { movements: [], purchaseOrder: po };
+  }
+
+  const acceptedWritten =
+    created.find((m) => m.movementType === "Purchase Receipt")?.quantity ?? 0;
+  const quantityReceived = po.quantityReceived + acceptedWritten;
   const status =
     quantityReceived >= po.quantityOrdered
       ? "Received"
@@ -545,6 +710,7 @@ export function transferToPartner(input: {
   partnerId: string;
   quantity: number;
   notes?: string;
+  reference?: string;
 }): StockMovement | null {
   const loc = locations.find((l) => l.partnerId === input.partnerId);
   if (!loc || input.quantity <= 0) return null;
@@ -554,6 +720,9 @@ export function transferToPartner(input: {
   if (!snap || snap.available < input.quantity) return null;
 
   const batch = batches.find((b) => b.productId === input.productId);
+  const reference =
+    input.reference ??
+    `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}-${input.quantity}`;
   const [created] = appendMovements([
     {
       productId: input.productId,
@@ -562,11 +731,11 @@ export function transferToPartner(input: {
       fromLocationId: LOC.studio,
       toLocationId: loc.id,
       movementType: "Transfer",
-      reference: `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${Date.now().toString().slice(-4)}`,
+      reference,
       notes: input.notes || `Transfer to ${getLocation(loc.id)?.name ?? input.partnerId}`,
     },
   ]);
-  return created;
+  return created ?? null;
 }
 
 export function recordPartnerSale(input: {
@@ -574,6 +743,7 @@ export function recordPartnerSale(input: {
   partnerId: string;
   quantity: number;
   notes?: string;
+  reference?: string;
 }): StockMovement | null {
   const loc = locations.find((l) => l.partnerId === input.partnerId);
   if (!loc || input.quantity <= 0) return null;
@@ -581,6 +751,9 @@ export function recordPartnerSale(input: {
   if (bal < input.quantity) return null;
 
   const batch = batches.find((b) => b.productId === input.productId);
+  const reference =
+    input.reference ??
+    `PSALE-${input.partnerId}-${input.productId}-${input.quantity}`;
   const [created] = appendMovements([
     {
       productId: input.productId,
@@ -589,19 +762,19 @@ export function recordPartnerSale(input: {
       fromLocationId: loc.id,
       toLocationId: LOC.sold,
       movementType: "Partner Sale",
-      reference: `PSALE-${Date.now().toString().slice(-6)}`,
+      reference,
       notes: input.notes || "Partner sale",
     },
   ]);
-  return created;
+  return created ?? null;
 }
 
 function getMovementsSnapshot() {
-  return JSON.stringify(readJson(MOVEMENTS_KEY, movementsSeed));
+  return JSON.stringify(getMovements());
 }
 
 function getPOsSnapshot() {
-  return JSON.stringify(readJson(POS_KEY, purchaseOrdersSeed));
+  return JSON.stringify(getPurchaseOrders());
 }
 
 function getServerSnapshot() {

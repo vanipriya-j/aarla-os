@@ -13,6 +13,11 @@ export {
   getMovements,
   getPurchaseOrders,
   upsertPurchaseOrder,
+  createOrGetManufacturingPO,
+  ensureSeededMovements,
+  resetLedgerStorage,
+  setMovementIdGenerator,
+  LEDGER_STORAGE_KEYS,
 } from "./ledger";
 export type { AppendMovementInput } from "./ledger";
 export { projectProductJourney } from "./journey";

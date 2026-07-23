@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { JourneyTimeline } from "@/components/network/JourneyTimeline";
 import { TraceabilityDiagram } from "@/components/network/TraceabilityDiagram";
+import { useNetworkStore } from "@/lib/storage";
 import {
   batches,
   getPersonName,
@@ -16,8 +17,7 @@ import {
   getVendorName,
   partners,
   projectProductJourney,
-  registrationsSeed,
-  } from "@/lib/domain";
+} from "@/lib/domain";
 import { ArrowLeft } from "lucide-react";
 
 type Tab = "overview" | "journey" | "traceability" | "movements" | "registrations";
@@ -28,14 +28,18 @@ export default function ProductDetailPage() {
   const product = getProduct(id);
   const [tab, setTab] = useState<Tab>("journey");
   const { movements, snapshots } = useLedger();
+  const { registrations } = useNetworkStore();
 
   const batch = batches.find((b) => b.productId === id && b.accepted > 0) ??
     batches.find((b) => b.productId === id);
   const vendor = batch ? getVendorName(batch.vendorId) : "—";
   const snapshot = snapshots.find((s) => s.productId === id);
   const moves = movements.filter((m) => m.productId === id);
-  const regs = registrationsSeed.filter((r) => r.productId === id);
-  const journey = useMemo(() => projectProductJourney(id, movements), [id, movements]);
+  const regs = registrations.filter((r) => r.productId === id);
+  const journey = useMemo(
+    () => projectProductJourney(id, movements, registrations),
+    [id, movements, registrations],
+  );
   const partnerNames = partners
     .filter((p) =>
       moves.some(

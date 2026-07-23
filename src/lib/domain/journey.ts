@@ -1,13 +1,15 @@
 import { batches, getPartnerName, getPersonName, getProduct, getVendorName, locations } from "./catalog";
 import { registrationsSeed } from "./catalog";
-import type { JourneyStage, StockMovement } from "./types";
+import type { JourneyStage, ProductRegistration, StockMovement } from "./types";
 
 /**
  * Journey is a projection over catalog + ledger + registrations — not hand-maintained pages.
+ * Pass live registrations when available; defaults to catalog seed for SSR / tests.
  */
 export function projectProductJourney(
   productId: string,
   movements: StockMovement[],
+  registrations: ProductRegistration[] = registrationsSeed,
 ): JourneyStage[] {
   const product = getProduct(productId);
   if (!product) return [];
@@ -91,7 +93,7 @@ export function projectProductJourney(
     ),
   );
   const soldQty = sales.reduce((s, m) => s + m.quantity, 0);
-  const regs = registrationsSeed.filter((r) => r.productId === productId);
+  const regs = registrations.filter((r) => r.productId === productId);
   const knownUsers = new Set(regs.map((r) => r.userId)).size;
 
   if (sales.some((m) => m.movementType === "Corporate Allocation")) {

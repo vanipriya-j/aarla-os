@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
+  createOrGetManufacturingPO,
   deriveBalances,
   deriveInventorySnapshots,
   ledgerStore,
@@ -9,7 +10,6 @@ import {
   receiveAgainstPO,
   recordPartnerSale,
   transferToPartner,
-  upsertPurchaseOrder,
 } from "./ledger";
 import { purchaseOrdersSeed } from "./catalog";
 import type { PurchaseOrder, StockMovement } from "./types";
@@ -57,27 +57,7 @@ export function useLedger() {
   }, []);
 
   const createManufacturingPO = useCallback(
-    (input: {
-      vendorId: string;
-      productId: string;
-      quantity: number;
-      unitCost: number;
-      requiredDate: string;
-    }) => {
-      const id = `PO-${Date.now().toString().slice(-6)}`;
-      const po: PurchaseOrder = {
-        id,
-        vendorId: input.vendorId,
-        productId: input.productId,
-        quantityOrdered: input.quantity,
-        quantityReceived: 0,
-        unitCost: input.unitCost,
-        status: "Sent",
-        requiredDate: input.requiredDate,
-        orderedDate: new Date().toISOString().slice(0, 10),
-      };
-      return upsertPurchaseOrder(po);
-    },
+    (input: Parameters<typeof createOrGetManufacturingPO>[0]) => createOrGetManufacturingPO(input),
     [],
   );
 
