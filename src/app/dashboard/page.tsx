@@ -1,3 +1,6 @@
+"use client";
+
+import { useLedger } from "@/lib/domain/use-ledger";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
@@ -7,18 +10,16 @@ import {
   channelMix,
   dashboardMetrics,
   launchChecklists,
-  products,
-  purchaseOrders,
   revenueByMonth,
 } from "@/lib/mock-data";
 import {
   batches,
-  getInventorySnapshots,
-  networkProducts,
+  formatINR,
   partners,
   peopleSeed,
+  products,
   registrationsSeed,
-} from "@/lib/network-data";
+  } from "@/lib/domain";
 import {
   IndianRupee,
   Package,
@@ -32,15 +33,8 @@ import {
   Wallet,
 } from "lucide-react";
 
-function formatINR(n: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
-
 export default function DashboardPage() {
+  const { snapshots, purchaseOrders, hydrated } = useLedger();
   const maxRevenue = Math.max(...revenueByMonth.map((m) => m.revenue));
   const fast = products.filter((p) => p.velocity === "Fast");
   const slow = products.filter((p) => p.velocity === "Slow");
@@ -51,26 +45,34 @@ export default function DashboardPage() {
   const customers = peopleSeed.filter((p) => p.roles.includes("Customer")).length;
   const users = peopleSeed.filter((p) => p.roles.includes("User")).length;
   const registeredProducts = registrationsSeed.length;
-  const inCirculationUnknown = 482;
-  const partnerInventory = partners.reduce(
-    (sum, p) => sum + p.currentInventory.reduce((s, i) => s + i.quantity, 0),
-    0,
-  );
-  const topPartner = [...partners].sort(
-    (a, b) => b.registeredUsersOriginatingHere - a.registeredUsersOriginatingHere,
-  )[0];
-  const topNetworkProduct = [...networkProducts].sort(
-    (a, b) => b.registrations - a.registrations,
-  )[0];
-  const regRate = Math.round((registeredProducts / (500 + 30)) * 1000) / 10;
+  const welcomeSold = 500;
+  const welcomeRegs = registrationsSeed.filter((r) => r.productId === "prod-welcome-kit").length;
+  const inCirculationUnknown = Math.max(welcomeSold - welcomeRegs, 0);
+  const partnerInventory = snapshots.reduce((sum, s) => sum + s.partnerStock, 0);
+  const topPartner = [...partners].sort((a, b) => {
+    const ca = registrationsSeed.filter((r) => r.partnerId === a.id).length;
+    const cb = registrationsSeed.filter((r) => r.partnerId === b.id).length;
+    return cb - ca;
+  })[0];
+  const topProduct = [...products]
+    .map((p) => ({
+      ...p,
+      regs: registrationsSeed.filter((r) => r.productId === p.id).length,
+    }))
+    .sort((a, b) => b.regs - a.regs)[0];
+  const regRate = Math.round((registeredProducts / (welcomeSold + 30)) * 1000) / 10;
   const damagedBatches = batches.filter((b) => b.damaged > 0);
-  const snapshots = getInventorySnapshots();
+  const capitalFromLedger = snapshots.reduce((sum, s) => {
+    const p = products.find((x) => x.id === s.productId);
+    if (!p) return sum;
+    return sum + p.cost * (s.studioStock + s.partnerStock + s.channelStock);
+  }, 0);
 
   return (
     <>
       <Header
         title="Business Dashboard"
-        subtitle="Revenue, capital, movement — and the journey from customer to community."
+        subtitle="Ops metrics plus network figures derived from the unified catalog and ledger."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -96,8 +98,8 @@ export default function DashboardPage() {
             accent="green"
           />
           <SummaryCard
-            label="Capital blocked in inventory"
-            value={formatINR(dashboardMetrics.capitalBlocked)}
+            label="Capital in inventory (ledger)"
+            value={hydrated ? formatINR(capitalFromLedger) : "—"}
             hint={`Receivables ${formatINR(dashboardMetrics.outstandingReceivables)}`}
             icon={Wallet}
             accent="red"
@@ -112,7 +114,7 @@ export default function DashboardPage() {
             <SummaryCard
               label="In Circulation – User Unknown"
               value={String(inCirculationUnknown)}
-              hint="Mostly Infosys welcome kits"
+              hint="Welcome kits not yet registered"
               icon={Package}
               accent="red"
             />
@@ -125,20 +127,17 @@ export default function DashboardPage() {
             />
             <SummaryCard
               label="Partner Inventory"
-              value={String(partnerInventory)}
+              value={hydrated ? String(partnerInventory) : "—"}
               icon={Store}
             />
             <SummaryCard
               label="Top Partner"
               value={topPartner?.name ?? "—"}
-              hint={`${topPartner?.registeredUsersOriginatingHere ?? 0} registrations`}
+              hint={`${registrationsSeed.filter((r) => r.partnerId === topPartner?.id).length} registrations`}
             />
-            <SummaryCard
-              label="Top Product"
-              value={topNetworkProduct?.title ?? "—"}
-            >
+            <SummaryCard label="Top Product" value={topProduct?.title ?? "—"}>
               <Link
-                href={`/products/${topNetworkProduct?.id ?? "np-kolam"}`}
+                href={`/products/${topProduct?.id ?? "prod-kolam-bottle"}`}
                 className="inline-block mt-2 text-sm text-aarla-red font-medium"
               >
                 Open journey →
@@ -160,7 +159,7 @@ export default function DashboardPage() {
             <li className="flex justify-between gap-3 border-b border-border pb-2">
               <span>
                 Products sold but not registered —{" "}
-                <Link href="/products/np-welcome-kit" className="text-aarla-red">
+                <Link href="/products/prod-welcome-kit" className="text-aarla-red">
                   Welcome Kit
                 </Link>
               </span>
@@ -172,7 +171,7 @@ export default function DashboardPage() {
             </li>
             <li className="flex justify-between gap-3 border-b border-border pb-2">
               <span>
-                Partner inventory not updated —{" "}
+                Partner merchandising —{" "}
                 <Link href="/partners" className="text-aarla-red">
                   Nimalli photos pending
                 </Link>
@@ -181,8 +180,7 @@ export default function DashboardPage() {
             </li>
             <li className="flex justify-between gap-3">
               <span>
-                Damaged batches —{" "}
-                {damagedBatches.map((b) => b.batchNumber).join(", ") || "None"}
+                Damaged batches — {damagedBatches.map((b) => b.batchNumber).join(", ") || "None"}
               </span>
               <StatusChip
                 label={`${snapshots.reduce((s, x) => s + x.damaged, 0)} units`}
@@ -220,10 +218,7 @@ export default function DashboardPage() {
                     <span className="text-charcoal/55">{c.share}%</span>
                   </div>
                   <div className="h-2 rounded-full bg-soft-beige overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-mustard"
-                      style={{ width: `${c.share}%` }}
-                    />
+                    <div className="h-full rounded-full bg-mustard" style={{ width: `${c.share}%` }} />
                   </div>
                   <p className="text-xs text-charcoal/50 mt-1">{formatINR(c.revenue)}</p>
                 </li>
@@ -239,21 +234,24 @@ export default function DashboardPage() {
               <h2 className="font-display text-xl text-deep-navy">Fast-moving products</h2>
             </div>
             <ul className="space-y-3">
-              {fast.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-deep-navy">{p.name}</p>
-                    <p className="text-xs text-charcoal/55">
-                      Stock {p.inventory} · Margin{" "}
-                      {(((p.sellingPrice - p.cost) / p.sellingPrice) * 100).toFixed(0)}%
-                    </p>
-                  </div>
-                  <StatusChip label="Fast" tone="success" />
-                </li>
-              ))}
+              {fast.slice(0, 4).map((p) => {
+                const snap = snapshots.find((s) => s.productId === p.id);
+                return (
+                  <li
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-deep-navy">{p.title}</p>
+                      <p className="text-xs text-charcoal/55">
+                        Stock {snap?.totalOnHand ?? 0} · Margin{" "}
+                        {(((p.sellingPrice - p.cost) / p.sellingPrice) * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                    <StatusChip label="Fast" tone="success" />
+                  </li>
+                );
+              })}
             </ul>
           </div>
           <div className="card-surface p-5">
@@ -262,20 +260,24 @@ export default function DashboardPage() {
               <h2 className="font-display text-xl text-deep-navy">Slow-moving products</h2>
             </div>
             <ul className="space-y-3">
-              {slow.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-deep-navy">{p.name}</p>
-                    <p className="text-xs text-charcoal/55">
-                      Stock {p.inventory} · Cost locked {formatINR(p.cost * p.inventory)}
-                    </p>
-                  </div>
-                  <StatusChip label="Slow" tone="warning" />
-                </li>
-              ))}
+              {slow.map((p) => {
+                const snap = snapshots.find((s) => s.productId === p.id);
+                const onHand = snap?.totalOnHand ?? 0;
+                return (
+                  <li
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-deep-navy">{p.title}</p>
+                      <p className="text-xs text-charcoal/55">
+                        Stock {onHand} · Cost locked {formatINR(p.cost * onHand)}
+                      </p>
+                    </div>
+                    <StatusChip label="Slow" tone="warning" />
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </section>
@@ -295,7 +297,11 @@ export default function DashboardPage() {
                 {
                   key: "product",
                   header: "Product",
-                  render: (r) => <span className="line-clamp-1 max-w-[180px]">{r.productName}</span>,
+                  render: (r) => (
+                    <span className="line-clamp-1 max-w-[180px]">
+                      {products.find((p) => p.id === r.productId)?.title ?? r.productId}
+                    </span>
+                  ),
                 },
                 {
                   key: "status",
@@ -317,20 +323,6 @@ export default function DashboardPage() {
               <p className="font-display text-3xl text-deep-navy">
                 {formatINR(dashboardMetrics.outstandingReceivables)}
               </p>
-              <ul className="mt-4 space-y-2 text-sm">
-                <li className="flex justify-between border-b border-border pb-2">
-                  <span>Kumon Learning Centre</span>
-                  <span className="font-medium">{formatINR(14800)}</span>
-                </li>
-                <li className="flex justify-between border-b border-border pb-2">
-                  <span>Chalanam Festival Org</span>
-                  <span className="font-medium">{formatINR(22000)}</span>
-                </li>
-                <li className="flex justify-between">
-                  <span>Pop-up partner — Besant Nagar</span>
-                  <span className="font-medium">{formatINR(11800)}</span>
-                </li>
-              </ul>
             </div>
             <div className="card-surface p-5">
               <h2 className="font-display text-xl text-deep-navy mb-3">Upcoming launches</h2>

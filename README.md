@@ -50,18 +50,14 @@ docs/                  # Product & design context
 | Projects | `/projects` |
 | Business Dashboard | `/dashboard` |
 
-## Product network (v0.2)
+## Domain unification (Phase 0–1)
 
-| Screen | Route |
-|--------|-------|
-| People | `/people` |
-| Partners | `/partners` |
-| Inventory | `/inventory` |
-| Product Journey | `/products/np-kolam` |
-| Register | `/register` |
-| Registrations | `/registrations` |
+- **One Product catalog** and **one Vendor model** in `src/lib/domain/catalog.ts`
+- **Stock Movement Ledger** in `src/lib/domain/ledger.ts` (LocalStorage)
+- Inventory balances, partner stock, journey, and capital-in-inventory are **derived**
+- Manufacture writes Purchase Orders; Receive / Partner Transfer / Partner Sale write ledger movements
 
-See `docs/product-network.md`. Registrations persist in LocalStorage.
+See `docs/architecture.md` and `docs/product-network.md`.
 
 ## Current limitations (v0.2)
 

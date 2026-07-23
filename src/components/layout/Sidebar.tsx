@@ -86,9 +86,9 @@ export function Sidebar() {
 
       <div className="p-4 border-t border-border">
         <div className="rounded-xl bg-pale-cream border border-border p-3">
-          <p className="text-xs font-medium text-deep-navy">Version 0.2</p>
+          <p className="text-xs font-medium text-deep-navy">Version 0.2 · Domain Phase 1</p>
           <p className="mt-1 text-xs text-charcoal/55 leading-relaxed">
-            Product network · local persistence
+            One catalog · one ledger
           </p>
         </div>
       </div>

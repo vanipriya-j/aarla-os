@@ -1,5 +1,6 @@
 "use client";
 
+import { useLedger } from "@/lib/domain/use-ledger";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -10,15 +11,13 @@ import { JourneyTimeline } from "@/components/network/JourneyTimeline";
 import { TraceabilityDiagram } from "@/components/network/TraceabilityDiagram";
 import {
   batches,
-  buildProductJourney,
-  getInventorySnapshots,
   getPersonName,
-  networkProducts,
-  networkVendors,
+  getProduct,
+  getVendorName,
   partners,
+  projectProductJourney,
   registrationsSeed,
-  stockMovements,
-} from "@/lib/network-data";
+  } from "@/lib/domain";
 import { ArrowLeft } from "lucide-react";
 
 type Tab = "overview" | "journey" | "traceability" | "movements" | "registrations";
@@ -26,17 +25,25 @@ type Tab = "overview" | "journey" | "traceability" | "movements" | "registration
 export default function ProductDetailPage() {
   const params = useParams();
   const id = String(params.id);
-  const product = networkProducts.find((p) => p.id === id);
+  const product = getProduct(id);
   const [tab, setTab] = useState<Tab>("journey");
+  const { movements, snapshots } = useLedger();
 
-  const batch = batches.find((b) => b.productId === id);
-  const vendor = batch ? networkVendors.find((v) => v.id === batch.vendorId) : undefined;
-  const snapshot = getInventorySnapshots().find((s) => s.productId === id);
-  const moves = stockMovements.filter((m) => m.productId === id);
+  const batch = batches.find((b) => b.productId === id && b.accepted > 0) ??
+    batches.find((b) => b.productId === id);
+  const vendor = batch ? getVendorName(batch.vendorId) : "—";
+  const snapshot = snapshots.find((s) => s.productId === id);
+  const moves = movements.filter((m) => m.productId === id);
   const regs = registrationsSeed.filter((r) => r.productId === id);
-  const journey = useMemo(() => buildProductJourney(id), [id]);
+  const journey = useMemo(() => projectProductJourney(id, movements), [id, movements]);
   const partnerNames = partners
-    .filter((p) => p.currentInventory.some((i) => i.productId === id && i.quantity > 0))
+    .filter((p) =>
+      moves.some(
+        (m) =>
+          m.movementType === "Transfer" &&
+          m.toLocationId.includes(p.id.replace("partner-", "")),
+      ),
+    )
     .map((p) => p.name);
 
   if (!product) {
@@ -52,8 +59,13 @@ export default function ProductDetailPage() {
     );
   }
 
-  const soldEstimate =
-    product.id === "np-welcome-kit" ? 500 : moves.filter((m) => m.movementType.includes("Sale") || m.movementType === "Gift" || m.movementType === "Corporate Allocation").reduce((s, m) => s + m.quantity, 0);
+  const soldEstimate = moves
+    .filter((m) =>
+      ["Shopify Sale", "Partner Sale", "Studio Sale", "Gift", "Corporate Allocation"].includes(
+        m.movementType,
+      ),
+    )
+    .reduce((s, m) => s + m.quantity, 0);
   const unknown = Math.max(soldEstimate - regs.length, 0);
   const regRate = soldEstimate ? Math.round((regs.length / soldEstimate) * 100) : 0;
 
@@ -64,6 +76,15 @@ export default function ProductDetailPage() {
     { id: "movements", label: "Movements" },
     { id: "registrations", label: "Registrations" },
   ];
+
+  const lifecycle =
+    unknown > 0 && soldEstimate > 0
+      ? "In Circulation – User Unknown"
+      : regs.length
+        ? "Registered"
+        : snapshot && snapshot.totalOnHand > 0
+          ? "In Inventory"
+          : "Designed";
 
   return (
     <>
@@ -82,10 +103,7 @@ export default function ProductDetailPage() {
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-5xl">
         <div className="card-surface p-5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap gap-2">
-            <StatusChip
-              label={product.currentLifecycleStatus}
-              tone={statusToneFromLabel(product.currentLifecycleStatus)}
-            />
+            <StatusChip label={lifecycle} tone={statusToneFromLabel(lifecycle)} />
             <StatusChip label={`${regs.length} registrations`} tone="success" />
             <StatusChip label={`${snapshot?.available ?? 0} available`} tone="info" />
           </div>
@@ -112,52 +130,27 @@ export default function ProductDetailPage() {
         </div>
 
         {tab === "overview" ? (
-          <div className="space-y-4 animate-fade-up">
-            <section className="card-surface p-5 grid sm:grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Idea origin</p>
-                <p className="mt-1 text-deep-navy">{product.ideaOrigin}</p>
-              </div>
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Vendor</p>
-                <p className="mt-1 text-deep-navy">{vendor?.company ?? "—"}</p>
-              </div>
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Batch</p>
-                <p className="mt-1 text-deep-navy">{batch?.batchNumber ?? "—"}</p>
-              </div>
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Received</p>
-                <p className="mt-1 text-deep-navy">
-                  {batch
-                    ? `${batch.receivedDate} · ${batch.accepted} accepted · ${batch.damaged} damaged`
-                    : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Partner stock</p>
-                <p className="mt-1 text-deep-navy">
-                  {partnerNames.length ? partnerNames.join(", ") : "None"}
-                </p>
-              </div>
-              <div>
-                <p className="text-charcoal/50 text-xs uppercase tracking-wider">Circulation</p>
-                <p className="mt-1 text-deep-navy">
-                  {unknown
-                    ? `${unknown} In Circulation – User Unknown`
-                    : "Users known via registration"}
-                </p>
-              </div>
-            </section>
-            <section className="card-surface p-5">
-              <h3 className="font-display text-lg text-deep-navy mb-3">Variants</h3>
-              <div className="flex flex-wrap gap-2">
-                {product.variants.map((v) => (
-                  <StatusChip key={v.id} label={`${v.label} · ${v.sku}`} />
-                ))}
-              </div>
-            </section>
-          </div>
+          <section className="card-surface p-5 grid sm:grid-cols-2 gap-4 text-sm animate-fade-up">
+            <div>
+              <p className="text-charcoal/50 text-xs uppercase tracking-wider">Idea origin</p>
+              <p className="mt-1 text-deep-navy">{product.ideaOrigin ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-charcoal/50 text-xs uppercase tracking-wider">Vendor</p>
+              <p className="mt-1 text-deep-navy">{vendor}</p>
+            </div>
+            <div>
+              <p className="text-charcoal/50 text-xs uppercase tracking-wider">Batch</p>
+              <p className="mt-1 text-deep-navy">{batch?.batchNumber ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-charcoal/50 text-xs uppercase tracking-wider">Ledger balances</p>
+              <p className="mt-1 text-deep-navy">
+                Studio {snapshot?.studioStock ?? 0} · Partner {snapshot?.partnerStock ?? 0} ·
+                Channel {snapshot?.channelStock ?? 0} · Damaged {snapshot?.damaged ?? 0}
+              </p>
+            </div>
+          </section>
         ) : null}
 
         {tab === "journey" ? (
@@ -165,7 +158,8 @@ export default function ProductDetailPage() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-aarla-red mb-2">
               Product Journey
             </p>
-            <h2 className="font-display text-3xl text-deep-navy mb-6">{product.title}</h2>
+            <h2 className="font-display text-3xl text-deep-navy mb-2">{product.title}</h2>
+            <p className="text-sm text-charcoal/55 mb-6">Projected from the stock ledger + registrations.</p>
             <JourneyTimeline stages={journey} />
           </div>
         ) : null}
@@ -174,7 +168,7 @@ export default function ProductDetailPage() {
           <div className="animate-fade-up">
             <TraceabilityDiagram
               productTitle={product.title}
-              vendorName={vendor?.company ?? "—"}
+              vendorName={vendor}
               batchNumber={batch?.batchNumber ?? "—"}
               partnerNames={partnerNames}
               registrationRate={regRate}
@@ -209,7 +203,6 @@ export default function ProductDetailPage() {
                 <p className="mt-1 text-charcoal/65">
                   {r.registrationDate} · User {getPersonName(r.userId)}
                   {r.customerId ? ` · Customer ${getPersonName(r.customerId)}` : ""}
-                  {r.customerId && r.userId !== r.customerId ? " (Customer ≠ User)" : ""}
                 </p>
               </li>
             ))}

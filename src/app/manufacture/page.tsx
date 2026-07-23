@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useLedger } from "@/lib/domain/use-ledger";
+import { useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass } from "@/components/ui/FormSection";
 import { Modal } from "@/components/ui/Modal";
 import { StepWorkflow } from "@/components/ui/StepWorkflow";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { products, purchaseOrders, vendors } from "@/lib/mock-data";
+import { getProductTitle, getVendorName, products, vendors } from "@/lib/domain";
 import { CheckCircle2, FileText, Mail, MessageSquare, Paperclip } from "lucide-react";
 
 type OrderMode = "new" | "reorder" | "quick";
@@ -21,17 +22,43 @@ const steps = [
 ];
 
 export default function ManufacturePage() {
+  const { purchaseOrders, createManufacturingPO } = useLedger();
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<OrderMode>("new");
   const [formType, setFormType] = useState<VendorForm>("bottle");
+  const [productId, setProductId] = useState("prod-muruga-bottle");
+  const [vendorId, setVendorId] = useState("vendor-velan");
+  const [quantity, setQuantity] = useState(200);
+  const [unitCost, setUnitCost] = useState(320);
+  const [requiredDate, setRequiredDate] = useState("2026-08-10");
   const [preview, setPreview] = useState<"po" | "spec" | "email" | "wa" | "attach" | null>(null);
-  const [sent, setSent] = useState(false);
+  const [sentPoId, setSentPoId] = useState<string | null>(null);
+
+  const bottleVendors = useMemo(
+    () => vendors.filter((v) => v.category.toLowerCase().includes("bottle")),
+    [],
+  );
+  const magnetVendors = useMemo(
+    () => vendors.filter((v) => v.category.toLowerCase().includes("magnet") || v.id === "vendor-pondy"),
+    [],
+  );
+
+  const approve = () => {
+    const po = createManufacturingPO({
+      vendorId,
+      productId,
+      quantity,
+      unitCost,
+      requiredDate,
+    });
+    setSentPoId(po.id);
+  };
 
   return (
     <>
       <Header
         title="Manufacture / Reorder"
-        subtitle="Raise vendor-specific orders, preview documents, and simulate sending."
+        subtitle="Raises a canonical Purchase Order. Stock enters the ledger when you Receive."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-5xl">
         <div className="card-surface p-4">
@@ -61,137 +88,156 @@ export default function ManufacturePage() {
                 </button>
               ))}
             </div>
-            {mode === "reorder" ? (
-              <Field label="Existing product">
-                <select className={selectClass} defaultValue={products[0].id}>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · stock {p.inventory}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            ) : null}
+            <Field label="Product">
+              <select
+                className={selectClass}
+                value={productId}
+                onChange={(e) => {
+                  setProductId(e.target.value);
+                  const p = products.find((x) => x.id === e.target.value);
+                  if (p) setUnitCost(p.cost);
+                }}
+              >
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title} · {p.sku}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Button onClick={() => setStep(1)}>Continue to vendor form</Button>
           </FormSection>
         ) : null}
 
         {step === 1 ? (
           <div className="space-y-4">
-            <FormSection title="Vendor" description="Forms adapt to bottle or magnet suppliers.">
+            <FormSection title="Vendor" description="Unified vendor catalog.">
               <div className="flex flex-wrap gap-2 mb-2">
                 <Button
                   variant={formType === "bottle" ? "primary" : "outline"}
                   size="sm"
-                  onClick={() => setFormType("bottle")}
+                  onClick={() => {
+                    setFormType("bottle");
+                    setVendorId(bottleVendors[0]?.id ?? "vendor-velan");
+                  }}
                 >
                   Bottle vendor form
                 </Button>
                 <Button
                   variant={formType === "magnet" ? "primary" : "outline"}
                   size="sm"
-                  onClick={() => setFormType("magnet")}
+                  onClick={() => {
+                    setFormType("magnet");
+                    setVendorId(magnetVendors[0]?.id ?? "vendor-pondy");
+                  }}
                 >
                   Magnet vendor form
                 </Button>
               </div>
               <Field label="Vendor">
-                <select className={selectClass} defaultValue={formType === "bottle" ? "v1" : "v3"}>
-                  {vendors
-                    .filter((v) =>
-                      formType === "bottle"
-                        ? v.specialty.toLowerCase().includes("bottle")
-                        : v.specialty.toLowerCase().includes("magnet"),
-                    )
-                    .concat(vendors)
-                    .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i)
-                    .map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} · {v.city} · MOQ {v.moq}
-                      </option>
-                    ))}
+                <select
+                  className={selectClass}
+                  value={vendorId}
+                  onChange={(e) => setVendorId(e.target.value)}
+                >
+                  {(formType === "bottle" ? bottleVendors : magnetVendors).concat(vendors).filter(
+                    (v, i, arr) => arr.findIndex((x) => x.id === v.id) === i,
+                  ).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} · {v.city} · MOQ {v.moq}
+                    </option>
+                  ))}
                 </select>
               </Field>
             </FormSection>
 
-            {formType === "bottle" ? (
-              <FormSection title="Bottle specification">
-                <div className="grid md:grid-cols-2 gap-4">
-                  <Field label="Bottle model">
-                    <input className={inputClass} defaultValue="Aarla Dual-Wall Classic" />
-                  </Field>
-                  <Field label="Capacity">
-                    <select className={selectClass} defaultValue="750">
-                      <option value="500">500ml</option>
-                      <option value="750">750ml</option>
-                      <option value="1000">1000ml</option>
-                    </select>
-                  </Field>
-                  <Field label="Body colour">
-                    <input className={inputClass} defaultValue="Deep indigo" />
-                  </Field>
-                  <Field label="Print colour">
-                    <input className={inputClass} defaultValue="Warm cream #F6EEDC" />
-                  </Field>
-                  <Field label="Artwork">
-                    <input className={inputClass} defaultValue="Muruga_line_v3.pdf" />
-                  </Field>
-                  <Field label="Print position">
-                    <select className={selectClass} defaultValue="front-center">
-                      <option value="front-center">Front centre</option>
-                      <option value="wrap">Wrap</option>
-                      <option value="front-back">Front + back</option>
-                    </select>
-                  </Field>
-                  <Field label="Quantity">
-                    <input className={inputClass} type="number" defaultValue={200} />
-                  </Field>
-                  <Field label="Unit cost (₹)">
-                    <input className={inputClass} type="number" defaultValue={320} />
-                  </Field>
-                  <Field label="Required date">
-                    <input className={inputClass} type="date" defaultValue="2026-08-10" />
-                  </Field>
-                </div>
-              </FormSection>
-            ) : (
-              <FormSection title="Magnet specification">
-                <div className="grid md:grid-cols-2 gap-4">
-                  <Field label="Material">
-                    <select className={selectClass} defaultValue="tin">
-                      <option value="tin">Tin plate</option>
-                      <option value="acrylic">Acrylic</option>
-                      <option value="wood">Wood laminate</option>
-                    </select>
-                  </Field>
-                  <Field label="Size">
-                    <input className={inputClass} defaultValue="50 × 50 mm" />
-                  </Field>
-                  <Field label="Shape">
-                    <select className={selectClass} defaultValue="rounded-square">
-                      <option value="circle">Circle</option>
-                      <option value="rounded-square">Rounded square</option>
-                      <option value="custom">Custom die-cut</option>
-                    </select>
-                  </Field>
-                  <Field label="Finish">
-                    <input className={inputClass} defaultValue="Soft-touch laminate" />
-                  </Field>
-                  <Field label="Artwork">
-                    <input className={inputClass} defaultValue="Navarathri_set_9.pdf" />
-                  </Field>
-                  <Field label="Quantity per design">
-                    <input className={inputClass} type="number" defaultValue={200} />
-                  </Field>
-                  <Field label="Packaging">
-                    <input className={inputClass} defaultValue="Kraft sleeve · set of 9" />
-                  </Field>
-                  <Field label="Required date">
-                    <input className={inputClass} type="date" defaultValue="2026-07-28" />
-                  </Field>
-                </div>
-              </FormSection>
-            )}
+            <FormSection title={formType === "bottle" ? "Bottle specification" : "Magnet specification"}>
+              <div className="grid md:grid-cols-2 gap-4">
+                {formType === "bottle" ? (
+                  <>
+                    <Field label="Bottle model">
+                      <input className={inputClass} defaultValue="Aarla Dual-Wall Classic" />
+                    </Field>
+                    <Field label="Capacity">
+                      <select className={selectClass} defaultValue="750">
+                        <option value="500">500ml</option>
+                        <option value="750">750ml</option>
+                        <option value="1000">1000ml</option>
+                      </select>
+                    </Field>
+                    <Field label="Body colour">
+                      <input className={inputClass} defaultValue="Deep indigo" />
+                    </Field>
+                    <Field label="Print colour">
+                      <input className={inputClass} defaultValue="Warm cream #F6EEDC" />
+                    </Field>
+                    <Field label="Artwork">
+                      <input className={inputClass} defaultValue="Muruga_line_v3.pdf" />
+                    </Field>
+                    <Field label="Print position">
+                      <select className={selectClass} defaultValue="front-center">
+                        <option value="front-center">Front centre</option>
+                        <option value="wrap">Wrap</option>
+                        <option value="front-back">Front + back</option>
+                      </select>
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Material">
+                      <select className={selectClass} defaultValue="tin">
+                        <option value="tin">Tin plate</option>
+                        <option value="acrylic">Acrylic</option>
+                        <option value="wood">Wood laminate</option>
+                      </select>
+                    </Field>
+                    <Field label="Size">
+                      <input className={inputClass} defaultValue="50 × 50 mm" />
+                    </Field>
+                    <Field label="Shape">
+                      <select className={selectClass} defaultValue="rounded-square">
+                        <option value="circle">Circle</option>
+                        <option value="rounded-square">Rounded square</option>
+                        <option value="custom">Custom die-cut</option>
+                      </select>
+                    </Field>
+                    <Field label="Finish">
+                      <input className={inputClass} defaultValue="Soft-touch laminate" />
+                    </Field>
+                    <Field label="Artwork">
+                      <input className={inputClass} defaultValue="Navarathri_set_9.pdf" />
+                    </Field>
+                    <Field label="Packaging">
+                      <input className={inputClass} defaultValue="Kraft sleeve · set of 9" />
+                    </Field>
+                  </>
+                )}
+                <Field label="Quantity">
+                  <input
+                    className={inputClass}
+                    type="number"
+                    value={quantity}
+                    onChange={(e) => setQuantity(Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Unit cost (₹)">
+                  <input
+                    className={inputClass}
+                    type="number"
+                    value={unitCost}
+                    onChange={(e) => setUnitCost(Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Required date">
+                  <input
+                    className={inputClass}
+                    type="date"
+                    value={requiredDate}
+                    onChange={(e) => setRequiredDate(e.target.value)}
+                  />
+                </Field>
+              </div>
+            </FormSection>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(0)}>
                 Back
@@ -202,10 +248,7 @@ export default function ManufacturePage() {
         ) : null}
 
         {step === 2 ? (
-          <FormSection
-            title="Document previews"
-            description="Mock purchase order, specification sheet, email, WhatsApp and attachments."
-          >
+          <FormSection title="Document previews">
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {(
                 [
@@ -237,18 +280,18 @@ export default function ManufacturePage() {
         ) : null}
 
         {step === 3 ? (
-          <FormSection title="Approve and send" description="Simulated send — no live email or WhatsApp.">
-            {sent ? (
+          <FormSection title="Approve and send" description="Creates a Purchase Order in the shared domain store.">
+            {sentPoId ? (
               <div className="rounded-xl bg-muted-green/25 border border-muted-green/40 p-6 flex gap-3">
                 <CheckCircle2 className="h-6 w-6 text-[#4a5c3a] shrink-0" />
                 <div>
                   <p className="font-display text-xl text-deep-navy">Order approved & marked sent</p>
                   <p className="text-sm text-charcoal/70 mt-1">
-                    Mock PO-2405 created for {formType === "bottle" ? "Sri Velan Bottles" : "Pondy Print House"}.
-                    Vendor notification simulated via email + WhatsApp previews.
+                    {sentPoId} created for {getVendorName(vendorId)} · {getProductTitle(productId)}.
+                    Stock will enter the ledger when you Receive against this PO.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <StatusChip label="PO-2405" tone="info" />
+                    <StatusChip label={sentPoId} tone="info" />
                     <StatusChip label="Status: Sent" tone="success" />
                   </div>
                 </div>
@@ -256,13 +299,13 @@ export default function ManufacturePage() {
             ) : (
               <>
                 <p className="text-sm text-charcoal/70">
-                  Review the previews, then approve. This prototype only updates local UI state.
+                  {getProductTitle(productId)} · qty {quantity} · ₹{unitCost} · {getVendorName(vendorId)}
                 </p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => setStep(2)}>
                     Back
                   </Button>
-                  <Button onClick={() => setSent(true)}>Approve and Send</Button>
+                  <Button onClick={approve}>Approve and Send</Button>
                 </div>
               </>
             )}
@@ -270,7 +313,7 @@ export default function ManufacturePage() {
         ) : null}
 
         <section className="card-surface p-5">
-          <h2 className="font-display text-xl text-deep-navy mb-3">Open purchase orders</h2>
+          <h2 className="font-display text-xl text-deep-navy mb-3">Purchase orders</h2>
           <ul className="space-y-2">
             {purchaseOrders.map((po) => (
               <li
@@ -279,10 +322,10 @@ export default function ManufacturePage() {
               >
                 <div>
                   <p className="text-sm font-medium text-deep-navy">
-                    {po.id} · {po.productName}
+                    {po.id} · {getProductTitle(po.productId)}
                   </p>
                   <p className="text-xs text-charcoal/55">
-                    {po.vendorName} · qty {po.quantityOrdered} · due {po.requiredDate}
+                    {getVendorName(po.vendorId)} · qty {po.quantityOrdered} · due {po.requiredDate}
                   </p>
                 </div>
                 <StatusChip label={po.status} tone="info" />
@@ -292,67 +335,10 @@ export default function ManufacturePage() {
         </section>
       </main>
 
-      <Modal
-        open={preview !== null}
-        onClose={() => setPreview(null)}
-        title={
-          preview === "po"
-            ? "Purchase order preview"
-            : preview === "spec"
-              ? "Specification sheet"
-              : preview === "email"
-                ? "Email preview"
-                : preview === "wa"
-                  ? "WhatsApp preview"
-                  : "Attachment checklist"
-        }
-        wide
-      >
-        {preview === "po" ? (
-          <div className="space-y-3 text-sm">
-            <p className="font-medium text-deep-navy">PO-2405 · Draft</p>
-            <p>Vendor: {formType === "bottle" ? "Sri Velan Bottles, Chennai" : "Pondy Print House"}</p>
-            <p>Qty: 200 · Unit cost: ₹{formType === "bottle" ? "320" : "85"} · Total: ₹{formType === "bottle" ? "64,000" : "17,000"}</p>
-            <p>Required by: 10 Aug 2026 · Payment: 40% advance / 60% on delivery</p>
-          </div>
-        ) : null}
-        {preview === "spec" ? (
-          <div className="text-sm space-y-2 text-charcoal/80">
-            <p>Artwork: approved file attached · Colour: cream on indigo · Position: front centre</p>
-            <p>QC: print registration ±1mm · packaging: individual poly + carton of 25</p>
-            <p>Reject criteria: colour shift beyond Aarla cream swatch, dents, missing print</p>
-          </div>
-        ) : null}
-        {preview === "email" ? (
-          <div className="rounded-xl border border-border bg-pale-cream p-4 text-sm font-mono leading-relaxed">
-            <p>To: orders@srivelan.example</p>
-            <p>Subject: Aarla PO-2405 — Muruga bottle reorder</p>
-            <p className="mt-3">Dear Velan team,</p>
-            <p className="mt-2">
-              Please find attached PO-2405 and artwork Muruga_line_v3.pdf. Kindly confirm lead time and advance invoice.
-            </p>
-            <p className="mt-2">Warmly, Aarla</p>
-          </div>
-        ) : null}
-        {preview === "wa" ? (
-          <div className="max-w-sm rounded-2xl bg-[#e7f0e4] p-4 text-sm">
-            <p className="rounded-2xl rounded-tl-sm bg-white px-3 py-2 shadow-sm">
-              Vanakkam — PO-2405 ready. Artwork + PO PDF attached. Please confirm receipt and ETA. — Aarla
-            </p>
-          </div>
-        ) : null}
-        {preview === "attach" ? (
-          <ul className="space-y-2 text-sm">
-            {["PO PDF", "Specification sheet", "Artwork PDF", "Colour swatch reference", "Packaging notes"].map(
-              (a) => (
-                <li key={a} className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-muted-green" />
-                  {a}
-                </li>
-              ),
-            )}
-          </ul>
-        ) : null}
+      <Modal open={preview !== null} onClose={() => setPreview(null)} title="Preview" wide>
+        <p className="text-sm text-charcoal/70">
+          Mock document for {getProductTitle(productId)} → {getVendorName(vendorId)} · qty {quantity}.
+        </p>
       </Modal>
     </>
   );

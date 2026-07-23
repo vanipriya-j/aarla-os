@@ -37,7 +37,7 @@ export default function ContentPage() {
 
   const [draft, setDraft] = useState({
     title: "",
-    product: products[0].name,
+    product: products[0].title,
     world: "Muruga",
     platform: "Instagram",
     format: "Reel" as ContentFormat,
@@ -139,7 +139,7 @@ export default function ContentPage() {
                   onChange={(e) => setDraft({ ...draft, product: e.target.value })}
                 >
                   {products.map((p) => (
-                    <option key={p.id}>{p.name}</option>
+                    <option key={p.id}>{p.title}</option>
                   ))}
                 </select>
               </Field>

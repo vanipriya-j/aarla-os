@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { JourneyStage } from "@/lib/domain-types";
+import type { JourneyStage } from "@/lib/domain";
 
 const toneClass: Record<NonNullable<JourneyStage["tone"]>, string> = {
   default: "border-border bg-white",

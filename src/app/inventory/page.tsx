@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { useLedger } from "@/lib/domain/use-ledger";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
@@ -8,14 +9,11 @@ import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
   batches,
-  getInventorySnapshots,
   getLocationName,
   getProductTitle,
+  getVendorName,
   locations,
-  networkProducts,
-  networkVendors,
-  stockMovements,
-} from "@/lib/network-data";
+  } from "@/lib/domain";
 
 type Tab = "products" | "locations" | "batches" | "movements";
 
@@ -23,7 +21,7 @@ function InventoryInner() {
   const searchParams = useSearchParams();
   const initial = (searchParams.get("tab") as Tab) || "products";
   const [tab, setTab] = useState<Tab>(initial);
-  const snapshots = useMemo(() => getInventorySnapshots(), []);
+  const { snapshots, movements, hydrated } = useLedger();
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "products", label: "Products" },
@@ -36,7 +34,7 @@ function InventoryInner() {
     <>
       <Header
         title="Inventory"
-        subtitle="Stock derived from movements across studio, partners and channels."
+        subtitle="Balances are derived from the Stock Movement Ledger — the single source of truth."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <div className="flex flex-wrap gap-2">
@@ -55,6 +53,10 @@ function InventoryInner() {
             </button>
           ))}
         </div>
+
+        {!hydrated ? (
+          <p className="text-sm text-charcoal/50">Loading ledger…</p>
+        ) : null}
 
         {tab === "products" ? (
           <DataTable
@@ -75,13 +77,17 @@ function InventoryInner() {
               },
               { key: "studio", header: "Studio Stock", render: (r) => String(r.studioStock) },
               { key: "partner", header: "Partner Stock", render: (r) => String(r.partnerStock) },
+              { key: "channel", header: "Shopify Pool", render: (r) => String(r.channelStock) },
               { key: "reserved", header: "Reserved", render: (r) => String(r.reserved) },
               { key: "damaged", header: "Damaged", render: (r) => String(r.damaged) },
               {
                 key: "available",
                 header: "Available",
                 render: (r) => (
-                  <StatusChip label={String(r.available)} tone={r.available ? "success" : "warning"} />
+                  <StatusChip
+                    label={String(r.available)}
+                    tone={r.available ? "success" : "warning"}
+                  />
                 ),
               },
             ]}
@@ -91,9 +97,9 @@ function InventoryInner() {
         {tab === "locations" ? (
           <div className="grid md:grid-cols-2 gap-4">
             {locations
-              .filter((l) => !["loc-vendor", "loc-customer", "loc-damage"].includes(l.id))
+              .filter((l) => !["loc-external", "loc-sold"].includes(l.id))
               .map((loc) => {
-                const inbound = stockMovements.filter((m) => m.toLocationId === loc.id);
+                const inbound = movements.filter((m) => m.toLocationId === loc.id);
                 const units = inbound.reduce((s, m) => s + m.quantity, 0);
                 return (
                   <div key={loc.id} className="card-surface p-5">
@@ -126,7 +132,9 @@ function InventoryInner() {
               {
                 key: "batch",
                 header: "Batch",
-                render: (r) => <span className="font-medium text-deep-navy">{r.batchNumber}</span>,
+                render: (r) => (
+                  <span className="font-medium text-deep-navy">{r.batchNumber}</span>
+                ),
               },
               {
                 key: "product",
@@ -140,10 +148,10 @@ function InventoryInner() {
               {
                 key: "vendor",
                 header: "Vendor",
-                render: (r) => networkVendors.find((v) => v.id === r.vendorId)?.company ?? "—",
+                render: (r) => getVendorName(r.vendorId),
               },
               { key: "mfg", header: "Manufactured", render: (r) => r.manufactureDate },
-              { key: "recv", header: "Received", render: (r) => r.receivedDate },
+              { key: "recv", header: "Received", render: (r) => r.receivedDate || "—" },
               { key: "qty", header: "Produced", render: (r) => String(r.quantityProduced) },
               { key: "ok", header: "Accepted", render: (r) => String(r.accepted) },
               {
@@ -159,7 +167,7 @@ function InventoryInner() {
 
         {tab === "movements" ? (
           <DataTable
-            rows={[...stockMovements].sort((a, b) => b.date.localeCompare(a.date))}
+            rows={[...movements].sort((a, b) => b.date.localeCompare(a.date))}
             rowKey={(r) => r.id}
             columns={[
               { key: "date", header: "Date", render: (r) => r.date },
@@ -175,7 +183,8 @@ function InventoryInner() {
               {
                 key: "batch",
                 header: "Batch",
-                render: (r) => batches.find((b) => b.id === r.batchId)?.batchNumber ?? "—",
+                render: (r) =>
+                  batches.find((b) => b.id === r.batchId)?.batchNumber ?? "—",
               },
               { key: "qty", header: "Qty", render: (r) => String(r.quantity) },
               {
@@ -200,12 +209,10 @@ function InventoryInner() {
 
         {tab === "products" ? (
           <div className="card-surface-pale p-4 text-sm text-charcoal/65">
-            Tip: open{" "}
-            <Link href="/products/np-kolam" className="text-aarla-red font-medium">
-              Kolam Bottle
-            </Link>{" "}
-            for the full journey and traceability experience.
-            <span className="text-charcoal/40"> · {networkProducts.length} network products</span>
+            Signature journey:{" "}
+            <Link href="/products/prod-kolam-bottle" className="text-aarla-red font-medium">
+              Kolam Bottle →
+            </Link>
           </div>
         ) : null}
       </main>

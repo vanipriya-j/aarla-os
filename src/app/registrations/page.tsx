@@ -11,10 +11,10 @@ import {
   getPartnerName,
   getPersonName,
   getProductTitle,
-  networkProducts,
+  products,
   organizations,
   partners,
-} from "@/lib/network-data";
+} from "@/lib/domain";
 import { MapPin, Package, Percent, ScanLine, Store, Users } from "lucide-react";
 
 export default function RegistrationsPage() {
@@ -44,7 +44,10 @@ export default function RegistrationsPage() {
     .slice(0, 3);
 
   const partnerCounts = partners
-    .map((p) => ({ name: p.name, count: p.registeredUsersOriginatingHere }))
+    .map((p) => ({
+      name: p.name,
+      count: registrations.filter((r) => r.partnerId === p.id).length,
+    }))
     .sort((a, b) => b.count - a.count);
 
   const infosysUnknown = 500 - (organizations.find((o) => o.id === "org-infosys")?.usersReached ?? 0);
@@ -165,7 +168,7 @@ export default function RegistrationsPage() {
         </div>
 
         <p className="text-xs text-charcoal/45">
-          Network catalog: {networkProducts.map((p) => p.title).join(" · ")}
+          Network catalog: {products.map((p) => p.title).join(" · ")}
         </p>
       </main>
     </>

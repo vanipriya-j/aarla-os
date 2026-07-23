@@ -14,6 +14,7 @@ import {
   recentProjects,
   shopifyOrders,
 } from "@/lib/mock-data";
+import { getProductTitle } from "@/lib/domain/catalog";
 import { AlertTriangle, IndianRupee, Package, Sparkles } from "lucide-react";
 
 function formatINR(n: number) {
@@ -82,7 +83,7 @@ export default function HomePage() {
           </div>
           <p className="mt-3 text-sm text-charcoal/60">
             Signature journey:{" "}
-            <Link href="/products/np-kolam" className="text-aarla-red font-medium">
+            <Link href="/products/prod-kolam-bottle" className="text-aarla-red font-medium">
               Kolam Bottle →
             </Link>
           </p>
@@ -202,7 +203,7 @@ export default function HomePage() {
                 <li key={po.id} className="flex items-start justify-between gap-2 py-2 border-b border-border last:border-0">
                   <div>
                     <p className="text-sm font-medium text-deep-navy">{po.id}</p>
-                    <p className="text-xs text-charcoal/60 truncate max-w-[160px]">{po.productName}</p>
+                    <p className="text-xs text-charcoal/60 truncate max-w-[160px]">{getProductTitle(po.productId)}</p>
                   </div>
                   <StatusChip label={po.status} tone={statusToneFromLabel(po.status)} />
                 </li>

@@ -9,10 +9,10 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { useNetworkStore } from "@/lib/storage";
 import {
   batches,
-  networkProducts,
   partners,
-} from "@/lib/network-data";
-import type { Interest, PurchaseSource } from "@/lib/domain-types";
+  products,
+} from "@/lib/domain";
+import type { Interest, PurchaseSource } from "@/lib/domain";
 import { Sparkles } from "lucide-react";
 
 const sources: PurchaseSource[] = [
@@ -48,7 +48,7 @@ export default function RegisterPage() {
   const [done, setDone] = useState<{ name: string; incentive: string; code: string } | null>(null);
   const [form, setForm] = useState({
     registrationCode: "AARLA-KOL-NEW1",
-    productId: "np-kolam",
+    productId: "prod-kolam-bottle",
     name: "",
     email: "",
     phone: "",
@@ -162,7 +162,7 @@ export default function RegisterPage() {
                     value={form.productId}
                     onChange={(e) => setForm({ ...form, productId: e.target.value })}
                   >
-                    {networkProducts.map((p) => (
+                    {products.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.title}
                       </option>

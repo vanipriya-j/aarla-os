@@ -1,10 +1,8 @@
-export type StatusTone =
-  | "neutral"
-  | "info"
-  | "success"
-  | "warning"
-  | "danger"
-  | "accent";
+/**
+ * Ops / workflow types (projects, content, dispatch UI).
+ * Catalog & ledger types live in `@/lib/domain`.
+ */
+export type { StatusTone } from "./domain/types";
 
 export type ProjectStatus =
   | "Ideation"
@@ -41,42 +39,6 @@ export type ContentFormat =
   | "Founder video"
   | "Culture Conversation"
   | "Aarla Pick";
-
-export interface Product {
-  id: string;
-  name: string;
-  category: string;
-  world: string;
-  sku: string;
-  sellingPrice: number;
-  cost: number;
-  inventory: number;
-  status: string;
-  velocity: "Fast" | "Steady" | "Slow";
-}
-
-export interface Vendor {
-  id: string;
-  name: string;
-  city: string;
-  specialty: string;
-  moq: number;
-  leadTimeDays: number;
-  rating: number;
-}
-
-export interface PurchaseOrder {
-  id: string;
-  vendorId: string;
-  vendorName: string;
-  productName: string;
-  quantityOrdered: number;
-  quantityReceived?: number;
-  unitCost: number;
-  status: "Draft" | "Sent" | "In Production" | "Shipped" | "Received" | "Partial";
-  requiredDate: string;
-  orderedDate: string;
-}
 
 export interface ShopifyOrder {
   id: string;
@@ -139,7 +101,7 @@ export interface AttentionItem {
   id: string;
   title: string;
   detail: string;
-  tone: StatusTone;
+  tone: import("./domain/types").StatusTone;
   href: string;
 }
 

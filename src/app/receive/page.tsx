@@ -1,12 +1,13 @@
 "use client";
 
+import { useLedger } from "@/lib/domain/use-ledger";
 import { useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { StepWorkflow } from "@/components/ui/StepWorkflow";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { purchaseOrders } from "@/lib/mock-data";
+import { getProductTitle, getVendorName } from "@/lib/domain";
 import { Barcode, CheckCircle2, ImageIcon, Printer } from "lucide-react";
 
 const steps = [
@@ -19,17 +20,25 @@ const steps = [
 ];
 
 export default function ReceivePage() {
+  const { purchaseOrders, receive } = useLedger();
   const receivable = useMemo(
-    () => purchaseOrders.filter((p) => ["Shipped", "Partial", "In Production"].includes(p.status)),
-    [],
+    () =>
+      purchaseOrders.filter((p) =>
+        ["Shipped", "Partial", "In Production", "Sent"].includes(p.status),
+      ),
+    [purchaseOrders],
   );
+
   const [step, setStep] = useState(0);
   const [poId, setPoId] = useState(receivable[0]?.id ?? "");
-  const [ordered, setOrdered] = useState(500);
-  const [received, setReceived] = useState(492);
-  const [accepted, setAccepted] = useState(480);
-  const [damaged, setDamaged] = useState(8);
-  const [missing, setMissing] = useState(4);
+  const po = purchaseOrders.find((p) => p.id === poId) ?? receivable[0];
+
+  const [ordered, setOrdered] = useState(po?.quantityOrdered ?? 0);
+  const [received, setReceived] = useState(po?.quantityOrdered ?? 0);
+  const [accepted, setAccepted] = useState(po?.quantityOrdered ?? 0);
+  const [damaged, setDamaged] = useState(0);
+  const [missing, setMissing] = useState(0);
+  const [qcNotes, setQcNotes] = useState("");
   const [barcodeGenerated, setBarcodeGenerated] = useState(false);
   const [barcodePrinted, setBarcodePrinted] = useState(false);
   const [barcodeAttached, setBarcodeAttached] = useState(false);
@@ -37,25 +46,37 @@ export default function ReceivePage() {
   const [done, setDone] = useState(false);
   const [refundType, setRefundType] = useState("replacement");
 
-  const po = purchaseOrders.find((p) => p.id === poId);
-
   const selectPo = (id: string) => {
     setPoId(id);
     const selected = purchaseOrders.find((p) => p.id === id);
     if (selected) {
       setOrdered(selected.quantityOrdered);
-      setReceived(selected.quantityOrdered);
-      setAccepted(selected.quantityOrdered);
+      const remaining = Math.max(selected.quantityOrdered - selected.quantityReceived, 0);
+      setReceived(remaining);
+      setAccepted(remaining);
       setDamaged(0);
       setMissing(0);
+      setDone(false);
     }
+  };
+
+  const postToLedger = () => {
+    if (!po) return;
+    const result = receive({
+      poId: po.id,
+      accepted,
+      damaged,
+      missing,
+      notes: qcNotes || `QC receive on shelf ${shelf}`,
+    });
+    if (result) setDone(true);
   };
 
   return (
     <>
       <Header
         title="Receive Stock"
-        subtitle="Guided receiving — quantities, QC, discrepancy, barcode and shelf."
+        subtitle="QC inbound stock and post Purchase Receipt / Damage movements to the ledger."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-4xl">
         <div className="card-surface p-4">
@@ -67,21 +88,22 @@ export default function ReceivePage() {
             <Field label="Purchase order">
               <select
                 className={selectClass}
-                value={poId}
+                value={po?.id ?? ""}
                 onChange={(e) => selectPo(e.target.value)}
               >
                 {receivable.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.id} — {p.productName} ({p.status})
+                    {p.id} — {getProductTitle(p.productId)} ({p.status})
                   </option>
                 ))}
               </select>
             </Field>
             {po ? (
               <div className="rounded-xl bg-pale-cream border border-border p-4 text-sm">
-                <p className="font-medium text-deep-navy">{po.productName}</p>
+                <p className="font-medium text-deep-navy">{getProductTitle(po.productId)}</p>
                 <p className="text-charcoal/60 mt-1">
-                  {po.vendorName} · Ordered {po.quantityOrdered} · Required {po.requiredDate}
+                  {getVendorName(po.vendorId)} · Ordered {po.quantityOrdered} · Already received{" "}
+                  {po.quantityReceived} · Required {po.requiredDate}
                 </p>
               </div>
             ) : null}
@@ -149,13 +171,14 @@ export default function ReceivePage() {
             <Field label="QC notes">
               <textarea
                 className={textareaClass}
-                defaultValue="Print registration good on 478 units. 8 magnets with edge laminate lift. Carton 4 short vs packing list."
+                value={qcNotes}
+                onChange={(e) => setQcNotes(e.target.value)}
+                placeholder="Print registration, damage notes…"
               />
             </Field>
             <div className="rounded-xl border border-dashed border-border-strong bg-pale-cream p-8 text-center">
               <ImageIcon className="h-8 w-8 text-charcoal/40 mx-auto mb-2" />
               <p className="text-sm font-medium text-deep-navy">QC photo placeholder</p>
-              <p className="text-xs text-charcoal/55 mt-1">Tap to attach (simulated)</p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(1)}>
@@ -182,16 +205,15 @@ export default function ReceivePage() {
             <div className="rounded-xl border border-border p-4 text-sm bg-white">
               <p className="font-medium text-deep-navy mb-2">Vendor discrepancy report</p>
               <p className="text-charcoal/70">
-                PO {poId}: ordered {ordered}, received {received}, accepted {accepted}, damaged {damaged},
-                missing {missing}. Requesting {refundType} for {damaged + missing} units from{" "}
-                {po?.vendorName}.
+                PO {po?.id}: ordered {ordered}, received {received}, accepted {accepted}, damaged{" "}
+                {damaged}, missing {missing}. Requesting {refundType}.
               </p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(2)}>
                 Back
               </Button>
-              <Button onClick={() => setStep(4)}>Generate barcode</Button>
+              <Button onClick={() => setStep(4)}>Continue</Button>
             </div>
           </FormSection>
         ) : null}
@@ -217,7 +239,7 @@ export default function ReceivePage() {
             </div>
             {barcodeGenerated ? (
               <div className="rounded-xl border border-border bg-white p-6 text-center font-mono tracking-[0.35em] text-deep-navy">
-                ||||| AAR-MAG-NAV-09 |||||
+                ||||| {po ? getProductTitle(po.productId).slice(0, 18).toUpperCase() : "AARLA"} |||||
               </div>
             ) : null}
             <label className="flex items-center gap-2 text-sm">
@@ -241,7 +263,7 @@ export default function ReceivePage() {
         ) : null}
 
         {step === 5 ? (
-          <FormSection title="Shelf location & Shopify readiness">
+          <FormSection title="Shelf location & post to ledger">
             <Field label="Assign shelf location">
               <input className={inputClass} value={shelf} onChange={(e) => setShelf(e.target.value)} />
             </Field>
@@ -249,13 +271,13 @@ export default function ReceivePage() {
               <div className="rounded-xl bg-muted-green/25 border border-muted-green/40 p-5 flex gap-3">
                 <CheckCircle2 className="h-6 w-6 text-[#4a5c3a]" />
                 <div>
-                  <p className="font-display text-xl text-deep-navy">Stock received & ready</p>
+                  <p className="font-display text-xl text-deep-navy">Posted to stock ledger</p>
                   <p className="text-sm text-charcoal/70 mt-1">
-                    {accepted} units on shelf {shelf}. Marked ready for Shopify (simulated).
+                    Purchase Receipt (+{accepted}) and Damage (+{damaged}) written. Shelf {shelf}.
                   </p>
                   <div className="mt-2 flex gap-2">
-                    <StatusChip label="Inventory updated" tone="success" />
-                    <StatusChip label="Shopify ready" tone="info" />
+                    <StatusChip label="Ledger updated" tone="success" />
+                    <StatusChip label="Ready for Shopify" tone="info" />
                   </div>
                 </div>
               </div>
@@ -264,7 +286,7 @@ export default function ReceivePage() {
                 <Button variant="outline" onClick={() => setStep(4)}>
                   Back
                 </Button>
-                <Button onClick={() => setDone(true)}>Mark ready for Shopify</Button>
+                <Button onClick={postToLedger}>Confirm receive & write ledger</Button>
               </div>
             )}
           </FormSection>

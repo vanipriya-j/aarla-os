@@ -1,44 +1,58 @@
-# Architecture — Aarla OS v0.1
+# Architecture — Aarla OS (unified domain)
 
 ## Stack
 
-- **Next.js** (App Router)
-- **TypeScript**
-- **Tailwind CSS** v4 (CSS variables + `@theme inline`)
-- **lucide-react** icons
-- Google fonts: DM Serif Display, Inter
+- Next.js App Router · TypeScript · Tailwind CSS v4 · lucide-react
+- Local mock data + LocalStorage for ledger / people / registrations
+- No auth, database, or live integrations
 
-## Topology
+## Domain spine (Phase 0–1)
 
 ```
-Browser
-  └── Next.js App Router (static / client components)
-        ├── AppShell (Sidebar + page)
-        ├── Pages under src/app/*
-        └── Mock data layer (src/lib/mock-data.ts)
+Catalog (static)
+  Product · Vendor · Location · Batch · Partner · Person …
+        │
+        ▼
+Stock Movement Ledger (append-only, LocalStorage)
+        │
+        ├── Inventory balances (derived)
+        ├── Partner stock (derived)
+        ├── Journey / Traceability (projected)
+        └── Dashboard capital-in-inventory (derived)
 ```
 
-No API routes, no database, no auth providers, no external SaaS SDKs.
+### Canonical modules
 
-## Layers
+| Module | Path | Role |
+|--------|------|------|
+| Types | `src/lib/domain/types.ts` | Unified domain types |
+| Catalog | `src/lib/domain/catalog.ts` | One Product + Vendor catalog, locations, batches |
+| Ledger | `src/lib/domain/ledger.ts` | Movements, PO store, derive balances, writers |
+| Journey | `src/lib/domain/journey.ts` | Journey projection from ledger + registrations |
+| Ops data | `src/lib/mock-data.ts` | Projects, content, Shopify UI fixtures, advice |
 
-1. **Presentation** — `src/app/**` pages and `src/components/**`
-2. **Domain types** — `src/lib/types.ts`
-3. **Mock data** — `src/lib/mock-data.ts` (products, vendors, POs, orders, projects, content, metrics, advice)
-4. **Navigation config** — `src/lib/navigation.ts`
+### Writers (ledger)
 
-## State
+- **Manufacture** → creates/updates `PurchaseOrder` (no stock yet)
+- **Receive** → `Purchase Receipt` + `Damage` movements
+- **Partner Transfer** → `Transfer` Studio → Partner location
+- **Partner Sale** → `Partner Sale` Partner location → Sold
 
-- Server components where possible (home, projects list/detail, dashboard)
-- Client components for interactive workflows (advice, explore, story, manufacture, receive, dispatch, launch, content)
-- In-session React state only; refresh resets to mock seeds
+### Invariants
 
-## Styling
+1. Inventory balances are never stored as source of truth — they are derived from movements.
+2. One Product id / one Vendor id everywhere.
+3. Customer ≠ User; registration creates known User.
+4. Sold/allocated without registration ⇒ In Circulation – User Unknown.
 
-Tokens live in `src/app/globals.css` as CSS custom properties mapped into Tailwind via `@theme inline`. Utility classes `card-surface`, `app-bg`, and motion helpers keep pages consistent.
+## Presentation
 
-## Extending later
+- `AppShell` + Sidebar/Header
+- Workflow pages under `src/app/*`
+- Network pages: people, partners, inventory, products, register, registrations
 
-- Replace mock modules with fetchers behind the same types
-- Add Server Actions only when a real persistence layer exists
-- Keep workflow step UIs; swap simulation modals for real send/print adapters
+## Not yet
+
+- Shopify / Delhivery / messaging adapters
+- Party / ProductInstance abstractions
+- Full LocalStorage for all ops entities

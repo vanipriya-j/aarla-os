@@ -1,3 +1,8 @@
+/**
+ * Ops mock data (workflows that are not the inventory ledger).
+ * Product / Vendor / PO / inventory come from `@/lib/domain`.
+ */
+import { products } from "./domain/catalog";
 import type {
   AttentionItem,
   ContentTask,
@@ -5,209 +10,12 @@ import type {
   IdeaExploration,
   LaunchChecklist,
   PriorityItem,
-  Product,
   Project,
-  PurchaseOrder,
   ShopifyOrder,
-  Vendor,
 } from "./types";
 
-export const products: Product[] = [
-  {
-    id: "p1",
-    name: "Muruga Water Bottle — 750ml",
-    category: "Water bottles",
-    world: "Muruga",
-    sku: "AAR-BOT-MUR-750",
-    sellingPrice: 890,
-    cost: 320,
-    inventory: 42,
-    status: "Active",
-    velocity: "Fast",
-  },
-  {
-    id: "p2",
-    name: "Lakshmi Brass Davara Tumbler",
-    category: "Brass davara tumblers",
-    world: "Lakshmi",
-    sku: "AAR-BRS-LAK-01",
-    sellingPrice: 1450,
-    cost: 680,
-    inventory: 18,
-    status: "Active",
-    velocity: "Steady",
-  },
-  {
-    id: "p3",
-    name: "Ganapathi Fridge Magnet Set",
-    category: "Magnets",
-    world: "Ganapathi",
-    sku: "AAR-MAG-GAN-04",
-    sellingPrice: 350,
-    cost: 95,
-    inventory: 210,
-    status: "Active",
-    velocity: "Fast",
-  },
-  {
-    id: "p4",
-    name: "Chennai Market Tote",
-    category: "Tote bags",
-    world: "Chennai",
-    sku: "AAR-TOT-CHN-01",
-    sellingPrice: 780,
-    cost: 290,
-    inventory: 64,
-    status: "Active",
-    velocity: "Steady",
-  },
-  {
-    id: "p5",
-    name: "Carnatic Raga Tray",
-    category: "Trays",
-    world: "Carnatic music",
-    sku: "AAR-TRY-CAR-02",
-    sellingPrice: 1680,
-    cost: 720,
-    inventory: 11,
-    status: "Low stock",
-    velocity: "Slow",
-  },
-  {
-    id: "p6",
-    name: "Bharatanatyam Gesture Pouch",
-    category: "Pouches",
-    world: "Bharatanatyam",
-    sku: "AAR-POU-BHA-01",
-    sellingPrice: 520,
-    cost: 180,
-    inventory: 88,
-    status: "Active",
-    velocity: "Steady",
-  },
-  {
-    id: "p7",
-    name: "Amman Stories — Children's Book",
-    category: "Children's books",
-    world: "Navarathri",
-    sku: "AAR-BOK-AMM-01",
-    sellingPrice: 499,
-    cost: 165,
-    inventory: 120,
-    status: "Active",
-    velocity: "Fast",
-  },
-  {
-    id: "p8",
-    name: "Kolam Framed Art — 12x16",
-    category: "Framed art",
-    world: "Chennai",
-    sku: "AAR-ART-KOL-12",
-    sellingPrice: 2200,
-    cost: 890,
-    inventory: 7,
-    status: "Low stock",
-    velocity: "Slow",
-  },
-];
-
-export const vendors: Vendor[] = [
-  {
-    id: "v1",
-    name: "Sri Velan Bottles",
-    city: "Chennai",
-    specialty: "Printed steel & BPA-free bottles",
-    moq: 100,
-    leadTimeDays: 18,
-    rating: 4.6,
-  },
-  {
-    id: "v2",
-    name: "Moradabad Brass Collective",
-    city: "Moradabad",
-    specialty: "Brass tumblers, trays, ritual objects",
-    moq: 50,
-    leadTimeDays: 28,
-    rating: 4.8,
-  },
-  {
-    id: "v3",
-    name: "Pondy Print House",
-    city: "Puducherry",
-    specialty: "Magnets, stickers, small print runs",
-    moq: 200,
-    leadTimeDays: 12,
-    rating: 4.4,
-  },
-  {
-    id: "v4",
-    name: "Kanchi Weave Studio",
-    city: "Kanchipuram",
-    specialty: "Totes, pouches, textile gifts",
-    moq: 75,
-    leadTimeDays: 21,
-    rating: 4.7,
-  },
-  {
-    id: "v5",
-    name: "Madurai Frame Works",
-    city: "Madurai",
-    specialty: "Framed art, print finishing",
-    moq: 25,
-    leadTimeDays: 14,
-    rating: 4.5,
-  },
-];
-
-export const purchaseOrders: PurchaseOrder[] = [
-  {
-    id: "PO-2401",
-    vendorId: "v1",
-    vendorName: "Sri Velan Bottles",
-    productName: "Muruga Water Bottle — 750ml",
-    quantityOrdered: 200,
-    quantityReceived: 0,
-    unitCost: 320,
-    status: "In Production",
-    requiredDate: "2026-08-10",
-    orderedDate: "2026-07-01",
-  },
-  {
-    id: "PO-2402",
-    vendorId: "v3",
-    vendorName: "Pondy Print House",
-    productName: "Navarathri Magnet Assortment",
-    quantityOrdered: 500,
-    quantityReceived: 0,
-    unitCost: 85,
-    status: "Shipped",
-    requiredDate: "2026-07-28",
-    orderedDate: "2026-07-05",
-  },
-  {
-    id: "PO-2398",
-    vendorId: "v2",
-    vendorName: "Moradabad Brass Collective",
-    productName: "Lakshmi Brass Davara Tumbler",
-    quantityOrdered: 80,
-    quantityReceived: 72,
-    unitCost: 680,
-    status: "Partial",
-    requiredDate: "2026-07-15",
-    orderedDate: "2026-06-10",
-  },
-  {
-    id: "PO-2395",
-    vendorId: "v4",
-    vendorName: "Kanchi Weave Studio",
-    productName: "Chennai Market Tote",
-    quantityOrdered: 150,
-    unitCost: 290,
-    status: "Sent",
-    requiredDate: "2026-08-20",
-    orderedDate: "2026-07-12",
-  },
-];
+export { products, vendors, purchaseOrdersSeed as purchaseOrders } from "./domain/catalog";
+export type { Product, Vendor, PurchaseOrder } from "./domain/types";
 
 export const shopifyOrders: ShopifyOrder[] = [
   {
@@ -558,16 +366,16 @@ export const sampleAdvice: Record<
 > = {
   "What should I manufacture before Navarathri?": {
     answer:
-      "Navarathri demand historically concentrates on Amman Stories books, Ganapathi magnets, and Lakshmi ritual objects. Your book stock (120) is healthy; magnets (210) can support a 500-unit festival push. Brass tumblers are thin at 18 units — Moradabad lead time is ~28 days, so place a reorder of 80–100 this week if you want them on shelves by early September. Pair bottles from the Muruga world as gift companions rather than a primary Navarathri SKU.",
+      "Navarathri demand historically concentrates on Amman Stories books, Ganapathi magnets, and Lakshmi ritual objects. Your book stock is healthy; magnets can support a festival push. Brass tumblers are thin — Moradabad lead time is ~28 days, so place a reorder this week if you want them on shelves by early September.",
     actions: [
       { label: "Start Manufacturing", href: "/manufacture" },
       { label: "Create Project", href: "/projects" },
-      { label: "Review Inventory", href: "/dashboard" },
+      { label: "Review Inventory", href: "/inventory" },
     ],
   },
   "Can I fulfil a 100-piece hamper order?": {
     answer:
-      "Yes, with a Chennai-rooted mix using existing inventory: Market Totes (64 on hand — reorder 50+), Ganapathi magnets (210), and Amman Stories books (120). For 100 hampers at ~₹1,200–1,500 budget, cost sits near ₹680–820/unit if you lean on magnets + book + small pouch. Bottleneck is totes — start a quick reorder with Kanchi Weave (MOQ 75, ~21 days) or substitute pouches (88 on hand) for part of the run.",
+      "Yes, with a Chennai-rooted mix using existing inventory: Market Totes, Ganapathi magnets, and Amman Stories books. Bottleneck is often totes — start a quick reorder with Kanchi Weave or substitute pouches for part of the run.",
     actions: [
       { label: "Build Hamper", href: "/story" },
       { label: "Start Manufacturing", href: "/manufacture" },
@@ -576,15 +384,15 @@ export const sampleAdvice: Record<
   },
   "Which products are blocking the most capital?": {
     answer:
-      "Capital blocked totals ~₹3.13L. Highest binders: Kolam Framed Art (slow, high unit cost, only 7 left but ₹890 cost each sitting cold), Carnatic Raga Trays (11 units × ₹720), and brass tumblers mid-pipeline (PO-2398 partial). Fast movers — bottles and magnets — turn capital quickly. Consider a framed-art clearance bundle and pause tray reorder until velocity improves.",
+      "Highest binders tend to be framed art and trays (slow velocity, high unit cost), plus brass mid-pipeline. Fast movers — bottles and magnets — turn capital quickly. Review the inventory ledger for current balances.",
     actions: [
-      { label: "Review Inventory", href: "/dashboard" },
+      { label: "Review Inventory", href: "/inventory" },
       { label: "Create Project", href: "/projects" },
     ],
   },
   "What should I look for in Moradabad?": {
     answer:
-      "For the sourcing trip: (1) finish consistency on davara rims — last partial had scuffing, (2) ability to drop MOQ to 40 for trial SKUs, (3) sample three patina levels for Lakshmi line, (4) tray weight vs shipping cost for Carnatic Raga Tray, (5) packaging that survives courier without foam waste. Ask for written lead-time SLAs ahead of Navarathri.",
+      "For the sourcing trip: finish consistency on davara rims, ability to drop MOQ for trial SKUs, sample patina levels for Lakshmi line, tray weight vs shipping cost, and packaging that survives courier without foam waste.",
     actions: [
       { label: "Open Project", href: "/projects/prj-5" },
       { label: "Start Manufacturing", href: "/manufacture" },
@@ -592,9 +400,9 @@ export const sampleAdvice: Record<
   },
   "Should I reorder bottles now?": {
     answer:
-      "Muruga bottles: 42 on hand + 200 in production (PO-2401, due Aug 10). At current velocity you will be fine through August. Do not double-order unless you commit a Navarathri gift set. If you want a second colourway, wait for PO-2401 QC before placing another 100.",
+      "Check studio stock and open POs on the inventory ledger before double-ordering. If PO-2401 is still in production, wait for QC receive before placing another colourway.",
     actions: [
-      { label: "Review Inventory", href: "/dashboard" },
+      { label: "Review Inventory", href: "/inventory" },
       { label: "Receive Stock", href: "/receive" },
       { label: "Add to Priorities", href: "/" },
     ],
@@ -634,12 +442,12 @@ export function exploreIdea(theme: string): IdeaExploration {
     existingProducts: products
       .filter((p) => p.world.toLowerCase().includes(t.toLowerCase()) || t.length < 3)
       .slice(0, 4)
-      .map((p) => p.name)
+      .map((p) => p.title)
       .concat(
         products
           .filter((p) => !p.world.toLowerCase().includes(t.toLowerCase()))
           .slice(0, 2)
-          .map((p) => p.name),
+          .map((p) => p.title),
       )
       .slice(0, 4),
     productOpportunities: [
