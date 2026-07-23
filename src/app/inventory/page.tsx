@@ -77,7 +77,7 @@ function InventoryInner() {
               },
               { key: "studio", header: "Studio Stock", render: (r) => String(r.studioStock) },
               { key: "partner", header: "Partner Stock", render: (r) => String(r.partnerStock) },
-              { key: "channel", header: "Shopify Pool", render: (r) => String(r.channelStock) },
+              { key: "channel", header: "Channel Pool", render: (r) => String(r.channelStock) },
               { key: "reserved", header: "Reserved", render: (r) => String(r.reserved) },
               { key: "damaged", header: "Damaged", render: (r) => String(r.damaged) },
               {

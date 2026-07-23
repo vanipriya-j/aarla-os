@@ -17,6 +17,11 @@ export const LOC = {
   freshly: "loc-partner-freshly",
   nimalli: "loc-partner-nimalli",
   ngs: "loc-partner-ngs",
+  /**
+   * D2C / web channel stock pool (currently labelled Shopify in the UI).
+   * This is an Aarla OS location — not a Shopify inventory mirror.
+   * Channel adapters may sync fulfilment against SalesOrders; they do not own balances here.
+   */
   shopify: "loc-shopify",
   damage: "loc-damage",
   sold: "loc-sold",
@@ -29,7 +34,11 @@ export const locations: Location[] = [
   { id: LOC.freshly, name: "Freshly Brewed", kind: "Partner", partnerId: "partner-freshly" },
   { id: LOC.nimalli, name: "Nimalli", kind: "Partner", partnerId: "partner-nimalli" },
   { id: LOC.ngs, name: "NGS", kind: "Partner", partnerId: "partner-ngs" },
-  { id: LOC.shopify, name: "Shopify", kind: "Channel" },
+  {
+    id: LOC.shopify,
+    name: "D2C Channel Pool",
+    kind: "Channel",
+  },
   { id: LOC.damage, name: "Damaged Hold", kind: "Hold" },
   { id: LOC.sold, name: "Sold / In Circulation", kind: "Channel" },
   { id: LOC.infosys, name: "Infosys (Corporate)", kind: "Channel" },

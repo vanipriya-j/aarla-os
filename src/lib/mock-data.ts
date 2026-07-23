@@ -1,6 +1,10 @@
 /**
  * Ops mock data (workflows that are not the inventory ledger).
  * Product / Vendor / PO / inventory come from `@/lib/domain`.
+ *
+ * `shopifyOrders` / `channelMix` are UI fixtures for dispatch & dashboard demos.
+ * They are not sources of business truth — Aarla OS catalog + ledger + SalesOrders are.
+ * When a commerce adapter lands, metrics must derive from domain projections, not these arrays.
  */
 import { products } from "./domain/catalog";
 import type {
@@ -17,6 +21,7 @@ import type {
 export { products, vendors, purchaseOrdersSeed as purchaseOrders } from "./domain/catalog";
 export type { Product, Vendor, PurchaseOrder } from "./domain/types";
 
+/** @deprecated Demo fixture for /dispatch — replace with SalesOrder list from domain. */
 export const shopifyOrders: ShopifyOrder[] = [
   {
     id: "ORD-8841",

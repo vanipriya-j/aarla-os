@@ -1,6 +1,9 @@
 /**
  * Ops / workflow types (projects, content, dispatch UI).
  * Catalog & ledger types live in `@/lib/domain`.
+ *
+ * Commerce system of record: use `SalesOrder` from `@/lib/domain`.
+ * `ShopifyOrder` below is a dispatch-screen fixture only — not business truth.
  */
 export type { StatusTone } from "./domain/types";
 
@@ -40,6 +43,12 @@ export type ContentFormat =
   | "Culture Conversation"
   | "Aarla Pick";
 
+/**
+ * Dispatch UI fixture shaped like a Shopify order list.
+ * Not the system of record — future channel adapters import into canonical `SalesOrder`
+ * (`@/lib/domain`) and write stock only through the ledger.
+ * Do not compute dashboard / inventory metrics from this type.
+ */
 export interface ShopifyOrder {
   id: string;
   customer: string;

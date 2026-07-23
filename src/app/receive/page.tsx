@@ -16,7 +16,7 @@ const steps = [
   { id: "qc", label: "QC" },
   { id: "resolve", label: "Discrepancy" },
   { id: "barcode", label: "Barcode" },
-  { id: "shelf", label: "Shelf & Shopify" },
+  { id: "shelf", label: "Shelf & channel" },
 ];
 
 export default function ReceivePage() {
@@ -277,7 +277,7 @@ export default function ReceivePage() {
                   </p>
                   <div className="mt-2 flex gap-2">
                     <StatusChip label="Ledger updated" tone="success" />
-                    <StatusChip label="Ready for Shopify" tone="info" />
+                    <StatusChip label="Ready for channel listing" tone="info" />
                   </div>
                 </div>
               </div>

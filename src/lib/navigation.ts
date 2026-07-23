@@ -61,7 +61,7 @@ export const primaryTiles: NavItem[] = [
     label: "Dispatch Orders",
     href: "/dispatch",
     icon: Truck,
-    description: "Pack, label and send Shopify orders.",
+    description: "Pack, label and send channel orders.",
   },
   {
     label: "Launch Products",

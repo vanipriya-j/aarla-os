@@ -16,6 +16,11 @@ export {
 } from "./ledger";
 export type { AppendMovementInput } from "./ledger";
 export { projectProductJourney } from "./journey";
+export {
+  assertCanonicalSalesOrderLines,
+  salesOrderLedgerReference,
+  salesOrderUsesCanonicalCatalog,
+} from "./sales-orders";
 
 export function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", {
