@@ -1,34 +1,35 @@
-# Product Network & Traceability (v0.2)
+# Product Network & Traceability
 
-Aarla OS understands the full journey of every product:
+## Domain spine (Phase 0–1 complete)
 
-Idea → Design → Vendor → Manufacturing → Inventory → Partner / Shopify → Customer → User → Community
+Aarla OS now uses:
 
-## Customer vs User
+1. **One Product catalog** — `src/lib/domain/catalog.ts`
+2. **One Vendor model** — same catalog
+3. **One Stock Movement Ledger** — `src/lib/domain/ledger.ts` (LocalStorage)
+4. **Derived inventory** — studio / partner / channel / damaged / available
 
-- **Customer** places the order and pays.
-- **User** owns or uses the product (may receive as gift / corporate / school).
-- A Customer may also be a User. A User is not always a Customer.
-- Sold ≠ known User. Association happens only after **registration**.
-- Unregistered sold goods sit as **In Circulation – User Unknown**.
+Journey and Traceability are **projections** (`src/lib/domain/journey.ts`), not independently maintained trees.
 
-## New routes
+### Writers
 
-| Screen | Path |
-|--------|------|
-| People | `/people`, `/people/[id]` |
-| Partners | `/partners` |
-| Inventory | `/inventory` |
-| Product Journey | `/products/[id]` |
-| Register | `/register` |
-| Registrations | `/registrations` |
+| Action | Writes |
+|--------|--------|
+| Manufacture → Approve & Send | `PurchaseOrder` (status Sent) |
+| Receive → Confirm | `Purchase Receipt` + `Damage` movements |
+| Partner → Transfer Stock | `Transfer` movement |
+| Partner → Record Sale | `Partner Sale` movement |
 
-## Domain files
+### Signature product
 
-- `src/lib/domain-types.ts` — Person, Organization, Partner, Vendor, Product, Batch, Location, StockMovement, Registration
-- `src/lib/network-data.ts` — seed mock data (Kolam Bottle, Infosys kits, Freshly Brewed, etc.)
-- `src/lib/storage.ts` — LocalStorage persistence for people + registrations
+`/products/prod-kolam-bottle` — Kolam Bottle journey from the ledger.
 
-## Signature experience
+### Customer vs User
 
-Open **Kolam Bottle** at `/products/np-kolam` → Journey + Traceability tabs.
+Unchanged: Customer pays; User owns/uses; registration creates known User; otherwise **In Circulation – User Unknown**.
+
+### Still deferred
+
+- Shopify / Delhivery adapters
+- Party / ProductInstance abstractions
+- Full ops persistence beyond ledger + people/registrations
