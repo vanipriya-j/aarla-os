@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { primaryTiles } from "@/lib/navigation";
+import { networkNav, primaryTiles } from "@/lib/navigation";
 
 interface HeaderProps {
   title: string;
@@ -72,7 +72,27 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
               >
                 Home
               </Link>
+              <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+                Workflows
+              </p>
               {primaryTiles.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  className={`block rounded-xl px-3 py-2.5 text-sm ${
+                    pathname === item.href || pathname.startsWith(`${item.href}/`)
+                      ? "bg-aarla-red text-white"
+                      : "text-deep-navy hover:bg-pale-cream"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+                Network
+              </p>
+              {networkNav.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

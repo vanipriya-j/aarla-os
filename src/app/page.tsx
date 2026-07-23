@@ -4,7 +4,7 @@ import { AskAarla } from "@/components/home/AskAarla";
 import { TaskTile } from "@/components/ui/TaskTile";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { primaryTiles } from "@/lib/navigation";
+import { primaryTiles, networkNav } from "@/lib/navigation";
 import {
   attentionItems,
   contentTasks,
@@ -59,6 +59,33 @@ export default function HomePage() {
               />
             ))}
           </div>
+        </section>
+
+        <section>
+          <div className="mb-4">
+            <h2 className="font-display text-2xl text-deep-navy">Product network</h2>
+            <p className="text-sm text-charcoal/60 mt-1">
+              From idea to community — people, partners, inventory and registrations.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4">
+            {networkNav.map((tile, i) => (
+              <TaskTile
+                key={tile.href}
+                label={tile.label}
+                description={tile.description}
+                href={tile.href}
+                icon={tile.icon}
+                index={i}
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-sm text-charcoal/60">
+            Signature journey:{" "}
+            <Link href="/products/np-kolam" className="text-aarla-red font-medium">
+              Kolam Bottle →
+            </Link>
+          </p>
         </section>
 
         <section className="grid lg:grid-cols-3 gap-4">

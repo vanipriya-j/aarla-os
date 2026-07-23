@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { primaryTiles } from "@/lib/navigation";
+import { networkNav, primaryTiles } from "@/lib/navigation";
 import { Boxes } from "lucide-react";
 
 export function Sidebar() {
@@ -59,13 +59,36 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+          Network
+        </p>
+
+        {networkNav.map((item) => {
+          const Icon = item.icon;
+          const active = isActive(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                active
+                  ? "bg-aarla-red text-white"
+                  : "text-deep-navy hover:bg-pale-cream"
+              }`}
+            >
+              <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              <span className="font-medium leading-snug">{item.label}</span>
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="p-4 border-t border-border">
         <div className="rounded-xl bg-pale-cream border border-border p-3">
-          <p className="text-xs font-medium text-deep-navy">Version 0.1</p>
+          <p className="text-xs font-medium text-deep-navy">Version 0.2</p>
           <p className="mt-1 text-xs text-charcoal/55 leading-relaxed">
-            Local prototype · mock data only
+            Product network · local persistence
           </p>
         </div>
       </div>

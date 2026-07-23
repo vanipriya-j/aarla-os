@@ -3,15 +3,20 @@ import {
   BookOpen,
   Boxes,
   ClipboardCheck,
+  ClipboardList,
   Compass,
   Factory,
   FolderKanban,
   LayoutDashboard,
   MessageCircleHeart,
+  Package,
   PackageCheck,
   Palette,
   Rocket,
+  ScanLine,
+  Store,
   Truck,
+  Users,
 } from "lucide-react";
 
 export interface NavItem {
@@ -84,6 +89,39 @@ export const primaryTiles: NavItem[] = [
   },
 ];
 
+export const networkNav: NavItem[] = [
+  {
+    label: "People",
+    href: "/people",
+    icon: Users,
+    description: "Customers, users and community members.",
+  },
+  {
+    label: "Partners",
+    href: "/partners",
+    icon: Store,
+    description: "Retail, café and studio partners.",
+  },
+  {
+    label: "Inventory",
+    href: "/inventory",
+    icon: Package,
+    description: "Stock, batches and movement ledger.",
+  },
+  {
+    label: "Registrations",
+    href: "/registrations",
+    icon: ClipboardList,
+    description: "Product registrations and community.",
+  },
+  {
+    label: "Register Product",
+    href: "/register",
+    icon: ScanLine,
+    description: "Tell us where your Aarla story reached.",
+  },
+];
+
 export const sidebarNav: NavItem[] = [
   {
     label: "Home",
@@ -92,6 +130,7 @@ export const sidebarNav: NavItem[] = [
     description: "Today’s operating view",
   },
   ...primaryTiles,
+  ...networkNav,
   {
     label: "Checklists",
     href: "/launch",

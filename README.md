@@ -1,6 +1,6 @@
 # Aarla OS
 
-**Aarla OS** is a founder operating system for [Aarla](https://aarla.in) — a cultural lifestyle brand. Version 0.1 is a polished, fully clickable front-end prototype that helps a single founder move from idea → product → manufacturing → launch → content → fulfilment → business review.
+**Aarla OS** is a founder operating system for [Aarla](https://aarla.in) — a cultural lifestyle brand. Version 0.2 adds the **product network & traceability** domain (People, Partners, Inventory, Registrations, Product Journey) on top of the v0.1 workflows from idea → manufacturing → launch → content → fulfilment → review.
 
 This build uses **local mock data only**. There is no authentication, database, backend, or live third-party integration.
 
@@ -50,10 +50,22 @@ docs/                  # Product & design context
 | Projects | `/projects` |
 | Business Dashboard | `/dashboard` |
 
-## Current limitations (v0.1)
+## Product network (v0.2)
 
-- Mock data only — state resets on refresh (except in-session UI state)
-- No auth, database, or API routes
+| Screen | Route |
+|--------|-------|
+| People | `/people` |
+| Partners | `/partners` |
+| Inventory | `/inventory` |
+| Product Journey | `/products/np-kolam` |
+| Register | `/register` |
+| Registrations | `/registrations` |
+
+See `docs/product-network.md`. Registrations persist in LocalStorage.
+
+## Current limitations (v0.2)
+
+- Mock data + LocalStorage only — no auth, database, or API routes
 - No live Shopify, Delhivery, email, or WhatsApp integrations (previews are simulated)
 - Charts are CSS-based mock visualisations
 - Desktop-first; mobile uses a collapsible nav

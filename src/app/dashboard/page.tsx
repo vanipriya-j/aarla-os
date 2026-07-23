@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { DataTable } from "@/components/ui/DataTable";
@@ -11,12 +12,23 @@ import {
   revenueByMonth,
 } from "@/lib/mock-data";
 import {
+  batches,
+  getInventorySnapshots,
+  networkProducts,
+  partners,
+  peopleSeed,
+  registrationsSeed,
+} from "@/lib/network-data";
+import {
   IndianRupee,
   Package,
   Percent,
+  ScanLine,
   ShoppingBag,
+  Store,
   TrendingDown,
   TrendingUp,
+  Users,
   Wallet,
 } from "lucide-react";
 
@@ -36,11 +48,29 @@ export default function DashboardPage() {
     ["Sent", "In Production", "Shipped", "Partial"].includes(p.status),
   );
 
+  const customers = peopleSeed.filter((p) => p.roles.includes("Customer")).length;
+  const users = peopleSeed.filter((p) => p.roles.includes("User")).length;
+  const registeredProducts = registrationsSeed.length;
+  const inCirculationUnknown = 482;
+  const partnerInventory = partners.reduce(
+    (sum, p) => sum + p.currentInventory.reduce((s, i) => s + i.quantity, 0),
+    0,
+  );
+  const topPartner = [...partners].sort(
+    (a, b) => b.registeredUsersOriginatingHere - a.registeredUsersOriginatingHere,
+  )[0];
+  const topNetworkProduct = [...networkProducts].sort(
+    (a, b) => b.registrations - a.registrations,
+  )[0];
+  const regRate = Math.round((registeredProducts / (500 + 30)) * 1000) / 10;
+  const damagedBatches = batches.filter((b) => b.damaged > 0);
+  const snapshots = getInventorySnapshots();
+
   return (
     <>
       <Header
         title="Business Dashboard"
-        subtitle="Revenue, capital, movement and what needs your attention next."
+        subtitle="Revenue, capital, movement — and the journey from customer to community."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -72,6 +102,94 @@ export default function DashboardPage() {
             icon={Wallet}
             accent="red"
           />
+        </section>
+
+        <section>
+          <h2 className="font-display text-xl text-deep-navy mb-3">Product network</h2>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <SummaryCard label="Customers" value={String(customers)} icon={Users} accent="navy" />
+            <SummaryCard label="Users" value={String(users)} icon={Users} accent="orange" />
+            <SummaryCard
+              label="In Circulation – User Unknown"
+              value={String(inCirculationUnknown)}
+              hint="Mostly Infosys welcome kits"
+              icon={Package}
+              accent="red"
+            />
+            <SummaryCard
+              label="Registered Products"
+              value={String(registeredProducts)}
+              hint={`Registration rate ${regRate}%`}
+              icon={ScanLine}
+              accent="green"
+            />
+            <SummaryCard
+              label="Partner Inventory"
+              value={String(partnerInventory)}
+              icon={Store}
+            />
+            <SummaryCard
+              label="Top Partner"
+              value={topPartner?.name ?? "—"}
+              hint={`${topPartner?.registeredUsersOriginatingHere ?? 0} registrations`}
+            />
+            <SummaryCard
+              label="Top Product"
+              value={topNetworkProduct?.title ?? "—"}
+            >
+              <Link
+                href={`/products/${topNetworkProduct?.id ?? "np-kolam"}`}
+                className="inline-block mt-2 text-sm text-aarla-red font-medium"
+              >
+                Open journey →
+              </Link>
+            </SummaryCard>
+            <SummaryCard
+              label="Registration Rate"
+              value={`${regRate}%`}
+              hint="Known users / allocated units"
+              icon={Percent}
+              accent="green"
+            />
+          </div>
+        </section>
+
+        <section className="card-surface p-5">
+          <h2 className="font-display text-xl text-deep-navy mb-3">Attention items</h2>
+          <ul className="space-y-2 text-sm">
+            <li className="flex justify-between gap-3 border-b border-border pb-2">
+              <span>
+                Products sold but not registered —{" "}
+                <Link href="/products/np-welcome-kit" className="text-aarla-red">
+                  Welcome Kit
+                </Link>
+              </span>
+              <StatusChip label={`${inCirculationUnknown} unknown`} tone="warning" />
+            </li>
+            <li className="flex justify-between gap-3 border-b border-border pb-2">
+              <span>Low registration rate on corporate allocation</span>
+              <StatusChip label={`${regRate}%`} tone="danger" />
+            </li>
+            <li className="flex justify-between gap-3 border-b border-border pb-2">
+              <span>
+                Partner inventory not updated —{" "}
+                <Link href="/partners" className="text-aarla-red">
+                  Nimalli photos pending
+                </Link>
+              </span>
+              <StatusChip label="Review" tone="warning" />
+            </li>
+            <li className="flex justify-between gap-3">
+              <span>
+                Damaged batches —{" "}
+                {damagedBatches.map((b) => b.batchNumber).join(", ") || "None"}
+              </span>
+              <StatusChip
+                label={`${snapshots.reduce((s, x) => s + x.damaged, 0)} units`}
+                tone="danger"
+              />
+            </li>
+          </ul>
         </section>
 
         <section className="grid lg:grid-cols-3 gap-4">
