@@ -1,10 +1,11 @@
 /**
- * Seed local Postgres with Aarla OS demo data.
+ * Seed Postgres with Aarla OS demo data (local or Supabase Cloud).
  *
  * Usage: npx tsx scripts/seed-db.ts
- * Env:   DATABASE_URL (default local Supabase Postgres)
+ * Env:   DATABASE_URL or SUPABASE_DB_URL
  */
 import { Client } from "pg";
+import { shouldUseSsl } from "../src/lib/infra/db/env";
 import {
   batches,
   locations,
@@ -33,7 +34,8 @@ import {
 import { ORG_CODE, ORG_ID, stableId } from "./lib/ids";
 
 const DATABASE_URL =
-  process.env.DATABASE_URL ??
+  process.env.DATABASE_URL?.trim() ||
+  process.env.SUPABASE_DB_URL?.trim() ||
   "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
 /** Story hamper options (from src/app/story/page.tsx — not imported from UI). */
@@ -664,7 +666,10 @@ async function seed(client: Client) {
 }
 
 async function main() {
-  const client = new Client({ connectionString: DATABASE_URL });
+  const client = new Client({
+    connectionString: DATABASE_URL,
+    ssl: shouldUseSsl(DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
+  });
   log(`connecting to ${DATABASE_URL.replace(/:[^:@/]+@/, ":***@")}`);
   await client.connect();
 

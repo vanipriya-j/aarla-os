@@ -60,3 +60,7 @@ UI → Server Actions → Application Services → Business Engine → Repositor
 ```
 
 UI components must not import `pg` or a Supabase client. When the database is down, actions return `{ ok: false, error }` (or the home page shows a clear message).
+
+## Production (Vercel)
+
+Use **Supabase Cloud** as the hosted Postgres. Same migrations and seed scripts — set `DATABASE_URL` to the Supabase URI. Step-by-step: `docs/supabase-vercel.md`.

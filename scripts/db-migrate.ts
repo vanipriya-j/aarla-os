@@ -1,18 +1,23 @@
 /**
  * Apply all SQL files in supabase/migrations/ in sorted order.
- * For environments without `supabase start` / `supabase db reset`.
+ * Works against local Docker / Supabase Local or Supabase Cloud.
  *
  * Usage: npx tsx scripts/db-migrate.ts
- * Env:   DATABASE_URL (default local Supabase Postgres)
+ * Env:   DATABASE_URL or SUPABASE_DB_URL
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
+import { shouldUseSsl } from "../src/lib/infra/db/env";
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+function connectionString(): string {
+  return (
+    process.env.DATABASE_URL?.trim() ||
+    process.env.SUPABASE_DB_URL?.trim() ||
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+  );
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, "../supabase/migrations");
@@ -49,8 +54,12 @@ async function markApplied(client: Client, filename: string) {
 }
 
 async function main() {
-  const client = new Client({ connectionString: DATABASE_URL });
-  console.log(`[db-migrate] connecting to ${DATABASE_URL.replace(/:[^:@/]+@/, ":***@")}`);
+  const url = connectionString();
+  const client = new Client({
+    connectionString: url,
+    ssl: shouldUseSsl(url) ? { rejectUnauthorized: false } : undefined,
+  });
+  console.log(`[db-migrate] connecting to ${url.replace(/:[^:@/]+@/, ":***@")}`);
   await client.connect();
 
   try {
