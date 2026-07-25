@@ -13,45 +13,51 @@ UI still never talks to Supabase directly — only the Business Engine / reposit
 4. Pick a region close to your Vercel region
 5. Wait until the project is ready
 
-## 2. Copy the database URL
+## 2. Copy the database URL (Session pooler)
+
+Vercel cannot reliably reach Supabase’s **direct** host (`db.*.supabase.co`) — that often times out (IPv6). Use the **Session pooler** instead.
 
 In Supabase:
 
-**Project Settings → Database → Connection string → URI**
+**Project Settings → Database → Connection string**
 
-Prefer the **direct** connection (host like `db.<project-ref>.supabase.co`, port **5432**).
+1. Method: **Session pooler** (not “Direct connection”, not “Transaction”)
+2. Type: **URI**
+3. Copy it — it looks like:
 
 ```
-postgresql://postgres:[YOUR-PASSWORD]@db.[ref].supabase.co:5432/postgres
+postgresql://postgres.YOUR_REF:[YOUR-PASSWORD]@aws-0-REGION.pooler.supabase.com:5432/postgres
 ```
 
-Replace `[YOUR-PASSWORD]` with the real password (URL-encode special characters if needed).
+Notes:
+
+- Host contains `pooler.supabase.com` and port is **5432**
+- Username is often `postgres.YOUR_REF` (with a dot), not just `postgres`
+- Replace `[YOUR-PASSWORD]` (URL-encode special characters if needed)
 
 ## 3. Add env vars on Vercel
 
 Vercel → your **aarla-os** project → **Settings → Environment Variables**
 
+Tick **Preview** and **Production**. No quotes around values.
+
 | Name | Value | Environments |
 |------|--------|----------------|
-| `DATABASE_URL` | the Supabase Postgres URI from step 2 | Production, Preview |
+| `DATABASE_URL` | Session pooler URI from step 2 | Production, Preview |
 | `SETUP_SECRET` | invent a long random phrase (you will type it once) | Production, Preview |
-
-Optional later:
-
-| Name | Value |
-|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://YOUR_REF.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | service_role key (server only) |
 
 ## 4. Redeploy
 
-Deployments → **Redeploy** the latest production deployment  
-(or merge/push so a new deploy runs).
+Deployments → **Redeploy** this Preview (or Production after merge).  
+Env var changes do nothing until you redeploy.
 
 ## 5. Initialize from the website
 
-Open:
+Preview (until PR merges):
+
+**https://aarla-os-git-cursor-supabase-cloud-vercel-8083-aarla.vercel.app/setup**
+
+Production (after merge):
 
 **https://aarla-os.vercel.app/setup**
 
@@ -63,6 +69,10 @@ Open:
 
 You can remove `SETUP_SECRET` from Vercel afterward (or leave it for rare resets). Re-running initialize with seed **wipes and reloads** demo data.
 
+### If you see “timeout expired”
+
+Your `DATABASE_URL` is almost certainly the **direct** URI. Switch to **Session pooler**, update Vercel, redeploy, retry.
+
 ## Architecture
 
 ```
@@ -70,7 +80,7 @@ Browser → Vercel (Next.js)
             → Server Actions /api/setup
               → Business Engine / bootstrap
                 → Postgres repositories
-                  → Supabase Postgres
+                  → Supabase Postgres (Session pooler)
 ```
 
 No second GitHub repo. No local machine required for the first cloud bring-up.
@@ -84,5 +94,3 @@ cp .env.example .env.local
 npm run db:start && npm run db:migrate && npm run db:seed
 npm run dev
 ```
-
-Or point `DATABASE_URL` at Supabase Cloud and run `npm run db:migrate` / `db:seed` from a laptop.

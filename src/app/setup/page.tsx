@@ -72,8 +72,10 @@ export default function SetupPage() {
             Supabase dashboard → New project → save the database password
           </li>
           <li>
-            Settings → Database → Connection string → URI (prefer{" "}
-            <code>db.…supabase.co:5432</code>)
+            Settings → Database → Connection string → Method:{" "}
+            <strong>Session pooler</strong> → URI (host must contain{" "}
+            <code>pooler.supabase.com</code> — direct{" "}
+            <code>db.…supabase.co</code> times out on Vercel)
           </li>
           <li>
             Vercel → aarla-os → Settings → Environment Variables (tick{" "}
