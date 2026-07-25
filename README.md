@@ -87,7 +87,7 @@ See `docs/architecture.md` and `docs/product-network.md`.
 
 ## Suggested next steps
 
-1. Create Supabase Cloud project + set `DATABASE_URL` on Vercel (`docs/supabase-vercel.md`)
+1. Create Supabase Cloud project, set `DATABASE_URL` + `SETUP_SECRET` on Vercel, open `/setup` (`docs/supabase-vercel.md`)
 2. Real Shopify order sync and inventory webhooks
 3. Vendor email / WhatsApp send with audit trail
 4. Barcode print via label printer drivers
