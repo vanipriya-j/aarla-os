@@ -1,4 +1,6 @@
+import dns from "node:dns";
 import { Client } from "pg";
+import { diagnoseDatabaseUrl } from "./diagnose";
 import { resolveDatabaseUrl, shouldUseSsl } from "./env";
 import { runMigrations } from "./migrate";
 import { runSeedDemo } from "./seed-demo";
@@ -17,6 +19,17 @@ export async function bootstrapDatabase(options: {
   seed: boolean;
 }): Promise<BootstrapResult> {
   const url = resolveDatabaseUrl();
+  const diagnosis = diagnoseDatabaseUrl(url);
+  if (diagnosis.kind === "https_api" || diagnosis.kind === "direct") {
+    throw new Error(
+      diagnosis.warning ??
+        "DATABASE_URL is not a Session pooler Postgres URI. In Supabase click Connect → Session pooler → copy URI.",
+    );
+  }
+
+  // Prefer IPv4 — Vercel cannot reach Supabase direct IPv6 hosts.
+  dns.setDefaultResultOrder("ipv4first");
+
   const client = new Client({
     connectionString: url,
     ssl: shouldUseSsl(url) ? { rejectUnauthorized: false } : undefined,
@@ -32,7 +45,9 @@ export async function bootstrapDatabase(options: {
     );
     if (looksLikeTimeout) {
       throw new Error(
-        `Cannot reach Postgres (${message}). On Vercel, use Supabase’s Session pooler URI — not the direct db.*.supabase.co host. In Supabase: Project Settings → Database → Connection string → Method: Session pooler → URI. Put that in Vercel DATABASE_URL, Redeploy, try again.`,
+        `Cannot reach Postgres at ${diagnosis.host ?? "unknown"}:${diagnosis.port ?? "?"} (${message}). ` +
+          `Confirm Vercel DATABASE_URL is the Session pooler URI (host contains pooler.supabase.com, port 5432, user like postgres.YOUR_REF), password is URL-encoded, then Redeploy. ` +
+          `Supabase → Connect → Session pooler.`,
       );
     }
     throw err;
