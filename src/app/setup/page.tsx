@@ -76,17 +76,23 @@ export default function SetupPage() {
             <code>db.…supabase.co:5432</code>)
           </li>
           <li>
-            Vercel → aarla-os → Settings → Environment Variables:
+            Vercel → aarla-os → Settings → Environment Variables (tick{" "}
+            <strong>Preview</strong> and Production, no quotes around values):
             <ul className="mt-1 list-disc pl-5">
               <li>
-                <code>DATABASE_URL</code> = that URI
+                <code>DATABASE_URL</code> = Supabase URI
               </li>
               <li>
-                <code>SETUP_SECRET</code> = any long random phrase you invent
+                <code>SETUP_SECRET</code> = a phrase you invent, e.g.{" "}
+                <code>aarla-setup-4917</code>
               </li>
             </ul>
           </li>
-          <li>Redeploy the site, come back here, paste the secret, Initialize</li>
+          <li>
+            Deployments → ⋯ on this Preview → <strong>Redeploy</strong> (env vars
+            only apply after redeploy)
+          </li>
+          <li>Paste the same phrase below → Initialize</li>
         </ol>
 
         {status && (

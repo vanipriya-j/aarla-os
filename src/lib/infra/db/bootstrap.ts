@@ -52,10 +52,16 @@ export function assertSetupSecret(provided: string | null | undefined): void {
   const expected = process.env.SETUP_SECRET?.trim();
   if (!expected) {
     throw new Error(
-      "SETUP_SECRET is not set on the server. Add it in Vercel → Settings → Environment Variables, redeploy, then try again.",
+      "SETUP_SECRET is not set on this deployment. In Vercel → Settings → Environment Variables, add SETUP_SECRET for Preview (and Production), then Redeploy this deployment.",
     );
   }
-  if (!provided || provided !== expected) {
-    throw new Error("Invalid setup secret.");
+  const got = provided?.trim() ?? "";
+  if (!got) {
+    throw new Error("Enter the setup secret (same value as SETUP_SECRET in Vercel).");
+  }
+  if (got !== expected) {
+    throw new Error(
+      "Setup secret does not match Vercel SETUP_SECRET. Use the exact value (no quotes), for the Preview environment if you are on a preview URL, then Redeploy after changing it.",
+    );
   }
 }
