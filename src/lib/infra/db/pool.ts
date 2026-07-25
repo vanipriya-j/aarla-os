@@ -4,6 +4,21 @@ import { resolveDatabaseUrl, shouldUseSsl } from "./env";
 
 let pool: Pool | null = null;
 
+/**
+ * Opt Next.js App Router out of prerendering before DB I/O.
+ * Safe no-op outside a Next request (scripts, Vitest).
+ */
+async function awaitRequestTime(): Promise<void> {
+  try {
+    const mod = await import("next/server");
+    if (typeof mod.connection === "function") {
+      await mod.connection();
+    }
+  } catch {
+    /* not in a Next request context */
+  }
+}
+
 export function getDatabaseUrl(): string {
   return resolveDatabaseUrl();
 }
@@ -33,6 +48,7 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
 ): Promise<T[]> {
+  await awaitRequestTime();
   try {
     const result = await getPool().query<T>(text, params);
     return result.rows;
@@ -44,6 +60,7 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 }
 
 export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await awaitRequestTime();
   let client: PoolClient;
   try {
     client = await getPool().connect();

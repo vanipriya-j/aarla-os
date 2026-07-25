@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { Header } from "@/components/layout/Header";
 import { AskAarla } from "@/components/home/AskAarla";
 import { TaskTile } from "@/components/ui/TaskTile";
@@ -19,6 +20,9 @@ function formatINR(n: number) {
 }
 
 export default async function HomePage() {
+  // Home reads Postgres — must not be prerendered at build time.
+  await connection();
+
   let metrics: DashboardMetrics = {
     revenue: 0,
     revenueChange: 0,

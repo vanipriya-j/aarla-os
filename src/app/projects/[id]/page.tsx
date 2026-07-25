@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
@@ -21,6 +22,7 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await connection();
   const [projects, contentTasks] = await Promise.all([
     listProjects() as Promise<Project[]>,
     listContentTasks() as Promise<ContentTask[]>,

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { Header } from "@/components/layout/Header";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { listProjects } from "@/lib/application/services";
@@ -14,6 +15,8 @@ function formatINR(n: number) {
 }
 
 export default async function ProjectsPage() {
+  await connection();
+
   let projects: Project[] = [];
   let error: string | null = null;
   try {
