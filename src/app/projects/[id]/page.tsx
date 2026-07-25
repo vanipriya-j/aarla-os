@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { contentTasks, projects } from "@/lib/mock-data";
+import { listContentTasks, listProjects } from "@/lib/application/services";
+import type { ContentTask, Project } from "@/lib/types";
 import { ArrowLeft } from "lucide-react";
 
 function formatINR(n: number) {
@@ -14,16 +15,16 @@ function formatINR(n: number) {
   }).format(n);
 }
 
-export function generateStaticParams() {
-  return projects.map((p) => ({ id: p.id }));
-}
-
 export default async function ProjectDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const [projects, contentTasks] = await Promise.all([
+    listProjects() as Promise<Project[]>,
+    listContentTasks() as Promise<ContentTask[]>,
+  ]);
   const project = projects.find((p) => p.id === id);
   if (!project) notFound();
 

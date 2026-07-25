@@ -3,9 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Sparkles } from "lucide-react";
-import { tipPrompts } from "@/lib/mock-data";
 
-export function AskAarla() {
+export function AskAarla({ tipPrompts = [] }: { tipPrompts?: string[] }) {
   const [query, setQuery] = useState("");
   const router = useRouter();
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
+import { partnerStockFor } from "@/lib/domain/ledger";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
@@ -9,58 +10,62 @@ import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Field, inputClass, selectClass } from "@/components/ui/FormSection";
-import {
-  getProductTitle,
-  partnerStockFor,
-  partners,
-  products,
-  registrationsSeed,
-  } from "@/lib/domain";
 import { Package, ScanLine, Store, ShoppingBag } from "lucide-react";
 
 export default function PartnersPage() {
-  const { movements, transfer, partnerSale } = useLedger();
-  const [selectedId, setSelectedId] = useState(partners[0]?.id);
+  const { movements, transfer, partnerSale, partners, products, locations, error } = useAppLedger();
+  const { registrations } = useAppNetwork();
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<string | null>(null);
   const [modal, setModal] = useState<"transfer" | "sale" | "payment" | null>(null);
   const [xferProduct, setXferProduct] = useState("prod-kolam-bottle");
   const [xferQty, setXferQty] = useState(5);
-  const selected = partners.find((p) => p.id === selectedId) ?? partners[0];
+
+  const selected =
+    partners.find((p) => p.id === (selectedId ?? partners[0]?.id)) ?? partners[0];
+
+  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
 
   const inventory = useMemo(
-    () => partnerStockFor(movements, selected.id),
-    [movements, selected.id],
+    () => (selected ? partnerStockFor(movements, selected.id, locations) : []),
+    [movements, selected, locations],
   );
 
   const totalPartnerInventory = partners.reduce(
-    (sum, p) => sum + partnerStockFor(movements, p.id).reduce((s, i) => s + i.quantity, 0),
+    (sum, p) =>
+      sum + partnerStockFor(movements, p.id, locations).reduce((s, i) => s + i.quantity, 0),
     0,
   );
 
-  const partnerRegs = registrationsSeed.filter((r) => r.partnerId === selected.id);
+  const partnerRegs = selected
+    ? registrations.filter((r) => r.partnerId === selected.id)
+    : [];
   const totalRegs = partners.reduce(
-    (sum, p) => sum + registrationsSeed.filter((r) => r.partnerId === p.id).length,
+    (sum, p) => sum + registrations.filter((r) => r.partnerId === p.id).length,
     0,
   );
   const totalSold = partners.reduce((sum, p) => sum + p.productsSold, 0);
   const invUnits = inventory.reduce((s, i) => s + i.quantity, 0);
   const regPct =
-    selected.productsSold > 0
+    selected && selected.productsSold > 0
       ? Math.round((partnerRegs.length / selected.productsSold) * 100)
       : 0;
 
-  const partnerMoves = movements.filter((m) => {
-    const locHint = selected.id.replace("partner-", "");
-    return (
-      m.toLocationId.includes(locHint) ||
-      m.fromLocationId.includes(locHint) ||
-      m.notes.toLowerCase().includes(selected.name.toLowerCase())
-    );
-  });
+  const partnerMoves = selected
+    ? movements.filter((m) => {
+        const locHint = selected.id.replace("partner-", "");
+        return (
+          m.toLocationId.includes(locHint) ||
+          m.fromLocationId.includes(locHint) ||
+          m.notes.toLowerCase().includes(selected.name.toLowerCase())
+        );
+      })
+    : [];
 
-  const confirmModal = () => {
+  const confirmModal = async () => {
+    if (!selected) return;
     if (modal === "transfer") {
-      const mv = transfer({
+      const mv = await transfer({
         productId: xferProduct,
         partnerId: selected.id,
         quantity: xferQty,
@@ -71,7 +76,7 @@ export default function PartnersPage() {
           : "Transfer failed — check studio available stock.",
       );
     } else if (modal === "sale") {
-      const mv = partnerSale({
+      const mv = await partnerSale({
         productId: xferProduct,
         partnerId: selected.id,
         quantity: Math.min(xferQty, 1),
@@ -88,6 +93,17 @@ export default function PartnersPage() {
     setTimeout(() => setToast(null), 2800);
   };
 
+  if (!selected) {
+    return (
+      <>
+        <Header title="Partners" subtitle="Loading partners…" />
+        <main className="px-4 md:px-8 py-6">
+          {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <Header
@@ -100,6 +116,7 @@ export default function PartnersPage() {
             {toast}
           </div>
         ) : null}
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
 
         <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <SummaryCard label="Active Partners" value={String(partners.length)} icon={Store} />
@@ -225,7 +242,7 @@ export default function PartnersPage() {
               ? "Record Sale"
               : "Record Payment"
         }
-        footer={<Button onClick={confirmModal}>Confirm</Button>}
+        footer={<Button onClick={() => void confirmModal()}>Confirm</Button>}
       >
         {modal === "payment" ? (
           <p className="text-sm text-charcoal/70">

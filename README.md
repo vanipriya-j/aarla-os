@@ -2,22 +2,32 @@
 
 **Aarla OS** is a founder operating system for [Aarla](https://aarla.in) — a cultural lifestyle brand. Version 0.2 adds the **product network & traceability** domain (People, Partners, Inventory, Registrations, Product Journey) on top of the v0.1 workflows from idea → manufacturing → launch → content → fulfilment → review.
 
-This build uses **local mock data only**. There is no authentication, database, backend, or live third-party integration.
+Business state persists in **local PostgreSQL**. There is no authentication, no Supabase Cloud project, and no live Shopify.
 
 ## How to run
 
 ```bash
 npm install
+cp .env.example .env.local
+npm run db:start      # local Postgres on 54322 (Docker)
+npm run db:migrate
+npm run db:seed
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
 ```bash
-npm run build   # production build
-npm run start   # serve production build
-npm run lint    # eslint
+npm run build         # production build
+npm run start         # serve production build (needs DATABASE_URL)
+npm run lint          # eslint
+npm test              # Vitest (domain + Postgres persistence)
+npm run test:e2e      # Playwright smoke + persistence reload
+npm run test:all      # Vitest + Playwright
+npm run db:reset      # migrate + seed
 ```
+
+Database details: `docs/local-database.md`. Migration plan: `docs/persistence-migration-plan.md`.
 
 ## Project structure
 
@@ -29,10 +39,16 @@ src/
     ui/                # Shared UI primitives
     home/              # Ask Aarla command bar
   lib/
-    types.ts           # Shared TypeScript types
-    mock-data.ts       # Realistic Aarla mock data
-    navigation.ts      # Primary tiles + sidebar nav
-docs/                  # Product & design context
+    application/       # Use cases
+    engine/            # Business Engine (only mutator)
+    repositories/      # Persistence interfaces
+    infra/             # Postgres pool + adapters
+    domain/            # Types + pure projectors
+    client/            # useAppLedger / useAppNetwork
+  app/actions/         # Server actions (UI entry to services)
+supabase/              # Migrations + seed hook for Supabase Local
+scripts/               # db-migrate + seed-db
+docs/                  # Product & architecture
 ```
 
 ### Primary workflows
@@ -50,20 +66,21 @@ docs/                  # Product & design context
 | Projects | `/projects` |
 | Business Dashboard | `/dashboard` |
 
-## Domain unification (Phase 0–1)
+## Domain + persistence
 
-- **One Product catalog** and **one Vendor model** in `src/lib/domain/catalog.ts`
-- **Stock Movement Ledger** in `src/lib/domain/ledger.ts` (LocalStorage)
-- Inventory balances, partner stock, journey, and capital-in-inventory are **derived**
-- Manufacture writes Purchase Orders; Receive / Partner Transfer / Partner Sale write ledger movements
+- **One Product catalog** and **one Vendor model** (Postgres)
+- **Stock Movement Ledger** (append-only Postgres); inventory is **derived**
+- UI → Server Actions → Application Services → Business Engine → Repositories → Postgres
+- Manufacture / Receive / Transfer / Partner Sale / Register persist through the Business Engine
 
 See `docs/architecture.md` and `docs/product-network.md`.
 
-## Current limitations (v0.2)
+## Current limitations
 
-- Mock data + LocalStorage only — no auth, database, or API routes
-- No live Shopify, Delhivery, email, or WhatsApp integrations (previews are simulated)
-- Charts are CSS-based mock visualisations
+- Local Postgres only (no Supabase Cloud, no auth)
+- No live Shopify, Delhivery, email, or WhatsApp integrations
+- Some home/dashboard chart figures are seeded **demo metrics** (labeled), not live commerce
+- Explore idea generation is a local helper (not an LLM)
 - Desktop-first; mobile uses a collapsible nav
 
 ## Suggested next steps

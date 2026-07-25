@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
+  DEFAULT_INVENTORY_LOC,
+  createOrGetManufacturingPO,
   deriveBalances,
   deriveInventorySnapshots,
   ledgerStore,
@@ -9,12 +11,14 @@ import {
   receiveAgainstPO,
   recordPartnerSale,
   transferToPartner,
-  upsertPurchaseOrder,
 } from "./ledger";
-import { purchaseOrdersSeed } from "./catalog";
+import { locations, products, purchaseOrdersSeed } from "./catalog";
 import type { PurchaseOrder, StockMovement } from "./types";
 
-/** React hook — ledger + derived inventory + PO list. */
+/**
+ * @deprecated LocalStorage ledger hook. Screens use `useAppLedger` (Postgres) instead.
+ * Kept temporarily for pure unit tests that still exercise in-memory writers.
+ */
 export function useLedger() {
   const movementsRaw = useSyncExternalStore(
     ledgerStore.subscribe,
@@ -41,7 +45,10 @@ export function useLedger() {
     [posRaw],
   );
 
-  const snapshots = useMemo(() => deriveInventorySnapshots(movements), [movements]);
+  const snapshots = useMemo(
+    () => deriveInventorySnapshots(movements, products, locations, DEFAULT_INVENTORY_LOC),
+    [movements],
+  );
   const balances = useMemo(() => deriveBalances(movements), [movements]);
 
   const receive = useCallback((input: Parameters<typeof receiveAgainstPO>[0]) => {
@@ -57,27 +64,7 @@ export function useLedger() {
   }, []);
 
   const createManufacturingPO = useCallback(
-    (input: {
-      vendorId: string;
-      productId: string;
-      quantity: number;
-      unitCost: number;
-      requiredDate: string;
-    }) => {
-      const id = `PO-${Date.now().toString().slice(-6)}`;
-      const po: PurchaseOrder = {
-        id,
-        vendorId: input.vendorId,
-        productId: input.productId,
-        quantityOrdered: input.quantity,
-        quantityReceived: 0,
-        unitCost: input.unitCost,
-        status: "Sent",
-        requiredDate: input.requiredDate,
-        orderedDate: new Date().toISOString().slice(0, 10),
-      };
-      return upsertPurchaseOrder(po);
-    },
+    (input: Parameters<typeof createOrGetManufacturingPO>[0]) => createOrGetManufacturingPO(input),
     [],
   );
 

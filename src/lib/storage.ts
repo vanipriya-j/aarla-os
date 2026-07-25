@@ -25,13 +25,27 @@ function subscribe(listener: Listener) {
   return () => listeners.delete(listener);
 }
 
-function readJson<T>(key: string, fallback: T): T {
+function readJson<T>(key: string, fallback: T, validate?: (v: unknown) => v is T): T {
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const parsed: unknown = JSON.parse(raw);
+    if (validate && !validate(parsed)) {
+      window.localStorage.removeItem(key);
+      return fallback;
+    }
+    if (!validate && (parsed === null || typeof parsed !== "object")) {
+      window.localStorage.removeItem(key);
+      return fallback;
+    }
+    return parsed as T;
   } catch {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
     return fallback;
   }
 }
@@ -70,6 +84,10 @@ function getServerSnapshot() {
   return "";
 }
 
+/**
+ * @deprecated LocalStorage people/registrations hook.
+ * Screens use `useAppNetwork` (Postgres) instead.
+ */
 export function useNetworkStore() {
   const peopleRaw = useSyncExternalStore(subscribe, getPeopleSnapshot, getServerSnapshot);
   const regsRaw = useSyncExternalStore(subscribe, getRegsSnapshot, getServerSnapshot);

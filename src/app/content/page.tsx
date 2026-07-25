@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { contentTasks as seedTasks, products } from "@/lib/mock-data";
+import { listContentTasksAction, listProductsAction } from "@/app/actions/app-actions";
 import type { ContentFormat, ContentStatus, ContentTask } from "@/lib/types";
 import { CalendarDays, Kanban, Plus } from "lucide-react";
 
@@ -31,13 +31,15 @@ const boardColumns: ContentStatus[] = [
 ];
 
 export default function ContentPage() {
-  const [tasks, setTasks] = useState<ContentTask[]>(seedTasks);
+  const [tasks, setTasks] = useState<ContentTask[]>([]);
+  const [products, setProducts] = useState<{ id: string; title: string }[]>([]);
   const [view, setView] = useState<"board" | "calendar" | "create">("board");
   const [createdToast, setCreatedToast] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [draft, setDraft] = useState({
     title: "",
-    product: products[0].title,
+    product: "",
     world: "Muruga",
     platform: "Instagram",
     format: "Reel" as ContentFormat,
@@ -45,6 +47,29 @@ export default function ContentPage() {
     status: "Idea" as ContentStatus,
     captionDraft: "",
   });
+
+  useEffect(() => {
+    void (async () => {
+      const [tasksRes, productsRes] = await Promise.all([
+        listContentTasksAction(),
+        listProductsAction(),
+      ]);
+      if (!tasksRes.ok) {
+        setError(tasksRes.error);
+        return;
+      }
+      if (!productsRes.ok) {
+        setError(productsRes.error);
+        return;
+      }
+      setTasks(tasksRes.data as ContentTask[]);
+      setProducts(productsRes.data.map((p) => ({ id: p.id, title: p.title })));
+      setDraft((d) => ({
+        ...d,
+        product: d.product || productsRes.data[0]?.title || "",
+      }));
+    })();
+  }, []);
 
   const createTask = () => {
     const id = `ct-${Date.now()}`;
@@ -109,6 +134,7 @@ export default function ContentPage() {
         }
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         {createdToast ? (
           <div className="rounded-xl bg-muted-green/30 border border-muted-green/50 px-4 py-3 text-sm text-deep-navy">
             Content task created.

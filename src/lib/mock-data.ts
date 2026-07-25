@@ -1,6 +1,7 @@
 /**
- * Ops mock data (workflows that are not the inventory ledger).
- * Product / Vendor / PO / inventory come from `@/lib/domain`.
+ * @deprecated Seed-source only — imported by `scripts/seed-db.ts`.
+ * Application screens must not read this module at runtime.
+ * Business state lives in local PostgreSQL via Application Services.
  */
 import { products } from "./domain/catalog";
 import type {

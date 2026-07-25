@@ -1,6 +1,6 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -9,15 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { JourneyTimeline } from "@/components/network/JourneyTimeline";
 import { TraceabilityDiagram } from "@/components/network/TraceabilityDiagram";
-import {
-  batches,
-  getPersonName,
-  getProduct,
-  getVendorName,
-  partners,
-  projectProductJourney,
-  registrationsSeed,
-  } from "@/lib/domain";
+import { projectProductJourney } from "@/lib/domain/journey";
 import { ArrowLeft } from "lucide-react";
 
 type Tab = "overview" | "journey" | "traceability" | "movements" | "registrations";
@@ -25,17 +17,25 @@ type Tab = "overview" | "journey" | "traceability" | "movements" | "registration
 export default function ProductDetailPage() {
   const params = useParams();
   const id = String(params.id);
-  const product = getProduct(id);
   const [tab, setTab] = useState<Tab>("journey");
-  const { movements, snapshots } = useLedger();
+  const { movements, snapshots, products, batches, vendors, partners, hydrated } = useAppLedger();
+  const { people, registrations } = useAppNetwork();
 
-  const batch = batches.find((b) => b.productId === id && b.accepted > 0) ??
+  const product = products.find((p) => p.id === id);
+  const getPersonName = (pid: string) => people.find((p) => p.id === pid)?.name ?? pid;
+  const getVendorName = (vid: string) => vendors.find((v) => v.id === vid)?.name ?? vid;
+
+  const batch =
+    batches.find((b) => b.productId === id && b.accepted > 0) ??
     batches.find((b) => b.productId === id);
   const vendor = batch ? getVendorName(batch.vendorId) : "—";
   const snapshot = snapshots.find((s) => s.productId === id);
   const moves = movements.filter((m) => m.productId === id);
-  const regs = registrationsSeed.filter((r) => r.productId === id);
-  const journey = useMemo(() => projectProductJourney(id, movements), [id, movements]);
+  const regs = registrations.filter((r) => r.productId === id);
+  const journey = useMemo(
+    () => projectProductJourney(id, movements, registrations),
+    [id, movements, registrations],
+  );
   const partnerNames = partners
     .filter((p) =>
       moves.some(
@@ -46,7 +46,7 @@ export default function ProductDetailPage() {
     )
     .map((p) => p.name);
 
-  if (!product) {
+  if (hydrated && !product) {
     return (
       <>
         <Header title="Product not found" />
@@ -57,6 +57,10 @@ export default function ProductDetailPage() {
         </main>
       </>
     );
+  }
+
+  if (!product) {
+    return <Header title="Product" subtitle="Loading…" />;
   }
 
   const soldEstimate = moves

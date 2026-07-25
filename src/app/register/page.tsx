@@ -6,12 +6,7 @@ import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, inputClass, selectClass } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useNetworkStore } from "@/lib/storage";
-import {
-  batches,
-  partners,
-  products,
-} from "@/lib/domain";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import type { Interest, PurchaseSource } from "@/lib/domain";
 import { Sparkles } from "lucide-react";
 
@@ -44,7 +39,8 @@ const incentives = [
 ];
 
 export default function RegisterPage() {
-  const { registerProduct } = useNetworkStore();
+  const { registerProduct, error: networkError } = useAppNetwork();
+  const { products, batches, partners, error: ledgerError } = useAppLedger();
   const [done, setDone] = useState<{ name: string; incentive: string; code: string } | null>(null);
   const [form, setForm] = useState({
     registrationCode: "AARLA-KOL-NEW1",
@@ -61,7 +57,9 @@ export default function RegisterPage() {
     consent: false,
   });
 
-  const batchId = batches.find((b) => b.productId === form.productId)?.id ?? batches[0].id;
+  const batchId =
+    batches.find((b) => b.productId === form.productId)?.id ?? batches[0]?.id ?? "";
+  const error = networkError ?? ledgerError;
 
   const toggleInterest = (i: Interest) => {
     setForm((prev) => ({
@@ -72,10 +70,10 @@ export default function RegisterPage() {
     }));
   };
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.consent || !form.name || !form.email) return;
-    const result = registerProduct({
+    if (!form.consent || !form.name || !form.email || !batchId) return;
+    const result = await registerProduct({
       registrationCode: form.registrationCode,
       productId: form.productId,
       batchId,
@@ -101,6 +99,7 @@ export default function RegisterPage() {
     <>
       <Header title="Register Product" subtitle="A calm doorway into the Aarla community." />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 max-w-3xl">
+        {error ? <p className="text-sm text-aarla-red mb-4">{error}</p> : null}
         {done ? (
           <div className="card-surface p-8 md:p-10 text-center animate-fade-up">
             <Sparkles className="h-8 w-8 text-aarla-red mx-auto mb-4" />
