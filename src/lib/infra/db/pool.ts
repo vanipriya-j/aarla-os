@@ -1,28 +1,31 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { ConfigurationError, DatabaseUnavailableError } from "./errors";
+import { resolveDatabaseUrl, shouldUseSsl } from "./env";
 
 let pool: Pool | null = null;
 
 export function getDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) {
-    throw new ConfigurationError(
-      "DATABASE_URL is not set. Copy .env.example to .env.local and start the local database.",
-    );
-  }
-  return url;
+  return resolveDatabaseUrl();
 }
 
 export function getPool(): Pool {
   if (pool) return pool;
+
+  const connectionString = getDatabaseUrl();
+  const useSsl = shouldUseSsl(connectionString);
+
   pool = new Pool({
-    connectionString: getDatabaseUrl(),
-    max: 10,
-    connectionTimeoutMillis: 5000,
+    connectionString,
+    max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+    connectionTimeoutMillis: 8_000,
+    // Supabase Cloud and Vercel require TLS. Local Docker does not.
+    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   });
+
   pool.on("error", (err) => {
     console.error("[db] unexpected pool error", err);
   });
+
   return pool;
 }
 
@@ -46,7 +49,10 @@ export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>)
     client = await getPool().connect();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new DatabaseUnavailableError(`Cannot connect to database: ${message}`);
+    throw new DatabaseUnavailableError(
+      `Cannot connect to database: ${message}. ` +
+        `If this is Vercel, set DATABASE_URL to your Supabase connection string (see docs/supabase-vercel.md).`,
+    );
   }
   try {
     await client.query("begin");

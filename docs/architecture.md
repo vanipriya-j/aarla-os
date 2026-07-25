@@ -1,10 +1,11 @@
-# Architecture — Aarla OS (unified domain + local Postgres)
+# Architecture — Aarla OS (unified domain + Postgres)
 
 ## Stack
 
 - Next.js App Router · TypeScript · Tailwind CSS v4 · lucide-react
-- **PostgreSQL** via Supabase Local migrations (Docker Postgres on port 54322 in constrained environments)
-- No auth, no cloud Supabase project, no live Shopify
+- **PostgreSQL** — local Docker / Supabase Local in dev; **Supabase Cloud** on Vercel
+- Migrations live in `supabase/migrations/` (same SQL for local and cloud)
+- No auth, no live Shopify
 
 ## Runtime architecture
 
@@ -15,7 +16,7 @@ UI (screens unchanged visually)
       → Business Engine (`src/lib/engine`)   ← only mutator of business state
         → Repository interfaces (`src/lib/repositories`)
           → Postgres adapters (`src/lib/infra/repositories`)
-            → Local PostgreSQL
+            → PostgreSQL (local or Supabase Cloud via DATABASE_URL)
 ```
 
 UI components must **not** import `pg` or a Supabase client.
@@ -64,9 +65,11 @@ Inventory quantities are **never** stored as editable balances. Corrections use 
 4. Every business row has `organization_id`.
 5. Channel platforms are adapters later — not SoR (see persistence plan).
 
-## Local database
+## Database
 
-See `docs/local-database.md` and `docs/persistence-migration-plan.md`.
+- Local: `docs/local-database.md`
+- Vercel + Supabase Cloud: `docs/supabase-vercel.md`
+- Plan: `docs/persistence-migration-plan.md`
 
 ```bash
 npm run db:start     # Docker Postgres on 54322 (or supabase start when available)
@@ -74,6 +77,8 @@ npm run db:migrate
 npm run db:seed
 npm run dev          # requires DATABASE_URL
 ```
+
+Connection resolution: `DATABASE_URL` or `SUPABASE_DB_URL` (`src/lib/infra/db/env.ts`). TLS is enabled automatically for `*.supabase.co` / Vercel.
 
 ## Testing
 

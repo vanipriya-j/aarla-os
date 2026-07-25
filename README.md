@@ -2,9 +2,9 @@
 
 **Aarla OS** is a founder operating system for [Aarla](https://aarla.in) — a cultural lifestyle brand. Version 0.2 adds the **product network & traceability** domain (People, Partners, Inventory, Registrations, Product Journey) on top of the v0.1 workflows from idea → manufacturing → launch → content → fulfilment → review.
 
-Business state persists in **local PostgreSQL**. There is no authentication, no Supabase Cloud project, and no live Shopify.
+Business state persists in **PostgreSQL** (local Docker for development; **Supabase Cloud** for Vercel). There is no authentication and no live Shopify.
 
-## How to run
+## How to run (local)
 
 ```bash
 npm install
@@ -27,7 +27,9 @@ npm run test:all      # Vitest + Playwright
 npm run db:reset      # migrate + seed
 ```
 
-Database details: `docs/local-database.md`. Migration plan: `docs/persistence-migration-plan.md`.
+- **No laptop:** Supabase + Vercel env vars + `/setup` — `docs/supabase-vercel.md`
+- Local DB (optional): `docs/local-database.md`
+- Migration plan: `docs/persistence-migration-plan.md`
 
 ## Project structure
 
@@ -77,7 +79,7 @@ See `docs/architecture.md` and `docs/product-network.md`.
 
 ## Current limitations
 
-- Local Postgres only (no Supabase Cloud, no auth)
+- No auth yet (anyone with the Vercel URL can use the app if deployed)
 - No live Shopify, Delhivery, email, or WhatsApp integrations
 - Some home/dashboard chart figures are seeded **demo metrics** (labeled), not live commerce
 - Explore idea generation is a local helper (not an LLM)
@@ -85,7 +87,7 @@ See `docs/architecture.md` and `docs/product-network.md`.
 
 ## Suggested next steps
 
-1. Persist projects / POs / content tasks locally (e.g. IndexedDB) before adding a backend
+1. Create Supabase Cloud project, set `DATABASE_URL` + `SETUP_SECRET` on Vercel, open `/setup` (`docs/supabase-vercel.md`)
 2. Real Shopify order sync and inventory webhooks
 3. Vendor email / WhatsApp send with audit trail
 4. Barcode print via label printer drivers
@@ -104,3 +106,5 @@ Warm cream surfaces, Aarla red actions, deep navy headings, DM Serif Display + I
 - `docs/glossary.md`
 - `docs/workflows.md`
 - `docs/architecture.md`
+- `docs/local-database.md`
+- `docs/supabase-vercel.md`

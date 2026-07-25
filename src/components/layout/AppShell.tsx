@@ -1,7 +1,17 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const bare = pathname === "/setup" || pathname.startsWith("/api/");
+
+  if (bare) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="app-bg min-h-screen flex">
       <Sidebar />
