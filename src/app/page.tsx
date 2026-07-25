@@ -5,16 +5,9 @@ import { TaskTile } from "@/components/ui/TaskTile";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { primaryTiles, networkNav } from "@/lib/navigation";
-import {
-  attentionItems,
-  contentTasks,
-  dashboardMetrics,
-  priorities,
-  purchaseOrders,
-  recentProjects,
-  shopifyOrders,
-} from "@/lib/mock-data";
-import { getProductTitle } from "@/lib/domain/catalog";
+import { getHomeDashboardData } from "@/lib/application/services";
+import type { AttentionItem, ContentTask, DashboardMetrics, PriorityItem, Project, ShopifyOrder } from "@/lib/types";
+import type { PurchaseOrder } from "@/lib/domain/types";
 import { AlertTriangle, IndianRupee, Package, Sparkles } from "lucide-react";
 
 function formatINR(n: number) {
@@ -25,12 +18,49 @@ function formatINR(n: number) {
   }).format(n);
 }
 
-export default function HomePage() {
-  const pendingOrders = shopifyOrders.filter((o) => o.courierStatus === "Awaiting Pack");
+export default async function HomePage() {
+  let metrics: DashboardMetrics = {
+    revenue: 0,
+    revenueChange: 0,
+    orders: 0,
+    ordersChange: 0,
+    aov: 0,
+    grossMargin: 0,
+    capitalBlocked: 0,
+    outstandingReceivables: 0,
+  };
+  let priorities: PriorityItem[] = [];
+  let attentionItems: AttentionItem[] = [];
+  let channelOrders: ShopifyOrder[] = [];
+  let contentTasks: ContentTask[] = [];
+  let projects: Project[] = [];
+  let purchaseOrders: PurchaseOrder[] = [];
+  let tipPrompts: string[] = [];
+  let productTitles = new Map<string, string>();
+  let loadError: string | null = null;
+
+  try {
+    const data = await getHomeDashboardData();
+    metrics = (data.metrics.dashboard as DashboardMetrics) ?? metrics;
+    priorities = data.priorities as PriorityItem[];
+    attentionItems = data.attention as AttentionItem[];
+    channelOrders = data.channelOrders as ShopifyOrder[];
+    contentTasks = data.contentTasks as ContentTask[];
+    projects = data.projects as Project[];
+    purchaseOrders = data.purchaseOrders;
+    tipPrompts = data.tipPrompts;
+    productTitles = new Map(data.products.map((p) => [p.id, p.title]));
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : String(err);
+  }
+
+  const pendingOrders = channelOrders.filter((o) => o.courierStatus === "Awaiting Pack");
   const mfgUpdates = purchaseOrders.filter((p) =>
     ["In Production", "Shipped", "Partial"].includes(p.status),
   );
   const openContent = contentTasks.filter((c) => c.status !== "Published");
+  const recentProjects = projects.slice(0, 4);
+  const productTitle = (id: string) => productTitles.get(id) ?? id;
 
   return (
     <>
@@ -39,7 +69,12 @@ export default function HomePage() {
         subtitle="Your calm operating surface for ideas, making, launch and care."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 space-y-8 pb-16">
-        <AskAarla />
+        {loadError ? (
+          <p className="text-sm text-aarla-red rounded-xl border border-aarla-red/30 bg-white px-4 py-3">
+            Database unavailable: {loadError}
+          </p>
+        ) : null}
+        <AskAarla tipPrompts={tipPrompts} />
 
         <section>
           <div className="flex items-end justify-between gap-4 mb-4">
@@ -92,8 +127,8 @@ export default function HomePage() {
         <section className="grid lg:grid-cols-3 gap-4">
           <SummaryCard
             label="Revenue (YTD)"
-            value={formatINR(dashboardMetrics.revenue)}
-            hint={`+${dashboardMetrics.revenueChange}% vs last period`}
+            value={formatINR(metrics.revenue)}
+            hint={`+${metrics.revenueChange}% vs last period`}
             icon={IndianRupee}
             accent="navy"
           />
@@ -203,7 +238,9 @@ export default function HomePage() {
                 <li key={po.id} className="flex items-start justify-between gap-2 py-2 border-b border-border last:border-0">
                   <div>
                     <p className="text-sm font-medium text-deep-navy">{po.id}</p>
-                    <p className="text-xs text-charcoal/60 truncate max-w-[160px]">{getProductTitle(po.productId)}</p>
+                    <p className="text-xs text-charcoal/60 truncate max-w-[160px]">
+                      {productTitle(po.productId)}
+                    </p>
                   </div>
                   <StatusChip label={po.status} tone={statusToneFromLabel(po.status)} />
                 </li>

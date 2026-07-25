@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { DataTable } from "@/components/ui/DataTable";
 import { FormSection } from "@/components/ui/FormSection";
 import { StepWorkflow } from "@/components/ui/StepWorkflow";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { packagingChecklistDefaults, shopifyOrders } from "@/lib/mock-data";
+import {
+  listChannelOrdersAction,
+  updateChannelOrderStatusAction,
+} from "@/app/actions/app-actions";
+import { packagingChecklistDefaults } from "@/lib/demo/workflow-helpers";
 import type { ShopifyOrder } from "@/lib/types";
 import { CheckCircle2, Printer, Truck } from "lucide-react";
 
@@ -21,8 +25,20 @@ const steps = [
 ];
 
 export default function DispatchPage() {
-  const [orders, setOrders] = useState(shopifyOrders);
+  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ShopifyOrder | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await listChannelOrdersAction();
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setOrders(res.data as ShopifyOrder[]);
+    })();
+  }, []);
   const [step, setStep] = useState(0);
   const [checks, setChecks] = useState<Record<string, boolean>>(
     Object.fromEntries(packagingChecklistDefaults.map((c) => [c, false])),
@@ -56,15 +72,17 @@ export default function DispatchPage() {
         o.id === selected.id ? { ...o, courierStatus: "In Transit" as const } : o,
       ),
     );
+    void updateChannelOrderStatusAction(selected.id, "In Transit");
   };
 
   return (
     <>
       <Header
         title="Dispatch Orders"
-        subtitle="Pending Shopify orders — pack, label and hand to courier."
+        subtitle="Pending Shopify orders — pack, label and hand to courier. (Demo data from database.)"
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         {!selected ? (
           <DataTable
             rows={orders}

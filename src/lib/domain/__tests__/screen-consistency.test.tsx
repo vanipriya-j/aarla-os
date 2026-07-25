@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  DEFAULT_INVENTORY_LOC,
   LOC,
   balanceAt,
   deriveBalances,
   deriveInventorySnapshots,
   getMovements,
+  locations,
   partnerStockFor,
   projectProductJourney,
   products,
@@ -26,12 +28,22 @@ import { JourneyTimeline } from "@/components/network/JourneyTimeline";
  */
 function ConsistencyPanel({ productId }: { productId: string }) {
   const movements = getMovements();
-  const snap = deriveInventorySnapshots(movements).find((s) => s.productId === productId);
-  const partner = partnerStockFor(movements, "partner-freshly").find(
+  const snap = deriveInventorySnapshots(
+    movements,
+    products,
+    locations,
+    DEFAULT_INVENTORY_LOC,
+  ).find((s) => s.productId === productId);
+  const partner = partnerStockFor(movements, "partner-freshly", locations).find(
     (s) => s.productId === productId,
   );
   const capital = products.reduce((sum, p) => {
-    const s = deriveInventorySnapshots(movements).find((x) => x.productId === p.id);
+    const s = deriveInventorySnapshots(
+      movements,
+      products,
+      locations,
+      DEFAULT_INVENTORY_LOC,
+    ).find((x) => x.productId === p.id);
     if (!s) return sum;
     return sum + p.cost * (s.studioStock + s.partnerStock + s.channelStock);
   }, 0);

@@ -8,8 +8,7 @@ import { SummaryCard } from "@/components/ui/SummaryCard";
 import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Button } from "@/components/ui/Button";
-import { useNetworkStore } from "@/lib/storage";
-import { getProductTitle } from "@/lib/network-data";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { Users } from "lucide-react";
 
 type Filter = "all" | "customers" | "users" | "both" | "community";
@@ -19,7 +18,9 @@ function PeopleInner() {
   const router = useRouter();
   const initial = (searchParams.get("filter") as Filter) || "all";
   const [filter, setFilter] = useState<Filter>(initial);
-  const { people, registrations, hydrated } = useNetworkStore();
+  const { people, registrations, hydrated, error } = useAppNetwork();
+  const { products } = useAppLedger();
+  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
 
   const filtered = useMemo(() => {
     return people.filter((p) => {
@@ -58,6 +59,7 @@ function PeopleInner() {
         }
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <SummaryCard
             label="Total People"

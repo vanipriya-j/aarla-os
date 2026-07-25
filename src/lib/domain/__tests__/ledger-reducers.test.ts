@@ -1,9 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  DEFAULT_INVENTORY_LOC,
   LOC,
   balanceAt,
   deriveBalances,
   deriveInventorySnapshots,
+  locations,
   movementsSeed,
   partnerStockFor,
   products,
@@ -61,20 +63,25 @@ describe("ledger reducers / projectors (Phase 0–1 invariants)", () => {
     expect(balanceAt(balances, "prod-kolam-bottle", LOC.studio)).toBe(47);
     expect(balanceAt(balances, "prod-kolam-bottle", LOC.damage)).toBe(3);
 
-    const snap = deriveInventorySnapshots([
-      buildStockMovement({
-        quantity: 47,
-        toLocationId: LOC.studio,
-        movementType: "Purchase Receipt",
-        reference: "PO-A",
-      }),
-      buildStockMovement({
-        quantity: 3,
-        toLocationId: LOC.damage,
-        movementType: "Damage",
-        reference: "PO-A-QC",
-      }),
-    ]).find((s) => s.productId === "prod-kolam-bottle");
+    const snap = deriveInventorySnapshots(
+      [
+        buildStockMovement({
+          quantity: 47,
+          toLocationId: LOC.studio,
+          movementType: "Purchase Receipt",
+          reference: "PO-A",
+        }),
+        buildStockMovement({
+          quantity: 3,
+          toLocationId: LOC.damage,
+          movementType: "Damage",
+          reference: "PO-A-QC",
+        }),
+      ],
+      products,
+      locations,
+      DEFAULT_INVENTORY_LOC,
+    ).find((s) => s.productId === "prod-kolam-bottle");
     expect(snap?.damaged).toBe(3);
     expect(snap?.available).toBe(47);
     expect(snap?.available).not.toBe((snap?.available ?? 0) + (snap?.damaged ?? 0));
@@ -119,24 +126,39 @@ describe("ledger reducers / projectors (Phase 0–1 invariants)", () => {
         reference: "PSALE-1",
       }),
     ];
-    const stock = partnerStockFor(movements, "partner-freshly");
+    const stock = partnerStockFor(movements, "partner-freshly", locations);
     const kolam = stock.find((s) => s.productId === "prod-kolam-bottle");
     expect(kolam?.quantity).toBe(6);
   });
 
   it("6. inventory positions are derived only from Stock Movements", () => {
-    const fromSeed = deriveInventorySnapshots(movementsSeed);
-    const empty = deriveInventorySnapshots([]);
+    const fromSeed = deriveInventorySnapshots(
+      movementsSeed,
+      products,
+      locations,
+      DEFAULT_INVENTORY_LOC,
+    );
+    const empty = deriveInventorySnapshots([], products, locations, DEFAULT_INVENTORY_LOC);
     expect(empty.every((s) => s.totalOnHand === 0 && s.damaged === 0)).toBe(true);
     expect(fromSeed.some((s) => s.totalOnHand > 0)).toBe(true);
 
     // No parallel inventory table — snapshots are a pure function of movements.
-    const recomputed = deriveInventorySnapshots(movementsSeed);
+    const recomputed = deriveInventorySnapshots(
+      movementsSeed,
+      products,
+      locations,
+      DEFAULT_INVENTORY_LOC,
+    );
     expect(recomputed).toEqual(fromSeed);
   });
 
   it("seed balances keep usable studio stock non-negative in snapshots", () => {
-    const snaps = deriveInventorySnapshots(movementsSeed);
+    const snaps = deriveInventorySnapshots(
+      movementsSeed,
+      products,
+      locations,
+      DEFAULT_INVENTORY_LOC,
+    );
     for (const s of snaps) {
       expect(s.studioStock).toBeGreaterThanOrEqual(0);
       expect(s.partnerStock).toBeGreaterThanOrEqual(0);

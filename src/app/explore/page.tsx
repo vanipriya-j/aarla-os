@@ -1,23 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { FormSection, Field, inputClass } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { exploreIdea } from "@/lib/mock-data";
+import { listProductsAction } from "@/app/actions/app-actions";
+import { exploreIdea } from "@/lib/demo/workflow-helpers";
+import type { IdeaExploration } from "@/lib/types";
 import { Compass, Check } from "lucide-react";
 
 export default function ExplorePage() {
   const [theme, setTheme] = useState("Muruga");
-  const [result, setResult] = useState<ReturnType<typeof exploreIdea> | null>(null);
+  const [result, setResult] = useState<IdeaExploration | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [created, setCreated] = useState(false);
+  const [productTitles, setProductTitles] = useState<string[]>([]);
   const router = useRouter();
 
+  useEffect(() => {
+    void (async () => {
+      const res = await listProductsAction();
+      if (res.ok) setProductTitles(res.data.map((p) => p.title));
+    })();
+  }, []);
+
   const run = () => {
-    setResult(exploreIdea(theme));
+    const exploration = exploreIdea(theme);
+    if (productTitles.length) {
+      exploration.existingProducts = productTitles
+        .filter((t) => t.toLowerCase().includes(theme.trim().toLowerCase()) || theme.length < 3)
+        .slice(0, 4);
+      if (exploration.existingProducts.length < 4) {
+        exploration.existingProducts = [
+          ...exploration.existingProducts,
+          ...productTitles.filter((t) => !exploration.existingProducts.includes(t)),
+        ].slice(0, 4);
+      }
+    }
+    setResult(exploration);
     setSelected([]);
     setCreated(false);
   };
@@ -35,7 +57,7 @@ export default function ExplorePage() {
     <>
       <Header
         title="Explore an Idea"
-        subtitle="Enter a theme, motif or product — Aarla expands it into Worlds, objects and opportunities."
+        subtitle="Enter a theme, motif or product — Aarla expands it into Worlds, objects and opportunities. (Demo exploration; catalog titles from database.)"
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <FormSection title="Seed the idea" description="Start with a cultural world, a motif, or a product category.">

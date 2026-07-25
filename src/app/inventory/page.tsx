@@ -1,19 +1,12 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger } from "@/lib/client/use-app-data";
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
-import {
-  batches,
-  getLocationName,
-  getProductTitle,
-  getVendorName,
-  locations,
-  } from "@/lib/domain";
 
 type Tab = "products" | "locations" | "batches" | "movements";
 
@@ -21,7 +14,20 @@ function InventoryInner() {
   const searchParams = useSearchParams();
   const initial = (searchParams.get("tab") as Tab) || "products";
   const [tab, setTab] = useState<Tab>(initial);
-  const { snapshots, movements, hydrated } = useLedger();
+  const {
+    snapshots,
+    movements,
+    hydrated,
+    error,
+    products,
+    locations,
+    batches,
+    vendors,
+  } = useAppLedger();
+
+  const productTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
+  const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
+  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "products", label: "Products" },
@@ -57,6 +63,9 @@ function InventoryInner() {
         {!hydrated ? (
           <p className="text-sm text-charcoal/50">Loading ledger…</p>
         ) : null}
+        {error ? (
+          <p className="text-sm text-aarla-red">{error}</p>
+        ) : null}
 
         {tab === "products" ? (
           <DataTable
@@ -71,7 +80,7 @@ function InventoryInner() {
                     href={`/products/${r.productId}`}
                     className="font-medium text-deep-navy hover:text-aarla-red"
                   >
-                    {getProductTitle(r.productId)}
+                    {productTitle(r.productId)}
                   </Link>
                 ),
               },
@@ -141,14 +150,14 @@ function InventoryInner() {
                 header: "Product",
                 render: (r) => (
                   <Link href={`/products/${r.productId}`} className="hover:text-aarla-red">
-                    {getProductTitle(r.productId)}
+                    {productTitle(r.productId)}
                   </Link>
                 ),
               },
               {
                 key: "vendor",
                 header: "Vendor",
-                render: (r) => getVendorName(r.vendorId),
+                render: (r) => vendorName(r.vendorId),
               },
               { key: "mfg", header: "Manufactured", render: (r) => r.manufactureDate },
               { key: "recv", header: "Received", render: (r) => r.receivedDate || "—" },
@@ -176,7 +185,7 @@ function InventoryInner() {
                 header: "Product",
                 render: (r) => (
                   <Link href={`/products/${r.productId}`} className="hover:text-aarla-red">
-                    {getProductTitle(r.productId)}
+                    {productTitle(r.productId)}
                   </Link>
                 ),
               },
@@ -190,12 +199,12 @@ function InventoryInner() {
               {
                 key: "from",
                 header: "From",
-                render: (r) => getLocationName(r.fromLocationId),
+                render: (r) => locationName(r.fromLocationId),
               },
               {
                 key: "to",
                 header: "To",
-                render: (r) => getLocationName(r.toLocationId),
+                render: (r) => locationName(r.toLocationId),
               },
               {
                 key: "type",

@@ -1,75 +1,92 @@
-# Architecture — Aarla OS (unified domain)
+# Architecture — Aarla OS (unified domain + local Postgres)
 
 ## Stack
 
 - Next.js App Router · TypeScript · Tailwind CSS v4 · lucide-react
-- Local mock data + LocalStorage for ledger / people / registrations
-- No auth, database, or live integrations
+- **PostgreSQL** via Supabase Local migrations (Docker Postgres on port 54322 in constrained environments)
+- No auth, no cloud Supabase project, no live Shopify
 
-## Domain spine (Phase 0–1)
+## Runtime architecture
 
 ```
-Catalog (static)
+UI (screens unchanged visually)
+  → Server Actions (`src/app/actions`)
+    → Application Services (`src/lib/application`)
+      → Business Engine (`src/lib/engine`)   ← only mutator of business state
+        → Repository interfaces (`src/lib/repositories`)
+          → Postgres adapters (`src/lib/infra/repositories`)
+            → Local PostgreSQL
+```
+
+UI components must **not** import `pg` or a Supabase client.
+
+## Domain spine
+
+```
+Catalog (Postgres)
   Product · Vendor · Location · Batch · Partner · Person …
         │
         ▼
-Stock Movement Ledger (append-only, LocalStorage)
+Stock Movement Ledger (append-only, Postgres)
         │
-        ├── Inventory balances (derived)
+        ├── Inventory balances (derived in Business Engine)
         ├── Partner stock (derived)
         ├── Journey / Traceability (projected)
         └── Dashboard capital-in-inventory (derived)
 ```
+
+Inventory quantities are **never** stored as editable balances. Corrections use compensating movements. Stock movements are immutable after commit (DB triggers reject UPDATE/DELETE).
 
 ### Canonical modules
 
 | Module | Path | Role |
 |--------|------|------|
 | Types | `src/lib/domain/types.ts` | Unified domain types |
-| Catalog | `src/lib/domain/catalog.ts` | One Product + Vendor catalog, locations, batches |
-| Ledger | `src/lib/domain/ledger.ts` | Movements, PO store, derive balances, writers |
-| Journey | `src/lib/domain/journey.ts` | Journey projection from ledger + registrations |
-| Ops data | `src/lib/mock-data.ts` | Projects, content, Shopify UI fixtures, advice |
+| Pure ledger math | `src/lib/domain/ledger.ts` | `deriveBalances` / snapshots (no I/O) |
+| Journey | `src/lib/domain/journey.ts` | Projection from movements + registrations |
+| Business Engine | `src/lib/engine/business-engine.ts` | Validation + mutations |
+| Repositories | `src/lib/repositories` + `infra/repositories` | Persistence |
+| Seed sources | `scripts/seed-db.ts` (+ catalog/mock arrays as seed input only) | Local DB init |
 
-### Writers (ledger)
+### Writers (Business Engine)
 
-- **Manufacture** → creates/updates `PurchaseOrder` (no stock yet)
-- **Receive** → `Purchase Receipt` + `Damage` movements
+- **Manufacture** → `PurchaseOrder` (no stock yet)
+- **Receive** → `Purchase Receipt` + `Damage` movements (+ PO update) in a transaction
 - **Partner Transfer** → `Transfer` Studio → Partner location
 - **Partner Sale** → `Partner Sale` Partner location → Sold
+- **Register** → Person upsert + `product_registrations`
 
 ### Invariants
 
-1. Inventory balances are never stored as source of truth — they are derived from movements.
-2. One Product id / one Vendor id everywhere.
+1. Inventory balances are derived from movements.
+2. One Product code / one Vendor code everywhere (UUID PK + stable `code`).
 3. Customer ≠ User; registration creates known User.
-4. Sold/allocated without registration ⇒ In Circulation – User Unknown.
+4. Every business row has `organization_id`.
+5. Channel platforms are adapters later — not SoR (see persistence plan).
 
-## Presentation
+## Local database
 
-- `AppShell` + Sidebar/Header
-- Workflow pages under `src/app/*`
-- Network pages: people, partners, inventory, products, register, registrations
-
-## Testing (Phase 0–1)
-
-Frameworks: **Vitest** (domain + LocalStorage integration), **React Testing Library** (screen-consistency harness), **Playwright** (critical browser smoke).
+See `docs/local-database.md` and `docs/persistence-migration-plan.md`.
 
 ```bash
-npm test              # Vitest unit + integration + RTL (Phase 0–1)
-npm run build && npm start   # production server (needed for Playwright)
-npm run test:e2e      # Playwright smoke (manufacture → receive → transfer → sale → registration)
-npm run test:all      # Vitest + Playwright
+npm run db:start     # Docker Postgres on 54322 (or supabase start when available)
+npm run db:migrate
+npm run db:seed
+npm run dev          # requires DATABASE_URL
 ```
 
-Playwright uses `next start` (see `playwright.config.ts`). Run `npm run build` first; `next dev` may not hydrate reliably in some environments.
-Fixtures/builders live in `src/test/fixtures/builders.ts`. Ledger tests inject deterministic movement IDs via `setMovementIdGenerator` and reset storage with `resetLedgerStorage`.
+## Testing
 
-Coverage targets the Phase 0–1 invariants (single catalog/ledger, receive/damage/transfer/sale, derived inventory & journey, idempotent writers, non-negative stock, seed-once, corrupt LocalStorage recovery, screen consistency).
+```bash
+npm test             # Vitest (includes Postgres persistence tests when DATABASE_URL set)
+npm run test:e2e     # Playwright smoke + persistence reload
+npm run build && npm run lint
+```
 
 ## Not yet
 
-- Shopify / Delhivery / messaging adapters
-- Party / ProductInstance abstractions
-- Full LocalStorage for all ops entities
-- Phase 2 feature work
+- Live Shopify / Delhivery / messaging adapters
+- Supabase Cloud
+- Auth users
+- RAG / LLM
+- Speculative tables (decisions / memories / evidence)

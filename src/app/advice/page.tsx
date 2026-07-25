@@ -1,45 +1,79 @@
 "use client";
 
-import { useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
-import { sampleAdvice, tipPrompts } from "@/lib/mock-data";
+import { listAdviceAction, listTipPromptsAction } from "@/app/actions/app-actions";
 import { MessageCircle, Send, Sparkles, User } from "lucide-react";
 
 type Message = { role: "user" | "assistant"; text: string; actions?: { label: string; href: string }[] };
+type AdviceHit = { answer: string; actions: { label: string; href: string }[] };
+
+function parseAdviceBody(body: string): AdviceHit | null {
+  try {
+    const parsed = JSON.parse(body) as AdviceHit;
+    if (parsed && typeof parsed.answer === "string") return parsed;
+  } catch {
+    /* plain text */
+  }
+  return null;
+}
 
 function AdviceInner() {
   const searchParams = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
   const [input, setInput] = useState(initialQ);
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (!initialQ) {
-      return [
-        {
-          role: "assistant",
-          text: "I'm your founder copilot. Ask about manufacturing, inventory, hampers, sourcing trips, or what to prioritise this week. I'll answer from Aarla's mock operating data.",
-        },
-      ];
-    }
-    const hit = sampleAdvice[initialQ];
-    return [
-      { role: "user", text: initialQ },
-      hit
-        ? { role: "assistant", text: hit.answer, actions: hit.actions }
-        : {
-            role: "assistant",
-            text: `Looking at Aarla's current picture for “${initialQ}”: bottle inventory is healthy with PO-2401 inbound; magnets can support festival volume; brass is the tightest SKU. I'd open a short project, confirm MOQs with the relevant vendor, and add a receive-stock checkpoint to priorities.`,
-            actions: [
-              { label: "Create Project", href: "/projects" },
-              { label: "Start Manufacturing", href: "/manufacture" },
-              { label: "Review Inventory", href: "/dashboard" },
-            ],
-          },
-    ];
-  });
+  const [sampleAdvice, setSampleAdvice] = useState<Record<string, AdviceHit>>({});
+  const [tipPrompts, setTipPrompts] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "assistant",
+      text: "I'm your founder copilot. Ask about manufacturing, inventory, hampers, sourcing trips, or what to prioritise this week. I'll answer from Aarla's demo operating data.",
+    },
+  ]);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [adviceRes, tipsRes] = await Promise.all([
+        listAdviceAction(),
+        listTipPromptsAction(),
+      ]);
+      if (cancelled) return;
+      const map: Record<string, AdviceHit> = {};
+      if (adviceRes.ok) {
+        for (const row of adviceRes.data) {
+          const hit = parseAdviceBody(row.body);
+          if (hit) map[row.matchKey] = hit;
+        }
+      }
+      setSampleAdvice(map);
+      if (tipsRes.ok) setTipPrompts(tipsRes.data);
+      if (initialQ) {
+        const hit = map[initialQ];
+        setMessages([
+          { role: "user", text: initialQ },
+          hit
+            ? { role: "assistant", text: hit.answer, actions: hit.actions }
+            : {
+                role: "assistant",
+                text: `Looking at Aarla's current picture for “${initialQ}”: bottle inventory is healthy with PO-2401 inbound; magnets can support festival volume; brass is the tightest SKU. I'd open a short project, confirm MOQs with the relevant vendor, and add a receive-stock checkpoint to priorities.`,
+                actions: [
+                  { label: "Create Project", href: "/projects" },
+                  { label: "Start Manufacturing", href: "/manufacture" },
+                  { label: "Review Inventory", href: "/dashboard" },
+                ],
+              },
+        ]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialQ]);
 
   const ask = (q: string) => {
     const query = q.trim();
@@ -68,7 +102,7 @@ function AdviceInner() {
     }
   };
 
-  const prompts = useMemo(() => tipPrompts, []);
+  const prompts = useMemo(() => tipPrompts, [tipPrompts]);
 
   return (
     <>

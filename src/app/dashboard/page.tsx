@@ -1,25 +1,18 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import {
-  channelMix,
-  dashboardMetrics,
-  launchChecklists,
-  revenueByMonth,
-} from "@/lib/mock-data";
-import {
-  batches,
-  formatINR,
-  partners,
-  peopleSeed,
-  products,
-  registrationsSeed,
-  } from "@/lib/domain";
+  getDemoMetricsAction,
+  listLaunchChecklistsAction,
+} from "@/app/actions/app-actions";
+import type { DashboardMetrics, LaunchChecklist } from "@/lib/types";
+import { formatINR } from "@/lib/domain";
 import {
   IndianRupee,
   Package,
@@ -34,30 +27,61 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const { snapshots, purchaseOrders, hydrated } = useLedger();
-  const maxRevenue = Math.max(...revenueByMonth.map((m) => m.revenue));
+  const { snapshots, purchaseOrders, hydrated, products, partners, batches, error } =
+    useAppLedger();
+  const { people, registrations } = useAppNetwork();
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
+  const [revenueByMonth, setRevenueByMonth] = useState<{ month: string; revenue: number }[]>([]);
+  const [channelMix, setChannelMix] = useState<
+    { channel: string; share: number; revenue: number }[]
+  >([]);
+  const [launchChecklists, setLaunchChecklists] = useState<LaunchChecklist[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      const [metrics, launches] = await Promise.all([
+        getDemoMetricsAction(),
+        listLaunchChecklistsAction(),
+      ]);
+      if (metrics.ok) {
+        setDashboardMetrics(metrics.data.dashboard as DashboardMetrics);
+        setRevenueByMonth(
+          (metrics.data.revenueByMonth as { month: string; revenue: number }[]) ?? [],
+        );
+        setChannelMix(
+          (metrics.data.channelMix as { channel: string; share: number; revenue: number }[]) ??
+            [],
+        );
+      }
+      if (launches.ok) {
+        setLaunchChecklists(launches.data as LaunchChecklist[]);
+      }
+    })();
+  }, []);
+
+  const maxRevenue = Math.max(...revenueByMonth.map((m) => m.revenue), 1);
   const fast = products.filter((p) => p.velocity === "Fast");
   const slow = products.filter((p) => p.velocity === "Slow");
   const pendingMfg = purchaseOrders.filter((p) =>
     ["Sent", "In Production", "Shipped", "Partial"].includes(p.status),
   );
 
-  const customers = peopleSeed.filter((p) => p.roles.includes("Customer")).length;
-  const users = peopleSeed.filter((p) => p.roles.includes("User")).length;
-  const registeredProducts = registrationsSeed.length;
+  const customers = people.filter((p) => p.roles.includes("Customer")).length;
+  const users = people.filter((p) => p.roles.includes("User")).length;
+  const registeredProducts = registrations.length;
   const welcomeSold = 500;
-  const welcomeRegs = registrationsSeed.filter((r) => r.productId === "prod-welcome-kit").length;
+  const welcomeRegs = registrations.filter((r) => r.productId === "prod-welcome-kit").length;
   const inCirculationUnknown = Math.max(welcomeSold - welcomeRegs, 0);
   const partnerInventory = snapshots.reduce((sum, s) => sum + s.partnerStock, 0);
   const topPartner = [...partners].sort((a, b) => {
-    const ca = registrationsSeed.filter((r) => r.partnerId === a.id).length;
-    const cb = registrationsSeed.filter((r) => r.partnerId === b.id).length;
+    const ca = registrations.filter((r) => r.partnerId === a.id).length;
+    const cb = registrations.filter((r) => r.partnerId === b.id).length;
     return cb - ca;
   })[0];
   const topProduct = [...products]
     .map((p) => ({
       ...p,
-      regs: registrationsSeed.filter((r) => r.productId === p.id).length,
+      regs: registrations.filter((r) => r.productId === p.id).length,
     }))
     .sort((a, b) => b.regs - a.regs)[0];
   const regRate = Math.round((registeredProducts / (welcomeSold + 30)) * 1000) / 10;
@@ -68,6 +92,17 @@ export default function DashboardPage() {
     return sum + p.cost * (s.studioStock + s.partnerStock + s.channelStock);
   }, 0);
 
+  const metrics = dashboardMetrics ?? {
+    revenue: 0,
+    revenueChange: 0,
+    orders: 0,
+    ordersChange: 0,
+    aov: 0,
+    grossMargin: 0,
+    capitalBlocked: 0,
+    outstandingReceivables: 0,
+  };
+
   return (
     <>
       <Header
@@ -75,24 +110,25 @@ export default function DashboardPage() {
         subtitle="Ops metrics plus network figures derived from the unified catalog and ledger."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <SummaryCard
             label="Revenue"
-            value={formatINR(dashboardMetrics.revenue)}
-            hint={`+${dashboardMetrics.revenueChange}% vs prior period`}
+            value={formatINR(metrics.revenue)}
+            hint={`+${metrics.revenueChange}% vs prior period`}
             icon={IndianRupee}
             accent="navy"
           />
           <SummaryCard
             label="Orders"
-            value={String(dashboardMetrics.orders)}
-            hint={`+${dashboardMetrics.ordersChange}% · AOV ${formatINR(dashboardMetrics.aov)}`}
+            value={String(metrics.orders)}
+            hint={`+${metrics.ordersChange}% · AOV ${formatINR(metrics.aov)}`}
             icon={ShoppingBag}
             accent="orange"
           />
           <SummaryCard
             label="Gross margin"
-            value={`${dashboardMetrics.grossMargin}%`}
+            value={`${metrics.grossMargin}%`}
             hint="Across active SKUs"
             icon={Percent}
             accent="green"
@@ -100,7 +136,7 @@ export default function DashboardPage() {
           <SummaryCard
             label="Capital in inventory (ledger)"
             value={hydrated ? formatINR(capitalFromLedger) : "—"}
-            hint={`Receivables ${formatINR(dashboardMetrics.outstandingReceivables)}`}
+            hint={`Receivables ${formatINR(metrics.outstandingReceivables)}`}
             icon={Wallet}
             accent="red"
           />
@@ -133,7 +169,7 @@ export default function DashboardPage() {
             <SummaryCard
               label="Top Partner"
               value={topPartner?.name ?? "—"}
-              hint={`${registrationsSeed.filter((r) => r.partnerId === topPartner?.id).length} registrations`}
+              hint={`${registrations.filter((r) => r.partnerId === topPartner?.id).length} registrations`}
             />
             <SummaryCard label="Top Product" value={topProduct?.title ?? "—"}>
               <Link
@@ -321,7 +357,7 @@ export default function DashboardPage() {
                 <h2 className="font-display text-xl text-deep-navy">Outstanding receivables</h2>
               </div>
               <p className="font-display text-3xl text-deep-navy">
-                {formatINR(dashboardMetrics.outstandingReceivables)}
+                {formatINR(metrics.outstandingReceivables)}
               </p>
             </div>
             <div className="card-surface p-5">

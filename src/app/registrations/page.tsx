@@ -6,19 +6,17 @@ import { SummaryCard } from "@/components/ui/SummaryCard";
 import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Button } from "@/components/ui/Button";
-import { useNetworkStore } from "@/lib/storage";
-import {
-  getPartnerName,
-  getPersonName,
-  getProductTitle,
-  products,
-  organizations,
-  partners,
-} from "@/lib/domain";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { MapPin, Package, Percent, ScanLine, Store, Users } from "lucide-react";
 
 export default function RegistrationsPage() {
-  const { people, registrations, hydrated } = useNetworkStore();
+  const { people, registrations, hydrated, error } = useAppNetwork();
+  const { products, partners, catalog } = useAppLedger();
+  const institutions = catalog.institutions;
+
+  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
+  const getPersonName = (id: string) => people.find((p) => p.id === id)?.name ?? id;
+  const getPartnerName = (id: string) => partners.find((p) => p.id === id)?.name ?? id;
 
   const registeredUsers = new Set(registrations.map((r) => r.userId)).size;
   const productsRegistered = new Set(registrations.map((r) => r.productId)).size;
@@ -50,7 +48,8 @@ export default function RegistrationsPage() {
     }))
     .sort((a, b) => b.count - a.count);
 
-  const infosysUnknown = 500 - (organizations.find((o) => o.id === "org-infosys")?.usersReached ?? 0);
+  const infosysUnknown =
+    500 - (institutions.find((o) => o.id === "org-infosys")?.usersReached ?? 0);
 
   return (
     <>
@@ -64,6 +63,7 @@ export default function RegistrationsPage() {
         }
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <section className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <SummaryCard
             label="Products Registered"
@@ -105,7 +105,7 @@ export default function RegistrationsPage() {
             <p className="text-sm text-charcoal/65 mt-1">
               Infosys Welcome Kits: {infosysUnknown} still{" "}
               <strong>In Circulation – User Unknown</strong>.{" "}
-              <Link href="/products/np-welcome-kit" className="text-aarla-red">
+              <Link href="/products/prod-welcome-kit" className="text-aarla-red">
                 View journey →
               </Link>
             </p>
@@ -138,7 +138,7 @@ export default function RegistrationsPage() {
                   r.customerId ? (
                     <Link href={`/people/${r.customerId}`}>{getPersonName(r.customerId)}</Link>
                   ) : r.organizationId ? (
-                    "Infosys"
+                    institutions.find((i) => i.id === r.organizationId)?.name ?? "Institution"
                   ) : (
                     "—"
                   ),

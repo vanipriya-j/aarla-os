@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { launchChecklists } from "@/lib/mock-data";
+import { listLaunchChecklistsAction } from "@/app/actions/app-actions";
+import type { LaunchChecklist } from "@/lib/types";
 import { AlertTriangle, CheckCircle2, Rocket } from "lucide-react";
 
-function readinessScore(item: (typeof launchChecklists)[0]) {
+function readinessScore(item: LaunchChecklist) {
   const flags = [
     item.photosReady,
     item.barcodeReady,
@@ -21,15 +22,41 @@ function readinessScore(item: (typeof launchChecklists)[0]) {
 }
 
 export default function LaunchPage() {
-  const [items, setItems] = useState(launchChecklists);
-  const [activeId, setActiveId] = useState(items[0]?.id);
-  const active = items.find((i) => i.id === activeId) ?? items[0];
+  const [items, setItems] = useState<LaunchChecklist[]>([]);
+  const [activeId, setActiveId] = useState<string | undefined>(undefined);
+  const active = items.find((i) => i.id === (activeId ?? items[0]?.id)) ?? items[0];
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const update = (patch: Partial<(typeof launchChecklists)[0]>) => {
+  useEffect(() => {
+    void (async () => {
+      const res = await listLaunchChecklistsAction();
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      const list = res.data as LaunchChecklist[];
+      setItems(list);
+      setActiveId(list[0]?.id);
+    })();
+  }, []);
+
+  const update = (patch: Partial<LaunchChecklist>) => {
+    if (!active) return;
     setItems((prev) => prev.map((i) => (i.id === active.id ? { ...i, ...patch } : i)));
     setSaved(false);
   };
+
+  if (!active) {
+    return (
+      <>
+        <Header title="Launch Products" subtitle="Loading checklists…" />
+        <main className="px-4 md:px-8 py-6">
+          {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
+        </main>
+      </>
+    );
+  }
 
   const score = readinessScore(active);
 
@@ -51,6 +78,7 @@ export default function LaunchPage() {
         }
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         {saved ? (
           <div className="rounded-xl bg-muted-green/30 border border-muted-green/50 px-4 py-3 text-sm text-deep-navy">
             Launch checklist saved (local prototype state).

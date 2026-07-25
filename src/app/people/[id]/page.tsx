@@ -5,14 +5,15 @@ import { useParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useNetworkStore } from "@/lib/storage";
-import { getProductTitle } from "@/lib/network-data";
+import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { ArrowLeft } from "lucide-react";
 
 export default function PersonDetailPage() {
   const params = useParams();
   const id = String(params.id);
-  const { people, registrations, hydrated } = useNetworkStore();
+  const { people, registrations, hydrated, error } = useAppNetwork();
+  const { products } = useAppLedger();
+  const getProductTitle = (pid: string) => products.find((p) => p.id === pid)?.title ?? pid;
   const person = people.find((p) => p.id === id);
 
   if (hydrated && !person) {
@@ -29,7 +30,16 @@ export default function PersonDetailPage() {
   }
 
   if (!person) {
-    return <Header title="People" subtitle="Loading…" />;
+    return (
+      <>
+        <Header title="People" subtitle="Loading…" />
+        {error ? (
+          <main className="px-8 py-4">
+            <p className="text-sm text-aarla-red">{error}</p>
+          </main>
+        ) : null}
+      </>
+    );
   }
 
   const regs = registrations.filter((r) => r.userId === person.id || r.customerId === person.id);

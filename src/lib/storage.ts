@@ -84,6 +84,10 @@ function getServerSnapshot() {
   return "";
 }
 
+/**
+ * @deprecated LocalStorage people/registrations hook.
+ * Screens use `useAppNetwork` (Postgres) instead.
+ */
 export function useNetworkStore() {
   const peopleRaw = useSyncExternalStore(subscribe, getPeopleSnapshot, getServerSnapshot);
   const regsRaw = useSyncExternalStore(subscribe, getRegsSnapshot, getServerSnapshot);

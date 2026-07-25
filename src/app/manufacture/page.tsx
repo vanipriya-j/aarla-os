@@ -1,6 +1,6 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger } from "@/lib/client/use-app-data";
 import { useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +8,6 @@ import { Field, FormSection, inputClass, selectClass } from "@/components/ui/For
 import { Modal } from "@/components/ui/Modal";
 import { StepWorkflow } from "@/components/ui/StepWorkflow";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { getProductTitle, getVendorName, products, vendors } from "@/lib/domain";
 import { CheckCircle2, FileText, Mail, MessageSquare, Paperclip } from "lucide-react";
 
 type OrderMode = "new" | "reorder" | "quick";
@@ -22,7 +21,9 @@ const steps = [
 ];
 
 export default function ManufacturePage() {
-  const { purchaseOrders, createManufacturingPO } = useLedger();
+  const { purchaseOrders, createManufacturingPO, products, vendors, error } = useAppLedger();
+  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
+  const getVendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<OrderMode>("new");
   const [formType, setFormType] = useState<VendorForm>("bottle");
@@ -36,15 +37,15 @@ export default function ManufacturePage() {
 
   const bottleVendors = useMemo(
     () => vendors.filter((v) => v.category.toLowerCase().includes("bottle")),
-    [],
+    [vendors],
   );
   const magnetVendors = useMemo(
     () => vendors.filter((v) => v.category.toLowerCase().includes("magnet") || v.id === "vendor-pondy"),
-    [],
+    [vendors],
   );
 
-  const approve = () => {
-    const po = createManufacturingPO({
+  const approve = async () => {
+    const po = await createManufacturingPO({
       vendorId,
       productId,
       quantity,
@@ -61,6 +62,7 @@ export default function ManufacturePage() {
         subtitle="Raises a canonical Purchase Order. Stock enters the ledger when you Receive."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-5xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <div className="card-surface p-4">
           <StepWorkflow steps={steps} current={step} onStepClick={setStep} />
         </div>

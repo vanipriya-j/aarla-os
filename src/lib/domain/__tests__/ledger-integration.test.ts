@@ -8,6 +8,7 @@ import {
   ensureSeededMovements,
   getMovements,
   getPurchaseOrders,
+  locations,
   movementsSeed,
   partnerStockFor,
   receiveAgainstPO,
@@ -113,7 +114,7 @@ describe("ledger LocalStorage integration", () => {
 
   it("5. partner sale reduces partner stock", () => {
     const productId = "prod-kolam-bottle";
-    const before = partnerStockFor(getMovements(), "partner-freshly").find(
+    const before = partnerStockFor(getMovements(), "partner-freshly", locations).find(
       (s) => s.productId === productId,
     )?.quantity;
     expect(before).toBeGreaterThan(0);
@@ -126,7 +127,7 @@ describe("ledger LocalStorage integration", () => {
     });
     expect(mv).not.toBeNull();
 
-    const after = partnerStockFor(getMovements(), "partner-freshly").find(
+    const after = partnerStockFor(getMovements(), "partner-freshly", locations).find(
       (s) => s.productId === productId,
     )?.quantity;
     expect(after).toBe((before ?? 0) - 1);
@@ -213,8 +214,9 @@ describe("ledger LocalStorage integration", () => {
     expect(balanceAt(deriveBalances(getMovements()), productId, LOC.studio)).toBe(studio);
 
     const partnerQty =
-      partnerStockFor(getMovements(), "partner-freshly").find((s) => s.productId === productId)
-        ?.quantity ?? 0;
+      partnerStockFor(getMovements(), "partner-freshly", locations).find(
+        (s) => s.productId === productId,
+      )?.quantity ?? 0;
     const saleFail = recordPartnerSale({
       productId,
       partnerId: "partner-freshly",

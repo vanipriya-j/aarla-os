@@ -1,62 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { listStoryHampersAction } from "@/app/actions/app-actions";
 import type { HamperOption } from "@/lib/types";
 import { Check, Gift } from "lucide-react";
 
-const mockOptions: HamperOption[] = [
-  {
-    id: "h1",
-    name: "Chennai Classroom Classic",
-    products: ["Chennai Market Tote", "Ganapathi Fridge Magnet Set", "Amman Stories — Children's Book"],
-    packaging: "Kraft sleeve + mustard ribbon + thank-you card",
-    cost: 720,
-    sellingPrice: 1450,
-    margin: 50.3,
-    existingInventory: ["Chennai Market Tote (64)", "Ganapathi Fridge Magnet Set (210)", "Amman Stories (120)"],
-    toManufacture: ["Thank-you cards × 100"],
-    leadTimeDays: 7,
-  },
-  {
-    id: "h2",
-    name: "Ritual Desk Companion",
-    products: [
-      "Lakshmi Brass Davara Tumbler",
-      "Bharatanatyam Gesture Pouch",
-      "Ganapathi Fridge Magnet Set",
-    ],
-    packaging: "Soft beige box + tissue + QR story card",
-    cost: 1080,
-    sellingPrice: 2200,
-    margin: 50.9,
-    existingInventory: ["Bharatanatyam Gesture Pouch (88)", "Ganapathi Fridge Magnet Set (210)"],
-    toManufacture: ["Lakshmi Brass Davara Tumbler × 82 (reorder)", "QR story cards × 100"],
-    leadTimeDays: 28,
-  },
-  {
-    id: "h3",
-    name: "Festival Light Hamper",
-    products: ["Muruga Water Bottle — 750ml", "Navarathri Magnet Assortment", "Story card pack"],
-    packaging: "Reusable tote wrap + tissue + festive seal (restrained)",
-    cost: 890,
-    sellingPrice: 1850,
-    margin: 51.9,
-    existingInventory: ["Muruga Water Bottle — 750ml (42)"],
-    toManufacture: ["Navarathri Magnet Assortment × 100", "Story card pack × 100", "Bottles × 58"],
-    leadTimeDays: 18,
-  },
-];
-
 export default function StoryPage() {
+  const [options, setOptions] = useState<HamperOption[]>([]);
   const [generated, setGenerated] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    void (async () => {
+      const res = await listStoryHampersAction();
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setOptions(res.data as HamperOption[]);
+    })();
+  }, []);
 
   const generate = () => {
     setGenerated(true);
@@ -75,6 +46,7 @@ export default function StoryPage() {
         subtitle="Custom gifting, institutional orders, event merchandise and hampers."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         {toast ? (
           <div className="rounded-xl bg-muted-green/30 border border-muted-green/50 px-4 py-3 text-sm text-deep-navy">
             {toast}
@@ -140,7 +112,7 @@ export default function StoryPage() {
               </Button>
             </div>
             <div className="grid lg:grid-cols-3 gap-4">
-              {mockOptions.map((opt) => {
+              {options.map((opt) => {
                 const on = selected === opt.id;
                 return (
                   <button

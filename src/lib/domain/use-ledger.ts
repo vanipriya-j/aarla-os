@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
+  DEFAULT_INVENTORY_LOC,
   createOrGetManufacturingPO,
   deriveBalances,
   deriveInventorySnapshots,
@@ -11,10 +12,13 @@ import {
   recordPartnerSale,
   transferToPartner,
 } from "./ledger";
-import { purchaseOrdersSeed } from "./catalog";
+import { locations, products, purchaseOrdersSeed } from "./catalog";
 import type { PurchaseOrder, StockMovement } from "./types";
 
-/** React hook — ledger + derived inventory + PO list. */
+/**
+ * @deprecated LocalStorage ledger hook. Screens use `useAppLedger` (Postgres) instead.
+ * Kept temporarily for pure unit tests that still exercise in-memory writers.
+ */
 export function useLedger() {
   const movementsRaw = useSyncExternalStore(
     ledgerStore.subscribe,
@@ -41,7 +45,10 @@ export function useLedger() {
     [posRaw],
   );
 
-  const snapshots = useMemo(() => deriveInventorySnapshots(movements), [movements]);
+  const snapshots = useMemo(
+    () => deriveInventorySnapshots(movements, products, locations, DEFAULT_INVENTORY_LOC),
+    [movements],
+  );
   const balances = useMemo(() => deriveBalances(movements), [movements]);
 
   const receive = useCallback((input: Parameters<typeof receiveAgainstPO>[0]) => {

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { projects } from "@/lib/mock-data";
+import { listProjects } from "@/lib/application/services";
+import type { Project } from "@/lib/types";
 import { FolderKanban } from "lucide-react";
 
 function formatINR(n: number) {
@@ -12,7 +13,15 @@ function formatINR(n: number) {
   }).format(n);
 }
 
-export default function ProjectsPage() {
+export default async function ProjectsPage() {
+  let projects: Project[] = [];
+  let error: string | null = null;
+  try {
+    projects = (await listProjects()) as Project[];
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+
   return (
     <>
       <Header
@@ -20,6 +29,7 @@ export default function ProjectsPage() {
         subtitle="Worlds, client work, sourcing trips and launches in one place."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <div className="grid md:grid-cols-2 gap-4">
           {projects.map((p, i) => (
             <Link

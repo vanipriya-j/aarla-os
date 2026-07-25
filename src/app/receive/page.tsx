@@ -1,13 +1,12 @@
 "use client";
 
-import { useLedger } from "@/lib/domain/use-ledger";
+import { useAppLedger } from "@/lib/client/use-app-data";
 import { useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { StepWorkflow } from "@/components/ui/StepWorkflow";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { getProductTitle, getVendorName } from "@/lib/domain";
 import { Barcode, CheckCircle2, ImageIcon, Printer } from "lucide-react";
 
 const steps = [
@@ -20,7 +19,9 @@ const steps = [
 ];
 
 export default function ReceivePage() {
-  const { purchaseOrders, receive } = useLedger();
+  const { purchaseOrders, receive, products, vendors, error } = useAppLedger();
+  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
+  const getVendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
   const receivable = useMemo(
     () =>
       purchaseOrders.filter((p) =>
@@ -60,9 +61,9 @@ export default function ReceivePage() {
     }
   };
 
-  const postToLedger = () => {
+  const postToLedger = async () => {
     if (!po) return;
-    const result = receive({
+    const result = await receive({
       poId: po.id,
       accepted,
       damaged,
@@ -79,6 +80,7 @@ export default function ReceivePage() {
         subtitle="QC inbound stock and post Purchase Receipt / Damage movements to the ledger."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-4xl">
+        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         <div className="card-surface p-4">
           <StepWorkflow steps={steps} current={step} onStepClick={(i) => i <= step && setStep(i)} />
         </div>

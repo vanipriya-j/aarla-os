@@ -9,10 +9,25 @@ import {
 import type {
   InventoryBalance,
   InventorySnapshot,
+  Location,
   MovementType,
+  Product,
   PurchaseOrder,
   StockMovement,
 } from "./types";
+
+/** Location codes used when projecting inventory snapshots. */
+export interface InventoryLocCodes {
+  studio: string;
+  shopify: string;
+  damage: string;
+}
+
+export const DEFAULT_INVENTORY_LOC: InventoryLocCodes = {
+  studio: LOC.studio,
+  shopify: LOC.shopify,
+  damage: LOC.damage,
+};
 
 const MOVEMENTS_KEY = "aarla-os-ledger-movements-v1";
 const POS_KEY = "aarla-os-purchase-orders-v1";
@@ -454,19 +469,24 @@ export function balanceAt(
   return balances.find((b) => b.productId === productId && b.locationId === locationId)?.quantity ?? 0;
 }
 
-/** Snapshot used by Inventory UI and dashboard. */
-export function deriveInventorySnapshots(movements: StockMovement[]): InventorySnapshot[] {
+/** Snapshot used by Inventory UI and dashboard. Catalog must be passed (DB-loaded or seed). */
+export function deriveInventorySnapshots(
+  movements: StockMovement[],
+  catalogProducts: Pick<Product, "id">[],
+  catalogLocations: Location[],
+  locCodes: InventoryLocCodes = DEFAULT_INVENTORY_LOC,
+): InventorySnapshot[] {
   const balances = deriveBalances(movements);
-  const partnerLocIds = locations.filter((l) => l.kind === "Partner").map((l) => l.id);
+  const partnerLocIds = catalogLocations.filter((l) => l.kind === "Partner").map((l) => l.id);
 
-  return products.map((p) => {
-    const studioStock = Math.max(balanceAt(balances, p.id, LOC.studio), 0);
+  return catalogProducts.map((p) => {
+    const studioStock = Math.max(balanceAt(balances, p.id, locCodes.studio), 0);
     const partnerStock = partnerLocIds.reduce(
       (sum, locId) => sum + Math.max(balanceAt(balances, p.id, locId), 0),
       0,
     );
-    const channelStock = Math.max(balanceAt(balances, p.id, LOC.shopify), 0);
-    const damaged = Math.max(balanceAt(balances, p.id, LOC.damage), 0);
+    const channelStock = Math.max(balanceAt(balances, p.id, locCodes.shopify), 0);
+    const damaged = Math.max(balanceAt(balances, p.id, locCodes.damage), 0);
     const reserved = channelStock; // Shopify pool treated as reserved for fulfilment
     const available = studioStock;
     const totalOnHand = studioStock + partnerStock + channelStock;
@@ -487,8 +507,9 @@ export function deriveInventorySnapshots(movements: StockMovement[]): InventoryS
 export function partnerStockFor(
   movements: StockMovement[],
   partnerId: string,
+  catalogLocations: Location[],
 ): { productId: string; quantity: number }[] {
-  const loc = locations.find((l) => l.partnerId === partnerId);
+  const loc = catalogLocations.find((l) => l.partnerId === partnerId);
   if (!loc) return [];
   const balances = deriveBalances(movements).filter(
     (b) => b.locationId === loc.id && b.quantity > 0,
@@ -715,7 +736,7 @@ export function transferToPartner(input: {
   const loc = locations.find((l) => l.partnerId === input.partnerId);
   if (!loc || input.quantity <= 0) return null;
 
-  const snapshots = deriveInventorySnapshots(getMovements());
+  const snapshots = deriveInventorySnapshots(getMovements(), products, locations, DEFAULT_INVENTORY_LOC);
   const snap = snapshots.find((s) => s.productId === input.productId);
   if (!snap || snap.available < input.quantity) return null;
 
