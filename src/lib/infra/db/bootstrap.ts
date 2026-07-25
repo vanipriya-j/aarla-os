@@ -20,10 +20,24 @@ export async function bootstrapDatabase(options: {
   const client = new Client({
     connectionString: url,
     ssl: shouldUseSsl(url) ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 15_000,
+    connectionTimeoutMillis: 20_000,
   });
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const looksLikeTimeout = /timeout|ETIMEDOUT|ENETUNREACH|ECONNREFUSED/i.test(
+      message,
+    );
+    if (looksLikeTimeout) {
+      throw new Error(
+        `Cannot reach Postgres (${message}). On Vercel, use Supabase’s Session pooler URI — not the direct db.*.supabase.co host. In Supabase: Project Settings → Database → Connection string → Method: Session pooler → URI. Put that in Vercel DATABASE_URL, Redeploy, try again.`,
+      );
+    }
+    throw err;
+  }
+
   try {
     const migrate = await runMigrations(client);
 
