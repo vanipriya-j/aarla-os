@@ -4,8 +4,12 @@ import { ConfigurationError } from "./errors";
  * Resolve the Postgres connection string.
  *
  * Priority:
- * 1. DATABASE_URL (local Docker, Supabase Local, or Supabase Cloud direct URI)
+ * 1. DATABASE_URL (local Docker, Supabase Local, or Supabase Cloud URI)
  * 2. SUPABASE_DB_URL (explicit cloud DB URI from Supabase dashboard)
+ *
+ * On Vercel, Supabase Session pooler (port 5432) is rewritten to Transaction
+ * pooler (port 6543) unless DATABASE_POOL_MODE=session — session mode caps at
+ * ~15 clients and exhausts quickly with serverless.
  */
 export function resolveDatabaseUrl(): string {
   const url =
@@ -17,9 +21,35 @@ export function resolveDatabaseUrl(): string {
     throw new ConfigurationError(
       "DATABASE_URL (or SUPABASE_DB_URL) is not set. " +
         "For local: copy .env.example → .env.local and run npm run db:start. " +
-        "For Vercel: add the Supabase Postgres connection string in Project → Settings → Environment Variables. " +
+        "For Vercel: add the Supabase Transaction pooler URI (port 6543). " +
         "See docs/supabase-vercel.md.",
     );
+  }
+  return normalizeDatabaseUrlForRuntime(url);
+}
+
+/**
+ * Prefer Transaction pooler on Vercel (port 6543) to avoid MaxClientsInSessionMode.
+ */
+export function normalizeDatabaseUrlForRuntime(url: string): string {
+  if (process.env.DATABASE_POOL_MODE === "session") return url;
+  if (process.env.DATABASE_POOL_MODE === "transaction") {
+    return forceTransactionPoolerPort(url);
+  }
+  // Default on Vercel: transaction pooler
+  if (process.env.VERCEL === "1") {
+    return forceTransactionPoolerPort(url);
+  }
+  return url;
+}
+
+function forceTransactionPoolerPort(url: string): string {
+  if (!url.includes("pooler.supabase.com")) return url;
+  if (url.includes(":6543/")) return url;
+  // Session pooler uses :5432 on the same host — flip to transaction mode.
+  // String replace avoids re-encoding passwords via URL.toString().
+  if (url.includes(":5432/")) {
+    return url.replace(":5432/", ":6543/");
   }
   return url;
 }
@@ -53,4 +83,12 @@ export function shouldUseSsl(url: string): boolean {
 
 export function getSupabaseProjectUrl(): string | null {
   return process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || null;
+}
+
+/** Default pg pool size: 1 on Vercel (serverless), 10 locally. */
+export function defaultPoolMax(): number {
+  if (process.env.DATABASE_POOL_MAX) {
+    return Number(process.env.DATABASE_POOL_MAX);
+  }
+  return process.env.VERCEL === "1" ? 1 : 10;
 }
