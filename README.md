@@ -27,8 +27,8 @@ npm run test:all      # Vitest + Playwright
 npm run db:reset      # migrate + seed
 ```
 
-- Local DB: `docs/local-database.md`
-- **Vercel + Supabase Cloud:** `docs/supabase-vercel.md`
+- **No laptop:** Supabase + Vercel env vars + `/setup` — `docs/supabase-vercel.md`
+- Local DB (optional): `docs/local-database.md`
 - Migration plan: `docs/persistence-migration-plan.md`
 
 ## Project structure
