@@ -34,6 +34,11 @@ Stock Movement Ledger (append-only, Postgres)
         ├── Partner stock (derived)
         ├── Journey / Traceability (projected)
         └── Dashboard capital-in-inventory (derived)
+
+Creative Universe (separate graph — see docs/aarla-universe.md)
+  CreativeNode · CreativeRelationship · AffinityEngine (rule-based)
+  UI: /explore · /universe/[nodeId]
+  Mutator: CreativeEngine (not Business Engine; no stock mutation)
 ```
 
 Inventory quantities are **never** stored as editable balances. Corrections use compensating movements. Stock movements are immutable after commit (DB triggers reject UPDATE/DELETE).
