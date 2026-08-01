@@ -37,7 +37,7 @@ export const primaryTiles: NavItem[] = [
     label: "Explore an Idea",
     href: "/explore",
     icon: Compass,
-    description: "Turn a theme or motif into product opportunities.",
+    description: "Map a thought across the Aarla Universe — worlds, concepts, objects and stories.",
   },
   {
     label: "Your Story. Our Telling.",

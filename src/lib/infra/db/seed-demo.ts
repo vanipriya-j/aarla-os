@@ -29,6 +29,7 @@ import {
   tipPrompts,
 } from "@/lib/mock-data";
 import { ORG_CODE, ORG_ID, stableId } from "./ids";
+import { seedUniverse } from "./seed-universe";
 
 type DbClient = Pick<PoolClient, "query">;
 
@@ -135,6 +136,12 @@ async function truncateAll(client: DbClient) {
   log("truncating all tables (CASCADE)…");
   await client.query(`
     truncate table
+      creative_events,
+      creative_node_notes,
+      creative_node_assets,
+      creative_node_aliases,
+      creative_relationships,
+      creative_nodes,
       story_hamper_options,
       advice_snippets,
       demo_metric_snapshots,
@@ -657,4 +664,7 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
       ],
     );
   }
+
+  // --- Aarla Universe creative graph ---
+  await seedUniverse(client);
 }

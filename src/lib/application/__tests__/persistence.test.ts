@@ -33,10 +33,11 @@ describe.runIf(hasDb)("Postgres persistence (application services)", () => {
 
   it("purchase order creation persists", async () => {
     const id = `PO-PERSIST-${runId}`;
+    const quantity = 1000 + (Number(runId.slice(-5)) % 8000);
     const po = await createManufacturingPO({
       vendorId: "vendor-velan",
       productId: "prod-muruga-bottle",
-      quantity: 17,
+      quantity,
       unitCost: 320,
       requiredDate: "2026-09-15",
       id,
