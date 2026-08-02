@@ -1,0 +1,196 @@
+import type { DelhiveryConnector } from "@/lib/adapters/delhivery/port";
+import {
+  chunkAwbs,
+  dedupeAwbs,
+  isDelhiveryCarrier,
+  normalizeAwb,
+} from "@/lib/adapters/delhivery/normalize";
+import { createLiveDelhiveryConnectorFromEnv } from "@/lib/adapters/delhivery/live-tracking-connector";
+import { FixtureDelhiveryConnector } from "@/lib/adapters/delhivery/fixture-connector";
+import { createShipmentRepository } from "@/lib/infra/repositories/postgres-shipments";
+import type {
+  FulfilmentTrackingRow,
+  ShipmentRepository,
+} from "@/lib/repositories/shipments";
+import {
+  emptyDelhiverySyncSummary,
+  tallyNormalizedStatus,
+  type DelhiverySyncSummary,
+  type ShipmentDiagnosticRow,
+} from "@/lib/domain/shipment-types";
+import { ConfigurationError } from "@/lib/infra/db/errors";
+
+export type SyncDelhiveryDeps = {
+  connector?: DelhiveryConnector;
+  repo?: ShipmentRepository;
+};
+
+function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
+  if (deps.connector) return deps.connector;
+  // Opt-in fixture mode for local/e2e — never enabled in production by default.
+  if (process.env.DELHIVERY_USE_FIXTURE === "1") {
+    return new FixtureDelhiveryConnector();
+  }
+  const live = createLiveDelhiveryConnectorFromEnv();
+  if (!live) {
+    throw new ConfigurationError(
+      "Delhivery credentials missing. Set DELHIVERY_API_TOKEN on the server.",
+    );
+  }
+  return live;
+}
+
+type AwbLink = {
+  awb: string;
+  rows: FulfilmentTrackingRow[];
+  ambiguous: boolean;
+};
+
+function buildAwbLinks(fulfilments: FulfilmentTrackingRow[]): {
+  evaluated: number;
+  delhiveryFound: number;
+  skipped: number;
+  links: AwbLink[];
+} {
+  let evaluated = 0;
+  let delhiveryFound = 0;
+  let skipped = 0;
+  const byAwb = new Map<string, FulfilmentTrackingRow[]>();
+
+  for (const row of fulfilments) {
+    evaluated += 1;
+    if (!isDelhiveryCarrier(row.trackingCompany, row.trackingUrl)) {
+      skipped += 1;
+      continue;
+    }
+    const awb = normalizeAwb(row.trackingNumber);
+    if (!awb) {
+      skipped += 1;
+      continue;
+    }
+    delhiveryFound += 1;
+    const list = byAwb.get(awb) ?? [];
+    list.push(row);
+    byAwb.set(awb, list);
+  }
+
+  const links: AwbLink[] = [...byAwb.entries()].map(([awb, rows]) => ({
+    awb,
+    rows,
+    ambiguous: rows.length > 1,
+  }));
+
+  return { evaluated, delhiveryFound, skipped, links };
+}
+
+/**
+ * Sync Delhivery tracking for AWBs from Shopify fulfilments.
+ * Does not create Customer Call queue items or mutate Shopify sync tables.
+ */
+export async function syncDelhiveryShipments(
+  deps: SyncDelhiveryDeps = {},
+): Promise<DelhiverySyncSummary> {
+  const summary = emptyDelhiverySyncSummary();
+  const repo = deps.repo ?? createShipmentRepository();
+  const connector = resolveConnector(deps);
+
+  const fulfilments = await repo.listFulfilmentsWithOrders();
+  const { evaluated, delhiveryFound, skipped, links } = buildAwbLinks(fulfilments);
+  summary.fulfilmentsEvaluated = evaluated;
+  summary.delhiveryAwbsFound = delhiveryFound;
+  summary.skippedRecords = skipped;
+  summary.ambiguousAwbLinkages = links.filter((l) => l.ambiguous).length;
+
+  const awbs = dedupeAwbs(links.map((l) => l.awb));
+  summary.uniqueAwbsTracked = awbs.length;
+
+  if (!awbs.length) {
+    return summary;
+  }
+
+  const linkByAwb = new Map(links.map((l) => [l.awb, l]));
+  let tracked;
+
+  try {
+    tracked = [];
+    for (const batch of chunkAwbs(awbs, 30)) {
+      tracked.push(...(await connector.trackShipments(batch)));
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Delhivery fetch failed";
+    summary.errors.push(message);
+    summary.failedLookups += awbs.length;
+    for (const awb of awbs) {
+      await repo.markSyncFailure("delhivery", awb, "error", message);
+    }
+    return summary;
+  }
+
+  for (const result of tracked) {
+    const link = linkByAwb.get(result.awb);
+    const primary = link?.rows[0];
+    const orderId = link?.ambiguous
+      ? // only link order if all rows share the same order
+        link.rows.every((r) => r.orderId === primary?.orderId)
+        ? primary?.orderId ?? null
+        : null
+      : primary?.orderId ?? null;
+    const fulfilmentId = link?.ambiguous ? null : primary?.fulfilmentId ?? null;
+
+    const ok = result.syncStatus === "ok";
+    if (!ok) {
+      summary.failedLookups += 1;
+      if (result.error) summary.errors.push(`${result.awb}: ${result.error}`);
+    }
+
+    try {
+      const existing = await repo.findByCarrierAwb("delhivery", result.awb);
+      const upsert = await repo.upsertShipment({
+        carrier: "delhivery",
+        awb: result.awb,
+        externalOrderId: orderId,
+        externalFulfilmentId: fulfilmentId,
+        providerStatus: result.providerStatus ?? null,
+        providerStatusType: result.providerStatusType ?? null,
+        normalizedStatus: result.normalizedStatus,
+        deliveredAt: result.deliveredAt ?? null,
+        latestScanAt: result.latestScanAt ?? null,
+        latestScanLocation: result.latestScanLocation ?? null,
+        syncStatus: result.syncStatus,
+        syncError: result.error ?? null,
+        rawProviderPayload: result.rawProviderPayload,
+        applyTrackingUpdate: ok,
+      });
+
+      if (upsert.created) summary.shipmentsCreated += 1;
+      else summary.shipmentsUpdated += 1;
+
+      const statusForTally = ok
+        ? upsert.shipment.normalizedStatus
+        : existing?.normalizedStatus ?? upsert.shipment.normalizedStatus;
+      if (ok) tallyNormalizedStatus(summary, statusForTally);
+
+      if (ok && result.scans?.length) {
+        await repo.appendStatusEvents({
+          shipmentId: upsert.id,
+          awb: result.awb,
+          scans: result.scans,
+        });
+      }
+    } catch (err) {
+      summary.failedLookups += 1;
+      summary.errors.push(
+        `${result.awb}: ${err instanceof Error ? err.message : "persist failed"}`,
+      );
+    }
+  }
+
+  return summary;
+}
+
+export async function getDelhiveryShipmentDiagnostics(
+  deps: { repo?: ShipmentRepository } = {},
+): Promise<ShipmentDiagnosticRow[]> {
+  const repo = deps.repo ?? createShipmentRepository();
+  return repo.listDiagnostics();
+}

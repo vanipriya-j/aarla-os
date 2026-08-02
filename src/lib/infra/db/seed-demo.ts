@@ -31,6 +31,7 @@ import {
 import { ORG_CODE, ORG_ID, stableId } from "./ids";
 import { seedUniverse } from "./seed-universe";
 import { seedCustomerCalls } from "./seed-customer-calls";
+import { seedDelhiveryDemoCommerce } from "./seed-delhivery-demo";
 
 type DbClient = Pick<PoolClient, "query">;
 
@@ -137,6 +138,12 @@ async function truncateAll(client: DbClient) {
   log("truncating all tables (CASCADE)…");
   await client.query(`
     truncate table
+      shipment_status_events,
+      shipments,
+      external_fulfilments,
+      external_order_items,
+      external_orders,
+      external_customers,
       customer_interactions,
       customer_call_queue_items,
       customer_contact_preferences,
@@ -675,4 +682,7 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
 
   // --- Customer Calls (seeded queues) ---
   await seedCustomerCalls(client);
+
+  // --- Shopify fulfilment AWBs for Delhivery sync / e2e (no live Shopify call) ---
+  await seedDelhiveryDemoCommerce(client);
 }
