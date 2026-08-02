@@ -12,6 +12,7 @@ import {
   type CallFormState,
 } from "@/components/customer-calls/CallWorkspaceModal";
 import { ShopifySyncPanel } from "@/components/customer-calls/ShopifySyncPanel";
+import { DelhiverySyncPanel } from "@/components/customer-calls/DelhiverySyncPanel";
 import {
   callLaterCustomerCallAction,
   getCustomerCallHistoryAction,
@@ -155,6 +156,7 @@ export default function CustomerCallsPage() {
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
 
         <ShopifySyncPanel />
+        <DelhiverySyncPanel />
 
         <div className="flex flex-wrap gap-2" data-testid="calls-tabs">
           {(

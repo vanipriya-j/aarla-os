@@ -10,6 +10,8 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules", ".next", "e2e/**"],
     css: false,
+    // Integration tests share one Postgres database — avoid cross-file races.
+    fileParallelism: false,
   },
   resolve: {
     alias: {
