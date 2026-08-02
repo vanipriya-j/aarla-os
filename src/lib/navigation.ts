@@ -13,6 +13,7 @@ import {
   PackageCheck,
   Palette,
   Rocket,
+  Phone,
   ScanLine,
   Store,
   Truck,
@@ -122,6 +123,16 @@ export const networkNav: NavItem[] = [
   },
 ];
 
+/** Outreach links — rendered near the bottom of the sidebar. */
+export const outreachNav: NavItem[] = [
+  {
+    label: "Customer Calls",
+    href: "/customer-calls",
+    icon: Phone,
+    description: "Delivery follow-ups and re-engagement calls.",
+  },
+];
+
 export const sidebarNav: NavItem[] = [
   {
     label: "Home",
@@ -131,6 +142,7 @@ export const sidebarNav: NavItem[] = [
   },
   ...primaryTiles,
   ...networkNav,
+  ...outreachNav,
   {
     label: "Checklists",
     href: "/launch",

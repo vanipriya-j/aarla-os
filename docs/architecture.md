@@ -39,6 +39,11 @@ Creative Universe (separate graph — see docs/aarla-universe.md)
   CreativeNode · CreativeRelationship · AffinityEngine (rule-based)
   UI: /explore · /universe/[nodeId]
   Mutator: CreativeEngine (not Business Engine; no stock mutation)
+
+Customer Calls (seeded outreach — see docs/customer-calls.md)
+  Segments · Queue items · Interactions · Contact preferences
+  UI: /customer-calls
+  Mutator: CustomerCallsEngine (no Shopify/Delhivery yet)
 ```
 
 Inventory quantities are **never** stored as editable balances. Corrections use compensating movements. Stock movements are immutable after commit (DB triggers reject UPDATE/DELETE).
