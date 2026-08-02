@@ -116,6 +116,7 @@ export async function getDiagnosticsReport(
     "shipment_status_events",
     "customer_call_segments",
     "customer_call_queue_items",
+    "commerce_sync_locks",
   ];
 
   const tables: Record<string, boolean> = {};

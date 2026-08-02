@@ -16,6 +16,7 @@ import {
   emptyShopifySyncSummary,
   mergeShopifySyncSummaries,
 } from "@/lib/domain/external-commerce-types";
+import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { RefreshCw } from "lucide-react";
 
 function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
@@ -82,7 +83,7 @@ export function ShopifySyncPanel() {
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
-    const maxChunks = 80; // safety: 80 × ~150 orders
+    const maxChunks = 120; // safety: 120 × ~50 orders
 
     try {
       while (guard < maxChunks) {
@@ -92,7 +93,15 @@ export function ShopifySyncPanel() {
             ? `Syncing chunk ${guard} (continuing)…`
             : `Syncing chunk ${guard}…`,
         );
-        const res = await syncShopifyCustomerCallDataAction(cursor, token);
+        let res;
+        try {
+          res = await syncShopifyCustomerCallDataAction(cursor, token);
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
+          setStatus(null);
+          return;
+        }
         if (!res.ok) {
           setError(res.error);
           setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
@@ -119,6 +128,9 @@ export function ShopifySyncPanel() {
       const diag = await getShopifyCommerceDiagnosticsAction();
       setDiagnosticsLoaded(true);
       if (diag.ok) setDiagnostics(diag.data);
+    } catch (err) {
+      setError(formatCommerceSyncFailure(err));
+      setStatus(null);
     } finally {
       await endSync(token);
     }

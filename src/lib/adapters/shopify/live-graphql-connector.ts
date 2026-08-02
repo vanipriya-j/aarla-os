@@ -268,7 +268,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     let hasNext = true;
     let pages = 0;
     // Keep each serverless invocation short (Vercel timeouts).
-    const maxPages = Math.max(1, Math.min(options.maxPages ?? 3, 10));
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 1, 10));
 
     while (hasNext && pages < maxPages) {
       pages += 1;
@@ -303,7 +303,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     // Back-compat: pull up to a bounded number of pages in one call.
     const page = await this.fetchCustomerCallPage({
       cursor: options.cursor,
-      maxPages: options.maxPages ?? 3,
+      maxPages: options.maxPages ?? 1,
     });
     return { customers: page.customers, orders: page.orders };
   }

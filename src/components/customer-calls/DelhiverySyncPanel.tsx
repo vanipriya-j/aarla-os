@@ -16,6 +16,7 @@ import {
   emptyDelhiverySyncSummary,
   mergeDelhiverySyncSummaries,
 } from "@/lib/domain/shipment-types";
+import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { Truck } from "lucide-react";
 
 function SummaryGrid({ summary }: { summary: DelhiverySyncSummary }) {
@@ -96,7 +97,17 @@ export function DelhiverySyncPanel() {
             ? `Syncing chunk ${guard} (offset ${offset})…`
             : `Syncing chunk ${guard}…`,
         );
-        const res = await syncDelhiveryShipmentsAction(offset, token);
+        let res;
+        try {
+          res = await syncDelhiveryShipmentsAction(offset, token);
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setSummary(
+            (total.awbsProcessed ?? 0) > 0 || total.shipmentsCreated > 0 ? total : null,
+          );
+          setStatus(null);
+          return;
+        }
         if (!res.ok) {
           setError(res.error);
           setSummary(
@@ -125,6 +136,9 @@ export function DelhiverySyncPanel() {
       const diag = await getDelhiveryShipmentDiagnosticsAction();
       setDiagnosticsLoaded(true);
       if (diag.ok) setRows(diag.data);
+    } catch (err) {
+      setError(formatCommerceSyncFailure(err));
+      setStatus(null);
     } finally {
       await endSync(token);
     }

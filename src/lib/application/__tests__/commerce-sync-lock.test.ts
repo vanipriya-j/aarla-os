@@ -37,7 +37,7 @@ describe.runIf(hasDb)("commerce sync lock", () => {
     const blocked = await acquireOrRenewCommerceSyncLock("token-b", "delhivery");
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) {
-      expect(blocked.error).toMatch(/already in progress/i);
+      expect(blocked.error).toMatch(/already in progress|stuck sync lock/i);
     }
 
     const renew = await acquireOrRenewCommerceSyncLock("token-a", "delhivery");
@@ -50,5 +50,21 @@ describe.runIf(hasDb)("commerce sync lock", () => {
     const again = await acquireOrRenewCommerceSyncLock("token-b", "shopify");
     expect(again).toEqual({ ok: true });
     await releaseCommerceSyncLock("token-b");
+  });
+
+  it("force-clear unlocks for a new holder", async () => {
+    const { forceClearCommerceSyncLock } = await import(
+      "@/lib/application/commerce-sync-lock"
+    );
+    await query(`delete from commerce_sync_locks`);
+    expect(await acquireOrRenewCommerceSyncLock("stuck", "shopify")).toEqual({
+      ok: true,
+    });
+    await forceClearCommerceSyncLock();
+    expect((await getCommerceSyncLockStatus()).locked).toBe(false);
+    expect(await acquireOrRenewCommerceSyncLock("fresh", "delhivery")).toEqual({
+      ok: true,
+    });
+    await releaseCommerceSyncLock("fresh");
   });
 });
