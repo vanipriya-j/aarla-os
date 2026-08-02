@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
@@ -16,6 +16,7 @@ import {
   emptyShopifySyncSummary,
   mergeShopifySyncSummaries,
 } from "@/lib/domain/external-commerce-types";
+import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { RefreshCw } from "lucide-react";
 
 function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
@@ -58,7 +59,7 @@ export function ShopifySyncPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  function loadDiagnostics() {
+  const loadDiagnostics = useCallback(() => {
     startDiagTransition(async () => {
       const res = await getShopifyCommerceDiagnosticsAction();
       setDiagnosticsLoaded(true);
@@ -68,7 +69,12 @@ export function ShopifySyncPanel() {
       }
       setDiagnostics(res.data);
     });
-  }
+  }, []);
+
+  // Cheap aggregated query — safe to show on open (not a sync).
+  useEffect(() => {
+    loadDiagnostics();
+  }, [loadDiagnostics]);
 
   async function handleSync() {
     const token = beginSync("shopify");
@@ -82,7 +88,7 @@ export function ShopifySyncPanel() {
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
-    const maxChunks = 80; // safety: 80 × ~150 orders
+    const maxChunks = 120; // safety: 120 × ~50 orders
 
     try {
       while (guard < maxChunks) {
@@ -92,7 +98,15 @@ export function ShopifySyncPanel() {
             ? `Syncing chunk ${guard} (continuing)…`
             : `Syncing chunk ${guard}…`,
         );
-        const res = await syncShopifyCustomerCallDataAction(cursor, token);
+        let res;
+        try {
+          res = await syncShopifyCustomerCallDataAction(cursor, token);
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
+          setStatus(null);
+          return;
+        }
         if (!res.ok) {
           setError(res.error);
           setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
@@ -119,6 +133,9 @@ export function ShopifySyncPanel() {
       const diag = await getShopifyCommerceDiagnosticsAction();
       setDiagnosticsLoaded(true);
       if (diag.ok) setDiagnostics(diag.data);
+    } catch (err) {
+      setError(formatCommerceSyncFailure(err));
+      setStatus(null);
     } finally {
       await endSync(token);
     }
@@ -172,7 +189,7 @@ export function ShopifySyncPanel() {
 
       <FormSection
         title="Synced commerce diagnostics"
-        description="Review-only view (up to 100 rows). Personal data is masked. Not loaded until you ask."
+        description="Review-only view (up to 100 rows). Personal data is masked. Sync progress cards above clear on refresh — these rows are what is saved."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -182,12 +199,12 @@ export function ShopifySyncPanel() {
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
-            {diagPending ? "Loading…" : "Load diagnostics"}
+            {diagPending ? "Loading…" : "Refresh diagnostics"}
           </button>
         </div>
         {!diagnosticsLoaded ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-idle">
-            Diagnostics are not loaded on page open. Click Load diagnostics when you need them.
+            Loading saved Shopify rows…
           </p>
         ) : diagnostics.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-empty">

@@ -5,6 +5,7 @@ import {
   DatabaseUnavailableError,
 } from "@/lib/infra/db/errors";
 import {
+  forceClearCommerceSyncLock,
   getCommerceSyncLockStatus,
   releaseCommerceSyncLock,
   type CommerceSyncLockStatus,
@@ -40,5 +41,14 @@ export async function releaseCommerceSyncLockAction(
   return wrap(async () => {
     await releaseCommerceSyncLock(lockToken);
     return { released: true as const };
+  });
+}
+
+export async function forceClearCommerceSyncLockAction(): Promise<
+  ActionResult<{ cleared: true }>
+> {
+  return wrap(async () => {
+    await forceClearCommerceSyncLock();
+    return { cleared: true as const };
   });
 }
