@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
@@ -38,6 +38,7 @@ export function CommerceSyncBar() {
   const [error, setError] = useState<string | null>(null);
   const [counts, setCounts] = useState<CommerceCounts | null>(null);
   const [serverLocked, setServerLocked] = useState(false);
+  const [, startMetaTransition] = useTransition();
 
   const refreshMeta = useCallback(async () => {
     try {
@@ -54,6 +55,13 @@ export function CommerceSyncBar() {
       /* non-fatal */
     }
   }, []);
+
+  // Lightweight counts only — not a sync.
+  useEffect(() => {
+    startMetaTransition(() => {
+      void refreshMeta();
+    });
+  }, [refreshMeta]);
 
   async function handleClearLock() {
     setError(null);
@@ -173,9 +181,8 @@ export function CommerceSyncBar() {
           {counts.fulfilmentsWithAwb} AWBs · {counts.shipments} shipments
         </p>
       ) : (
-        <p className="text-sm text-charcoal/55 mb-3">
-          Sync progress text clears on refresh — saved rows stay in the database. Click
-          “Refresh DB counts” to see what is stored.
+        <p className="text-sm text-charcoal/55 mb-3" data-testid="commerce-sync-counts-loading">
+          Loading saved commerce counts…
         </p>
       )}
 

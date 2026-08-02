@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
@@ -59,7 +59,7 @@ export function ShopifySyncPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  function loadDiagnostics() {
+  const loadDiagnostics = useCallback(() => {
     startDiagTransition(async () => {
       const res = await getShopifyCommerceDiagnosticsAction();
       setDiagnosticsLoaded(true);
@@ -69,7 +69,12 @@ export function ShopifySyncPanel() {
       }
       setDiagnostics(res.data);
     });
-  }
+  }, []);
+
+  // Cheap aggregated query — safe to show on open (not a sync).
+  useEffect(() => {
+    loadDiagnostics();
+  }, [loadDiagnostics]);
 
   async function handleSync() {
     const token = beginSync("shopify");
@@ -184,7 +189,7 @@ export function ShopifySyncPanel() {
 
       <FormSection
         title="Synced commerce diagnostics"
-        description="Review-only view (up to 100 rows). Personal data is masked. Not loaded until you ask."
+        description="Review-only view (up to 100 rows). Personal data is masked. Sync progress cards above clear on refresh — these rows are what is saved."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -194,12 +199,12 @@ export function ShopifySyncPanel() {
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
-            {diagPending ? "Loading…" : "Load diagnostics"}
+            {diagPending ? "Loading…" : "Refresh diagnostics"}
           </button>
         </div>
         {!diagnosticsLoaded ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-idle">
-            Diagnostics are not loaded on page open. Click Load diagnostics when you need them.
+            Loading saved Shopify rows…
           </p>
         ) : diagnostics.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-empty">

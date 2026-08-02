@@ -5,8 +5,6 @@ test.describe("Delhivery shipment diagnostics", () => {
     await page.goto("/customer-calls");
     await expect(page.getByTestId("customer-calls-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("delhivery-sync-panel")).toBeVisible();
-    // Page load must not auto-start sync or diagnostics.
-    await expect(page.getByTestId("delhivery-diagnostics-idle")).toBeVisible();
 
     await page.getByTestId("sync-delhivery-shipments").click();
     await expect(page.getByTestId("delhivery-sync-summary")).toBeVisible({ timeout: 30_000 });
@@ -24,8 +22,7 @@ test.describe("Delhivery shipment diagnostics", () => {
 
     await page.reload();
     await expect(page.getByTestId("delhivery-sync-panel")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("delhivery-diagnostics-idle")).toBeVisible();
-    await page.getByTestId("load-delhivery-diagnostics").click();
+    // Diagnostics reload from DB on open — sync buttons are not auto-clicked.
     await expect(page.getByTestId("shipment-row-AWB1001DEL")).toHaveAttribute(
       "data-status",
       "delivered",

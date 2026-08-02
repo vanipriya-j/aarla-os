@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
@@ -63,7 +63,7 @@ export function DelhiverySyncPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  function loadDiagnostics() {
+  const loadDiagnostics = useCallback(() => {
     startDiagTransition(async () => {
       const res = await getDelhiveryShipmentDiagnosticsAction();
       setDiagnosticsLoaded(true);
@@ -73,7 +73,12 @@ export function DelhiverySyncPanel() {
       }
       setRows(res.data);
     });
-  }
+  }, []);
+
+  // Read-only table load — not a Delhivery API sync.
+  useEffect(() => {
+    loadDiagnostics();
+  }, [loadDiagnostics]);
 
   async function handleSync() {
     const token = beginSync("delhivery");
@@ -192,7 +197,7 @@ export function DelhiverySyncPanel() {
 
       <FormSection
         title="Shipment diagnostics"
-        description="Normalized Delhivery status only — not proof for call eligibility yet. Not loaded until you ask."
+        description="Normalized Delhivery status only — not proof for call eligibility yet. Empty until Delhivery sync completes."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -202,12 +207,12 @@ export function DelhiverySyncPanel() {
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
-            {diagPending ? "Loading…" : "Load diagnostics"}
+            {diagPending ? "Loading…" : "Refresh diagnostics"}
           </button>
         </div>
         {!diagnosticsLoaded ? (
           <p className="text-sm text-charcoal/60" data-testid="delhivery-diagnostics-idle">
-            Diagnostics are not loaded on page open. Click Load diagnostics when you need them.
+            Loading saved shipment rows…
           </p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="delhivery-diagnostics-empty">
