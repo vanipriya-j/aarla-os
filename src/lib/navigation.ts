@@ -14,6 +14,7 @@ import {
   Palette,
   Rocket,
   Phone,
+  Activity,
   ScanLine,
   Store,
   Truck,
@@ -130,6 +131,12 @@ export const outreachNav: NavItem[] = [
     href: "/customer-calls",
     icon: Phone,
     description: "Delivery follow-ups and re-engagement calls.",
+  },
+  {
+    label: "Diagnostics",
+    href: "/diagnostics",
+    icon: Activity,
+    description: "Health of database, Shopify, and Delhivery wiring.",
   },
 ];
 

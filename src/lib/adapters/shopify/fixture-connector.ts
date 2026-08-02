@@ -267,8 +267,9 @@ export class FixtureShopifyConnector implements ShopifyConnector {
   }
 
   async fetchCustomerCallPage(
-    _options: ShopifyFetchOptions = {},
+    options: ShopifyFetchOptions = {},
   ): Promise<ShopifyCustomerCallPage> {
+    void options;
     const payload = await this.fetchCustomerCallPayload();
     return {
       ...payload,
