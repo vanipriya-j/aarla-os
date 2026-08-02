@@ -1,6 +1,6 @@
 # Customer Calls
 
-Founder outreach queues for Vyshali — seeded demo data only (no Shopify / Delhivery yet).
+Founder outreach queues for Vyshali. Shopify commerce sync lands synchronized customers/orders/fulfilments into `external_*` tables; queue generation from live Shopify data is still deferred. No Delhivery yet.
 
 ## Queues
 
