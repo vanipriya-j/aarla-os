@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
   getShopifyCommerceDiagnosticsAction,
   syncShopifyCustomerCallDataAction,
 } from "@/app/actions/shopify-sync-actions";
+import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
 import type {
   CommerceCustomerDiagnostic,
   ShopifySyncSummary,
@@ -48,36 +49,42 @@ function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
 }
 
 export function ShopifySyncPanel() {
+  const { busy, activeSync, beginSync, endSync } = useCommerceSync();
+  const syncingHere = activeSync === "shopify";
   const [summary, setSummary] = useState<ShopifySyncSummary | null>(null);
   const [diagnostics, setDiagnostics] = useState<CommerceCustomerDiagnostic[]>([]);
+  const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [diagPending, startDiagTransition] = useTransition();
 
-  const loadDiagnostics = useCallback(() => {
-    startTransition(async () => {
+  function loadDiagnostics() {
+    startDiagTransition(async () => {
       const res = await getShopifyCommerceDiagnosticsAction();
+      setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
         return;
       }
       setDiagnostics(res.data);
     });
-  }, []);
+  }
 
-  useEffect(() => {
-    loadDiagnostics();
-  }, [loadDiagnostics]);
+  async function handleSync() {
+    const token = beginSync("shopify");
+    if (!token) {
+      setError("A sync is already in progress.");
+      return;
+    }
 
-  function handleSync() {
-    startTransition(async () => {
-      setError(null);
-      setStatus("Starting Shopify sync…");
-      let cursor: string | null = null;
-      let total = emptyShopifySyncSummary();
-      let guard = 0;
-      const maxChunks = 80; // safety: 80 × ~150 orders
+    setError(null);
+    setStatus("Starting Shopify sync…");
+    let cursor: string | null = null;
+    let total = emptyShopifySyncSummary();
+    let guard = 0;
+    const maxChunks = 80; // safety: 80 × ~150 orders
 
+    try {
       while (guard < maxChunks) {
         guard += 1;
         setStatus(
@@ -85,7 +92,7 @@ export function ShopifySyncPanel() {
             ? `Syncing chunk ${guard} (continuing)…`
             : `Syncing chunk ${guard}…`,
         );
-        const res = await syncShopifyCustomerCallDataAction(cursor);
+        const res = await syncShopifyCustomerCallDataAction(cursor, token);
         if (!res.ok) {
           setError(res.error);
           setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
@@ -110,28 +117,36 @@ export function ShopifySyncPanel() {
           : "Shopify sync paused — click Sync again to continue.",
       );
       const diag = await getShopifyCommerceDiagnosticsAction();
+      setDiagnosticsLoaded(true);
       if (diag.ok) setDiagnostics(diag.data);
-    });
+    } finally {
+      await endSync(token);
+    }
   }
 
   return (
     <div className="space-y-4" data-testid="shopify-sync-panel">
       <FormSection
         title="Shopify commerce sync"
-        description="Pulls orders in small chunks so Vercel does not time out. Keeps going automatically until complete. Does not refresh call queues."
+        description="Pulls orders in small chunks so Vercel does not time out. Keeps going automatically until complete. Does not start on page load. Does not refresh call queues."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
             type="button"
             data-testid="sync-shopify-data"
-            onClick={handleSync}
-            disabled={pending}
+            onClick={() => void handleSync()}
+            disabled={busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
           >
-            <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${syncingHere ? "animate-spin" : ""}`} />
             Sync Shopify Data
           </button>
-          {pending ? <StatusChip label="Syncing…" tone="neutral" /> : null}
+          {busy ? (
+            <StatusChip
+              label={syncingHere ? "Syncing…" : "Waiting — another sync is running"}
+              tone="neutral"
+            />
+          ) : null}
           {status ? (
             <span className="text-sm text-charcoal/65" data-testid="shopify-sync-status">
               {status}
@@ -157,9 +172,24 @@ export function ShopifySyncPanel() {
 
       <FormSection
         title="Synced commerce diagnostics"
-        description="Review-only view. Personal data is masked. Fulfilment tracking is not proof of physical delivery."
+        description="Review-only view (up to 100 rows). Personal data is masked. Not loaded until you ask."
       >
-        {diagnostics.length === 0 ? (
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <button
+            type="button"
+            data-testid="load-shopify-diagnostics"
+            onClick={loadDiagnostics}
+            disabled={diagPending || busy}
+            className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+          >
+            {diagPending ? "Loading…" : "Load diagnostics"}
+          </button>
+        </div>
+        {!diagnosticsLoaded ? (
+          <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-idle">
+            Diagnostics are not loaded on page open. Click Load diagnostics when you need them.
+          </p>
+        ) : diagnostics.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-empty">
             No synchronized Shopify customers yet.
           </p>

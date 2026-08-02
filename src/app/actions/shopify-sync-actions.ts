@@ -8,6 +8,9 @@ import {
   getShopifyCommerceDiagnostics,
   syncShopifyCustomerCallData,
 } from "@/lib/application/shopify-sync-service";
+import {
+  acquireOrRenewCommerceSyncLock,
+} from "@/lib/application/commerce-sync-lock";
 import type {
   CommerceCustomerDiagnostic,
   ShopifySyncSummary,
@@ -31,11 +34,19 @@ async function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   }
 }
 
-/** Sync one Shopify chunk (pass cursor to continue). */
+/** Sync one Shopify chunk (pass cursor to continue). Requires lockToken. */
 export async function syncShopifyCustomerCallDataAction(
   cursor?: string | null,
+  lockToken?: string,
 ): Promise<ActionResult<ShopifySyncSummary>> {
-  return wrap(() => syncShopifyCustomerCallData({ cursor: cursor ?? null }));
+  return wrap(async () => {
+    if (!lockToken?.trim()) {
+      throw new Error("Sync lock token is required.");
+    }
+    const lock = await acquireOrRenewCommerceSyncLock(lockToken, "shopify");
+    if (!lock.ok) throw new Error(lock.error);
+    return syncShopifyCustomerCallData({ cursor: cursor ?? null });
+  });
 }
 
 export async function getShopifyCommerceDiagnosticsAction(): Promise<

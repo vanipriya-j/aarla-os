@@ -399,53 +399,77 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
     },
 
     async diagnostics(): Promise<CommerceCustomerDiagnostic[]> {
-      const customers = await q(
-        `select * from external_customers where organization_id = $1 order by name`,
-        [ORG_ID],
-      );
-      const result: CommerceCustomerDiagnostic[] = [];
-      for (const c of customers) {
-        const customer = mapCustomer(c);
-        const orders = await q(
-          `select * from external_orders
-           where organization_id = $1 and external_customer_id = $2
-           order by order_date desc`,
-          [ORG_ID, customer.id],
-        );
-        const mappedOrders = orders.map(mapOrder);
-        const last = mappedOrders[0] ?? null;
-        const fulRows = await q<{
-          tracking_company: string | null;
-          tracking_number: string | null;
-        }>(
-          `select f.tracking_company, f.tracking_number
+      // Single aggregated query — avoids N+1 over every customer on page load.
+      const rows = await q<{
+        external_id: string;
+        name: string;
+        phone: string | null;
+        email: string | null;
+        latest_valid_order_at: Date | string | null;
+        order_count: string | number;
+        last_order_number: string | null;
+        last_order_date: Date | string | null;
+        fulfilment_count: string | number;
+        carriers: string[] | null;
+        awb_available: boolean;
+      }>(
+        `with order_stats as (
+           select
+             external_customer_id,
+             count(*)::int as order_count,
+             (array_agg(order_number order by order_date desc nulls last))[1] as last_order_number,
+             (array_agg(order_date order by order_date desc nulls last))[1] as last_order_date
+           from external_orders
+           where organization_id = $1
+           group by external_customer_id
+         ),
+         ful_stats as (
+           select
+             o.external_customer_id,
+             count(f.id)::int as fulfilment_count,
+             array_remove(array_agg(distinct f.tracking_company), null) as carriers,
+             bool_or(
+               f.tracking_number is not null and btrim(f.tracking_number) <> ''
+             ) as awb_available
            from external_fulfilments f
            join external_orders o on o.id = f.external_order_id
-           where f.organization_id = $1 and o.external_customer_id = $2`,
-          [ORG_ID, customer.id],
-        );
-        const carriers = [
-          ...new Set(
-            fulRows
-              .map((f) => f.tracking_company)
-              .filter((v): v is string => Boolean(v)),
-          ),
-        ];
-        result.push({
-          externalId: customer.externalId,
-          displayName: customer.name,
-          phoneMasked: maskPhone(customer.phone),
-          emailMasked: maskEmail(customer.email),
-          latestValidOrderAt: customer.latestValidOrderAt,
-          orderCount: mappedOrders.length,
-          lastOrderNumber: last?.orderNumber ?? null,
-          lastOrderDate: last?.orderDate ?? null,
-          fulfilmentCount: fulRows.length,
-          carriers,
-          awbAvailable: fulRows.some((f) => Boolean(f.tracking_number)),
-        });
-      }
-      return result;
+           where f.organization_id = $1
+           group by o.external_customer_id
+         )
+         select
+           c.external_id,
+           c.name,
+           c.phone,
+           c.email,
+           c.latest_valid_order_at,
+           coalesce(os.order_count, 0) as order_count,
+           os.last_order_number,
+           os.last_order_date,
+           coalesce(fs.fulfilment_count, 0) as fulfilment_count,
+           coalesce(fs.carriers, '{}'::text[]) as carriers,
+           coalesce(fs.awb_available, false) as awb_available
+         from external_customers c
+         left join order_stats os on os.external_customer_id = c.id
+         left join ful_stats fs on fs.external_customer_id = c.id
+         where c.organization_id = $1
+         order by c.name
+         limit 100`,
+        [ORG_ID],
+      );
+
+      return rows.map((r) => ({
+        externalId: String(r.external_id),
+        displayName: String(r.name ?? ""),
+        phoneMasked: maskPhone(r.phone),
+        emailMasked: maskEmail(r.email),
+        latestValidOrderAt: isoOrNull(r.latest_valid_order_at),
+        orderCount: num(r.order_count),
+        lastOrderNumber: r.last_order_number == null ? null : String(r.last_order_number),
+        lastOrderDate: isoOrNull(r.last_order_date),
+        fulfilmentCount: num(r.fulfilment_count),
+        carriers: Array.isArray(r.carriers) ? r.carriers.filter(Boolean) : [],
+        awbAvailable: Boolean(r.awb_available),
+      }));
     },
 
     async countInteractionsForExternalCustomer(externalCustomerId) {

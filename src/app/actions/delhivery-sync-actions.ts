@@ -8,6 +8,9 @@ import {
   getDelhiveryShipmentDiagnostics,
   syncDelhiveryShipments,
 } from "@/lib/application/delhivery-sync-service";
+import {
+  acquireOrRenewCommerceSyncLock,
+} from "@/lib/application/commerce-sync-lock";
 import type {
   DelhiverySyncSummary,
   ShipmentDiagnosticRow,
@@ -31,10 +34,19 @@ async function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   }
 }
 
-export async function syncDelhiveryShipmentsAction(): Promise<
-  ActionResult<DelhiverySyncSummary>
-> {
-  return wrap(() => syncDelhiveryShipments());
+/** Sync one Delhivery AWB chunk (pass offset to continue). Requires lockToken. */
+export async function syncDelhiveryShipmentsAction(
+  offset?: number | null,
+  lockToken?: string,
+): Promise<ActionResult<DelhiverySyncSummary>> {
+  return wrap(async () => {
+    if (!lockToken?.trim()) {
+      throw new Error("Sync lock token is required.");
+    }
+    const lock = await acquireOrRenewCommerceSyncLock(lockToken, "delhivery");
+    if (!lock.ok) throw new Error(lock.error);
+    return syncDelhiveryShipments({ offset: offset ?? 0 });
+  });
 }
 
 export async function getDelhiveryShipmentDiagnosticsAction(): Promise<

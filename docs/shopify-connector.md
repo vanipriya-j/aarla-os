@@ -11,14 +11,16 @@ Server-side GraphQL Admin sync that stores normalized commerce references in Aar
 ## Architecture
 
 ```
-UI Sync Shopify Data
-  → shopify-sync-actions (server)
-    → syncShopifyCustomerCallData()
+UI Sync Shopify Data / Sync All
+  → shopify-sync-actions (server, lock token)
+    → syncShopifyCustomerCallData({ cursor })  # chunked
       → ShopifyConnector (live | fixture)
       → ExternalCommerceRepository → Postgres
 ```
 
 React components never call Shopify Admin APIs.
+
+`/customer-calls` does **not** auto-sync or auto-load heavy diagnostics on page open. Shopify and Delhivery share one server lock and run serially.
 
 ## Scopes
 
