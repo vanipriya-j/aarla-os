@@ -87,6 +87,14 @@ export interface DelhiverySyncSummary {
   skippedRecords: number;
   ambiguousAwbLinkages: number;
   errors: string[];
+  /** AWBs tracked in this chunk */
+  awbsProcessed?: number;
+  /** Chunked sync: more AWBs remain */
+  hasMore?: boolean;
+  /** Pass back into the next sync call */
+  nextOffset?: number | null;
+  /** True when this call finished the full AWB list */
+  complete?: boolean;
 }
 
 export function emptyDelhiverySyncSummary(): DelhiverySyncSummary {
@@ -106,6 +114,37 @@ export function emptyDelhiverySyncSummary(): DelhiverySyncSummary {
     skippedRecords: 0,
     ambiguousAwbLinkages: 0,
     errors: [],
+    awbsProcessed: 0,
+    hasMore: false,
+    nextOffset: null,
+    complete: true,
+  };
+}
+
+export function mergeDelhiverySyncSummaries(
+  a: DelhiverySyncSummary,
+  b: DelhiverySyncSummary,
+): DelhiverySyncSummary {
+  return {
+    fulfilmentsEvaluated: Math.max(a.fulfilmentsEvaluated, b.fulfilmentsEvaluated),
+    delhiveryAwbsFound: Math.max(a.delhiveryAwbsFound, b.delhiveryAwbsFound),
+    uniqueAwbsTracked: Math.max(a.uniqueAwbsTracked, b.uniqueAwbsTracked),
+    shipmentsCreated: a.shipmentsCreated + b.shipmentsCreated,
+    shipmentsUpdated: a.shipmentsUpdated + b.shipmentsUpdated,
+    delivered: a.delivered + b.delivered,
+    inTransit: a.inTransit + b.inTransit,
+    outForDelivery: a.outForDelivery + b.outForDelivery,
+    returned: a.returned + b.returned,
+    cancelled: a.cancelled + b.cancelled,
+    unknown: a.unknown + b.unknown,
+    failedLookups: a.failedLookups + b.failedLookups,
+    skippedRecords: Math.max(a.skippedRecords, b.skippedRecords),
+    ambiguousAwbLinkages: Math.max(a.ambiguousAwbLinkages, b.ambiguousAwbLinkages),
+    errors: [...a.errors, ...b.errors].slice(0, 20),
+    awbsProcessed: (a.awbsProcessed ?? 0) + (b.awbsProcessed ?? 0),
+    hasMore: Boolean(b.hasMore),
+    nextOffset: b.nextOffset ?? null,
+    complete: Boolean(b.complete),
   };
 }
 

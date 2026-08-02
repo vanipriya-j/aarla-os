@@ -174,6 +174,7 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     expect(first.delhiveryAwbsFound).toBeGreaterThanOrEqual(2);
     expect(first.delivered).toBeGreaterThanOrEqual(1);
     expect(first.inTransit).toBeGreaterThanOrEqual(1);
+    expect(first.complete).toBe(true);
 
     await syncDelhiveryShipments({
       connector: new FixtureDelhiveryConnector({ failAwbs: ["AWB1002DEL"] }),
@@ -181,6 +182,40 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     });
     const inTransit = await repo().findByCarrierAwb("delhivery", "AWB1002DEL");
     expect(inTransit?.normalizedStatus).toBe("in-transit");
+  });
+
+  it("chunked sync resumes by offset without re-tracking earlier AWBs", async () => {
+    const spy: string[][] = [];
+    const connector: DelhiveryConnector = {
+      async trackShipments(awbs) {
+        spy.push([...awbs]);
+        return new FixtureDelhiveryConnector().trackShipments(awbs);
+      },
+    };
+    await clearCommerceAndShipments();
+    await seedShopifyFixture();
+
+    const first = await syncDelhiveryShipments({
+      connector,
+      repo: repo(),
+      offset: 0,
+      maxAwbs: 1,
+    });
+    expect(first.hasMore).toBe(true);
+    expect(first.complete).toBe(false);
+    expect(first.awbsProcessed).toBe(1);
+    expect(first.nextOffset).toBe(1);
+    expect(spy.flat()).toHaveLength(1);
+
+    const second = await syncDelhiveryShipments({
+      connector,
+      repo: repo(),
+      offset: first.nextOffset ?? 1,
+      maxAwbs: 1,
+    });
+    expect(second.awbsProcessed).toBe(1);
+    expect(spy.flat()).toHaveLength(2);
+    expect(new Set(spy.flat()).size).toBe(2);
   });
 
   it("hard connector failure does not erase prior shipments", async () => {

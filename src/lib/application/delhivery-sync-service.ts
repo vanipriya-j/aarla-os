@@ -23,6 +23,10 @@ import { ConfigurationError } from "@/lib/infra/db/errors";
 export type SyncDelhiveryDeps = {
   connector?: DelhiveryConnector;
   repo?: ShipmentRepository;
+  /** Resume offset into the deduped AWB list */
+  offset?: number;
+  /** Max AWBs to track per invocation (default 10) */
+  maxAwbs?: number;
 };
 
 function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
@@ -38,6 +42,13 @@ function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
     );
   }
   return live;
+}
+
+function defaultMaxAwbs(): number {
+  const raw = process.env.DELHIVERY_SYNC_MAX_AWBS?.trim();
+  const n = raw ? Number(raw) : 10;
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.min(Math.floor(n), 30);
 }
 
 type AwbLink = {
@@ -85,6 +96,7 @@ function buildAwbLinks(fulfilments: FulfilmentTrackingRow[]): {
 
 /**
  * Sync Delhivery tracking for AWBs from Shopify fulfilments.
+ * Chunked for Vercel timeouts — pass `offset` from the previous summary to continue.
  * Does not create Customer Call queue items or mutate Shopify sync tables.
  */
 export async function syncDelhiveryShipments(
@@ -93,6 +105,8 @@ export async function syncDelhiveryShipments(
   const summary = emptyDelhiverySyncSummary();
   const repo = deps.repo ?? createShipmentRepository();
   const connector = resolveConnector(deps);
+  const offset = Math.max(0, Math.floor(deps.offset ?? 0));
+  const maxAwbs = deps.maxAwbs ?? defaultMaxAwbs();
 
   const fulfilments = await repo.listFulfilmentsWithOrders();
   const { evaluated, delhiveryFound, skipped, links } = buildAwbLinks(fulfilments);
@@ -101,10 +115,26 @@ export async function syncDelhiveryShipments(
   summary.skippedRecords = skipped;
   summary.ambiguousAwbLinkages = links.filter((l) => l.ambiguous).length;
 
-  const awbs = dedupeAwbs(links.map((l) => l.awb));
+  const awbs = dedupeAwbs(links.map((l) => l.awb)).sort();
   summary.uniqueAwbsTracked = awbs.length;
 
   if (!awbs.length) {
+    summary.awbsProcessed = 0;
+    summary.hasMore = false;
+    summary.nextOffset = null;
+    summary.complete = true;
+    return summary;
+  }
+
+  const slice = awbs.slice(offset, offset + maxAwbs);
+  summary.awbsProcessed = slice.length;
+  const nextOffset = offset + slice.length;
+  const hasMore = nextOffset < awbs.length;
+  summary.hasMore = hasMore;
+  summary.nextOffset = hasMore ? nextOffset : null;
+  summary.complete = !hasMore;
+
+  if (!slice.length) {
     return summary;
   }
 
@@ -113,14 +143,14 @@ export async function syncDelhiveryShipments(
 
   try {
     tracked = [];
-    for (const batch of chunkAwbs(awbs, 30)) {
+    for (const batch of chunkAwbs(slice, 30)) {
       tracked.push(...(await connector.trackShipments(batch)));
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Delhivery fetch failed";
     summary.errors.push(message);
-    summary.failedLookups += awbs.length;
-    for (const awb of awbs) {
+    summary.failedLookups += slice.length;
+    for (const awb of slice) {
       await repo.markSyncFailure("delhivery", awb, "error", message);
     }
     return summary;
