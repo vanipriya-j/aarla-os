@@ -22,7 +22,8 @@ test.describe("Customer Calls", () => {
     await page.getByTestId("call-notes").fill("E2E WhatsApp note");
     await page.getByTestId("call-save-next").click();
 
-    await expect(page.getByTestId("call-workspace").or(page.getByTestId("customer-calls-page"))).toBeVisible();
+    // After Save & Next the workspace may advance to another call while the page stays mounted.
+    await expect(page.getByTestId("customer-calls-page")).toBeVisible();
 
     await page.goto("/customer-calls");
     await page.getByTestId("tab-re-engagement").click();
