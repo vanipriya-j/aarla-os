@@ -28,13 +28,39 @@ React components never call Shopify Admin APIs.
 
 ## Environment (server-only)
 
+**Preferred — Shopify Dev Dashboard (client credentials):**
+
 ```
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
-SHOPIFY_ADMIN_API_ACCESS_TOKEN=shpat_…
+SHOPIFY_CLIENT_ID=…
+SHOPIFY_CLIENT_SECRET=…
 SHOPIFY_API_VERSION=2025-01
 ```
 
+Aarla OS exchanges Client ID/Secret for a short-lived Admin API token (~24h) and refreshes it automatically.
+
+**Optional legacy** — static Admin API token:
+
+```
+SHOPIFY_ADMIN_API_ACCESS_TOKEN=shpat_…
+```
+
 Never use `NEXT_PUBLIC_` for these values.
+
+### Dev Dashboard setup
+
+1. Ensure scopes include `read_customers`, `read_orders`, `read_all_orders` (see `shopify.app.toml`).
+2. Install the app on the Aarla store (Installs must be ≥ 1).
+3. Copy **Client ID** and **Client secret** from Dev Dashboard → Settings.
+4. Set the env vars on Vercel and redeploy.
+
+CLI helpers (local):
+
+```bash
+npx shopify auth login
+npx shopify app config link
+npx shopify app deploy
+```
 
 ## Valid orders
 

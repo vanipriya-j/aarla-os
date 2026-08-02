@@ -25,7 +25,7 @@ function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
   const live = createLiveShopifyConnectorFromEnv();
   if (!live) {
     throw new ConfigurationError(
-      "Shopify credentials missing. Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_API_ACCESS_TOKEN on the server.",
+      "Shopify credentials missing. Set SHOPIFY_STORE_DOMAIN plus SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET (Dev Dashboard), or SHOPIFY_ADMIN_API_ACCESS_TOKEN.",
     );
   }
   return live;
