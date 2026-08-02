@@ -31,11 +31,11 @@ async function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
   }
 }
 
-/** Sync Shopify commerce data into Aarla OS (live connector when env is configured). */
-export async function syncShopifyCustomerCallDataAction(): Promise<
-  ActionResult<ShopifySyncSummary>
-> {
-  return wrap(() => syncShopifyCustomerCallData());
+/** Sync one Shopify chunk (pass cursor to continue). */
+export async function syncShopifyCustomerCallDataAction(
+  cursor?: string | null,
+): Promise<ActionResult<ShopifySyncSummary>> {
+  return wrap(() => syncShopifyCustomerCallData({ cursor: cursor ?? null }));
 }
 
 export async function getShopifyCommerceDiagnosticsAction(): Promise<

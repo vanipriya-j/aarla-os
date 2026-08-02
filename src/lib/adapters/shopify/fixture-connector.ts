@@ -1,7 +1,9 @@
 import type {
   ShopifyConnector,
+  ShopifyCustomerCallPage,
   ShopifyCustomerCallPayload,
   ShopifyCustomerRecord,
+  ShopifyFetchOptions,
   ShopifyOrderRecord,
 } from "./port";
 
@@ -261,6 +263,18 @@ export class FixtureShopifyConnector implements ShopifyConnector {
     return {
       customers: this.options.customers ?? FIXTURE_CUSTOMERS,
       orders: this.options.orders ?? FIXTURE_ORDERS,
+    };
+  }
+
+  async fetchCustomerCallPage(
+    _options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyCustomerCallPage> {
+    const payload = await this.fetchCustomerCallPayload();
+    return {
+      ...payload,
+      hasMore: false,
+      nextCursor: null,
+      pagesFetched: 1,
     };
   }
 }

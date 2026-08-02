@@ -11,6 +11,10 @@ import type {
   CommerceCustomerDiagnostic,
   ShopifySyncSummary,
 } from "@/lib/domain/external-commerce-types";
+import {
+  emptyShopifySyncSummary,
+  mergeShopifySyncSummaries,
+} from "@/lib/domain/external-commerce-types";
 import { RefreshCw } from "lucide-react";
 
 function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
@@ -24,7 +28,9 @@ function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
     ["Fulfilments found", summary.fulfilmentsFound],
     ["AWBs found", summary.awbsFound],
     ["Records skipped", summary.recordsSkipped],
+    ["Pages fetched", summary.pagesFetched ?? 0],
     ["Errors", summary.errors.length],
+    ["Status", summary.complete ? "Complete" : summary.hasMore ? "More remaining" : "Stopped"],
   ];
   return (
     <dl
@@ -45,6 +51,7 @@ export function ShopifySyncPanel() {
   const [summary, setSummary] = useState<ShopifySyncSummary | null>(null);
   const [diagnostics, setDiagnostics] = useState<CommerceCustomerDiagnostic[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const loadDiagnostics = useCallback(() => {
@@ -65,15 +72,43 @@ export function ShopifySyncPanel() {
   function handleSync() {
     startTransition(async () => {
       setError(null);
-      const res = await syncShopifyCustomerCallDataAction();
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      setStatus("Starting Shopify sync…");
+      let cursor: string | null = null;
+      let total = emptyShopifySyncSummary();
+      let guard = 0;
+      const maxChunks = 80; // safety: 80 × ~150 orders
+
+      while (guard < maxChunks) {
+        guard += 1;
+        setStatus(
+          cursor
+            ? `Syncing chunk ${guard} (continuing)…`
+            : `Syncing chunk ${guard}…`,
+        );
+        const res = await syncShopifyCustomerCallDataAction(cursor);
+        if (!res.ok) {
+          setError(res.error);
+          setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
+          setStatus(null);
+          return;
+        }
+        total = mergeShopifySyncSummaries(total, res.data);
+        setSummary({ ...total });
+
+        if (res.data.errors.length && !res.data.hasMore) {
+          setError(res.data.errors.slice(0, 3).join(" · "));
+        }
+
+        if (!res.data.hasMore) break;
+        cursor = res.data.nextCursor ?? null;
+        if (!cursor) break;
       }
-      setSummary(res.data);
-      if (res.data.errors.length) {
-        setError(res.data.errors.slice(0, 3).join(" · "));
-      }
+
+      setStatus(
+        total.complete
+          ? "Shopify sync complete."
+          : "Shopify sync paused — click Sync again to continue.",
+      );
       const diag = await getShopifyCommerceDiagnosticsAction();
       if (diag.ok) setDiagnostics(diag.data);
     });
@@ -83,7 +118,7 @@ export function ShopifySyncPanel() {
     <div className="space-y-4" data-testid="shopify-sync-panel">
       <FormSection
         title="Shopify commerce sync"
-        description="Pull customers, orders, products, and fulfilment tracking into Aarla OS. Does not refresh call queues."
+        description="Pulls orders in small chunks so Vercel does not time out. Keeps going automatically until complete. Does not refresh call queues."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -97,6 +132,11 @@ export function ShopifySyncPanel() {
             Sync Shopify Data
           </button>
           {pending ? <StatusChip label="Syncing…" tone="neutral" /> : null}
+          {status ? (
+            <span className="text-sm text-charcoal/65" data-testid="shopify-sync-status">
+              {status}
+            </span>
+          ) : null}
         </div>
 
         {error ? (

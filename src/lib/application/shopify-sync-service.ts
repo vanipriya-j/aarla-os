@@ -18,6 +18,10 @@ import { ConfigurationError } from "@/lib/infra/db/errors";
 export type SyncShopifyDeps = {
   connector?: ShopifyConnector;
   repo?: ExternalCommerceRepository;
+  /** Resume cursor from a previous chunk */
+  cursor?: string | null;
+  /** Order pages per invocation (default 3 ≈ 150 orders) */
+  maxPages?: number;
 };
 
 function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
@@ -31,8 +35,16 @@ function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
   return live;
 }
 
+function defaultMaxPages(): number {
+  const raw = process.env.SHOPIFY_SYNC_MAX_PAGES?.trim();
+  const n = raw ? Number(raw) : 3;
+  if (!Number.isFinite(n) || n < 1) return 3;
+  return Math.min(Math.floor(n), 10);
+}
+
 /**
  * Server-side Shopify → Aarla OS commerce sync for Customer Calls foundation.
+ * Chunked for Vercel timeouts — pass `cursor` from the previous summary to continue.
  * Does not regenerate call queues or mutate interactions / contact preferences.
  */
 export async function syncShopifyCustomerCallData(
@@ -41,18 +53,48 @@ export async function syncShopifyCustomerCallData(
   const summary = emptyShopifySyncSummary();
   const repo = deps.repo ?? createExternalCommerceRepository();
   const connector = resolveConnector(deps);
+  const maxPages = deps.maxPages ?? defaultMaxPages();
 
   let payload;
+  let hasMore = false;
+  let nextCursor: string | null = null;
+  let pagesFetched = 0;
+
   try {
-    payload = await connector.fetchCustomerCallPayload();
+    if (typeof connector.fetchCustomerCallPage === "function") {
+      const page = await connector.fetchCustomerCallPage({
+        cursor: deps.cursor ?? null,
+        maxPages,
+      });
+      payload = { customers: page.customers, orders: page.orders };
+      hasMore = page.hasMore;
+      nextCursor = page.nextCursor;
+      pagesFetched = page.pagesFetched;
+    } else {
+      payload = await connector.fetchCustomerCallPayload({
+        cursor: deps.cursor ?? null,
+        maxPages,
+      });
+      hasMore = false;
+      nextCursor = null;
+      pagesFetched = 1;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify fetch failed";
     summary.errors.push(message);
+    summary.hasMore = false;
+    summary.nextCursor = null;
+    summary.pagesFetched = 0;
+    summary.complete = false;
     return summary;
   }
 
   summary.customersRead = payload.customers.length;
   summary.ordersRead = payload.orders.length;
+  summary.hasMore = hasMore;
+  summary.nextCursor = nextCursor;
+  summary.pagesFetched = pagesFetched;
+  summary.complete = !hasMore;
 
   const customerExternalIds = new Set<string>();
 
@@ -77,7 +119,6 @@ export async function syncShopifyCustomerCallData(
     }
   }
 
-  // Ensure customers referenced only on orders exist before order upserts.
   for (const order of payload.orders) {
     if (!order.externalCustomerId || customerExternalIds.has(order.externalCustomerId)) {
       continue;
@@ -176,22 +217,17 @@ export async function syncShopifyCustomerCallData(
   const latest = computeLatestValidOrderDates(classified);
   for (const [externalId, latestAt] of latest) {
     try {
-      await repo.setLatestValidOrderAt("shopify", externalId, latestAt);
+      const existing = await repo.findCustomerByExternalId("shopify", externalId);
+      if (
+        !existing?.latestValidOrderAt ||
+        latestAt > existing.latestValidOrderAt
+      ) {
+        await repo.setLatestValidOrderAt("shopify", externalId, latestAt);
+      }
     } catch (err) {
       summary.errors.push(
         `Latest order ${externalId}: ${err instanceof Error ? err.message : "update failed"}`,
       );
-    }
-  }
-
-  // Clear latest for customers with no valid orders after this sync.
-  for (const customer of payload.customers) {
-    if (!latest.has(customer.externalId)) {
-      try {
-        await repo.setLatestValidOrderAt("shopify", customer.externalId, null);
-      } catch {
-        /* ignore */
-      }
     }
   }
 

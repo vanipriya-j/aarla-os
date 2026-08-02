@@ -11,8 +11,10 @@
 
 import type {
   ShopifyConnector,
+  ShopifyCustomerCallPage,
   ShopifyCustomerCallPayload,
   ShopifyCustomerRecord,
+  ShopifyFetchOptions,
   ShopifyFulfilmentRecord,
   ShopifyLineItemRecord,
   ShopifyOrderRecord,
@@ -256,14 +258,17 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     return body.data;
   }
 
-  async fetchCustomerCallPayload(): Promise<ShopifyCustomerCallPayload> {
+  async fetchCustomerCallPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyCustomerCallPage> {
     assertServerOnly();
     const customers = new Map<string, ShopifyCustomerRecord>();
     const orders: ShopifyOrderRecord[] = [];
-    let cursor: string | null = null;
+    let cursor: string | null = options.cursor ?? null;
     let hasNext = true;
     let pages = 0;
-    const maxPages = 40;
+    // Keep each serverless invocation short (Vercel timeouts).
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 3, 10));
 
     while (hasNext && pages < maxPages) {
       pages += 1;
@@ -286,7 +291,21 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     return {
       customers: [...customers.values()],
       orders,
+      hasMore: hasNext,
+      nextCursor: hasNext ? cursor : null,
+      pagesFetched: pages,
     };
+  }
+
+  async fetchCustomerCallPayload(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyCustomerCallPayload> {
+    // Back-compat: pull up to a bounded number of pages in one call.
+    const page = await this.fetchCustomerCallPage({
+      cursor: options.cursor,
+      maxPages: options.maxPages ?? 3,
+    });
+    return { customers: page.customers, orders: page.orders };
   }
 }
 

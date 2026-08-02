@@ -83,6 +83,13 @@ export interface ShopifySyncSummary {
   awbsFound: number;
   recordsSkipped: number;
   errors: string[];
+  /** Chunked sync: more Shopify pages remain */
+  hasMore?: boolean;
+  /** Pass back into the next sync call */
+  nextCursor?: string | null;
+  pagesFetched?: number;
+  /** True when this call finished the full catalog (no more pages) */
+  complete?: boolean;
 }
 
 export interface CommerceCustomerDiagnostic {
@@ -111,6 +118,32 @@ export function emptyShopifySyncSummary(): ShopifySyncSummary {
     awbsFound: 0,
     recordsSkipped: 0,
     errors: [],
+    hasMore: false,
+    nextCursor: null,
+    pagesFetched: 0,
+    complete: true,
+  };
+}
+
+export function mergeShopifySyncSummaries(
+  a: ShopifySyncSummary,
+  b: ShopifySyncSummary,
+): ShopifySyncSummary {
+  return {
+    customersRead: a.customersRead + b.customersRead,
+    customersAdded: a.customersAdded + b.customersAdded,
+    customersUpdated: a.customersUpdated + b.customersUpdated,
+    ordersRead: a.ordersRead + b.ordersRead,
+    ordersAdded: a.ordersAdded + b.ordersAdded,
+    ordersUpdated: a.ordersUpdated + b.ordersUpdated,
+    fulfilmentsFound: a.fulfilmentsFound + b.fulfilmentsFound,
+    awbsFound: a.awbsFound + b.awbsFound,
+    recordsSkipped: a.recordsSkipped + b.recordsSkipped,
+    errors: [...a.errors, ...b.errors].slice(0, 20),
+    hasMore: Boolean(b.hasMore),
+    nextCursor: b.nextCursor ?? null,
+    pagesFetched: (a.pagesFetched ?? 0) + (b.pagesFetched ?? 0),
+    complete: Boolean(b.complete),
   };
 }
 
