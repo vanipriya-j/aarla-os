@@ -245,10 +245,12 @@ describe("Shopify credential boundary", () => {
     ];
     const banned = [
       "SHOPIFY_ADMIN_API_ACCESS_TOKEN",
+      "SHOPIFY_CLIENT_SECRET",
       "live-graphql-connector",
       "LiveShopifyGraphqlConnector",
       "createLiveShopifyConnectorFromEnv",
       "X-Shopify-Access-Token",
+      "resolveShopifyAccessToken",
     ];
 
     function walk(dir: string, files: string[] = []): string[] {

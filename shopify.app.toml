@@ -1,0 +1,18 @@
+# Aarla OS — Shopify Dev Dashboard app configuration
+# Link with: npx shopify app config link
+# Then release scopes and install on the store from the Dev Dashboard.
+
+name = "aarla-os"
+client_id = "REPLACE_WITH_CLIENT_ID"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = false
+
+[access_scopes]
+# Minimum for Customer Calls commerce sync. Prefer read_all_orders for history.
+scopes = "read_customers,read_orders,read_all_orders"
+
+[auth]
+redirect_urls = [ "https://shopify.dev/apps/default-app-home" ]
+
+[webhooks]
+api_version = "2025-01"

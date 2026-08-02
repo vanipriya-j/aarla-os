@@ -3,6 +3,10 @@
  *
  * Never import this module from React client components or any browser-bound path.
  * Credentials are read from process.env and must never use NEXT_PUBLIC_ prefixes.
+ *
+ * Auth modes:
+ * - Dev Dashboard: SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (+ store domain)
+ * - Legacy static: SHOPIFY_ADMIN_API_ACCESS_TOKEN
  */
 
 import type {
@@ -14,12 +18,14 @@ import type {
   ShopifyOrderRecord,
 } from "./port";
 import { shopifyGidToExternalId } from "./normalize";
+import {
+  normalizeShopifyShopDomain,
+  readShopifyAuthConfigFromEnv,
+  resolveShopifyAccessToken,
+  type ShopifyAuthConfig,
+} from "./auth";
 
-export type LiveShopifyConfig = {
-  storeDomain: string;
-  adminApiAccessToken: string;
-  apiVersion: string;
-};
+export type LiveShopifyConfig = ShopifyAuthConfig;
 
 function assertServerOnly(): void {
   if (typeof window !== "undefined") {
@@ -32,11 +38,7 @@ function assertServerOnly(): void {
 export function readLiveShopifyConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): LiveShopifyConfig | null {
-  const storeDomain = env.SHOPIFY_STORE_DOMAIN?.trim();
-  const adminApiAccessToken = env.SHOPIFY_ADMIN_API_ACCESS_TOKEN?.trim();
-  const apiVersion = env.SHOPIFY_API_VERSION?.trim() || "2025-01";
-  if (!storeDomain || !adminApiAccessToken) return null;
-  return { storeDomain, adminApiAccessToken, apiVersion };
+  return readShopifyAuthConfigFromEnv(env);
 }
 
 const ORDERS_QUERY = `
@@ -215,24 +217,29 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
   constructor(config: LiveShopifyConfig, fetchImpl: typeof fetch = fetch) {
     assertServerOnly();
-    this.config = config;
+    this.config = {
+      ...config,
+      storeDomain: normalizeShopifyShopDomain(config.storeDomain),
+    };
     this.fetchImpl = fetchImpl;
   }
 
   private endpoint(): string {
-    const domain = this.config.storeDomain
-      .replace(/^https?:\/\//, "")
-      .replace(/\/$/, "");
-    return `https://${domain}/admin/api/${this.config.apiVersion}/graphql.json`;
+    return `https://${this.config.storeDomain}/admin/api/${this.config.apiVersion}/graphql.json`;
+  }
+
+  private async accessToken(): Promise<string> {
+    return resolveShopifyAccessToken(this.config, this.fetchImpl);
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     assertServerOnly();
+    const token = await this.accessToken();
     const res = await this.fetchImpl(this.endpoint(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": this.config.adminApiAccessToken,
+        "X-Shopify-Access-Token": token,
       },
       body: JSON.stringify({ query, variables }),
     });
