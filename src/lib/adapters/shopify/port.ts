@@ -51,7 +51,23 @@ export interface ShopifyCustomerCallPayload {
   orders: ShopifyOrderRecord[];
 }
 
+export type ShopifyFetchOptions = {
+  /** GraphQL endCursor from a previous page; null/undefined = start */
+  cursor?: string | null;
+  /** Max order connection pages to fetch in this call (default connector-specific) */
+  maxPages?: number;
+};
+
+export type ShopifyCustomerCallPage = ShopifyCustomerCallPayload & {
+  hasMore: boolean;
+  nextCursor: string | null;
+  pagesFetched: number;
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
-  fetchCustomerCallPayload(): Promise<ShopifyCustomerCallPayload>;
+  /** Full fetch (fixtures / small stores). Live connector may still page internally. */
+  fetchCustomerCallPayload(options?: ShopifyFetchOptions): Promise<ShopifyCustomerCallPayload>;
+  /** Chunked fetch for serverless timeouts. */
+  fetchCustomerCallPage?(options?: ShopifyFetchOptions): Promise<ShopifyCustomerCallPage>;
 }
