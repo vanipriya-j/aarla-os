@@ -12,11 +12,14 @@ Server-side GraphQL Admin sync that stores normalized commerce references in Aar
 
 ```
 UI Sync Shopify Data / Sync All
-  → shopify-sync-actions (server, lock token)
-    → syncShopifyCustomerCallData({ cursor })  # chunked
+  → POST /api/commerce/sync/shopify  (JSON, lock token)
+    → syncShopifyCustomerCallData({ cursor })  # chunked (~25 orders)
       → ShopifyConnector (live | fixture)
       → ExternalCommerceRepository → Postgres
 ```
+
+Uses a Route Handler (not a Server Action) so Vercel timeouts return JSON instead of
+Next.js “An unexpected response was received from the server.”
 
 React components never call Shopify Admin APIs.
 

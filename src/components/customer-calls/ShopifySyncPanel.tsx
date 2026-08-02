@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
-import {
-  getShopifyCommerceDiagnosticsAction,
-  syncShopifyCustomerCallDataAction,
-} from "@/app/actions/shopify-sync-actions";
+import { getShopifyCommerceDiagnosticsAction } from "@/app/actions/shopify-sync-actions";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
 import type {
   CommerceCustomerDiagnostic,
@@ -16,6 +13,7 @@ import {
   emptyShopifySyncSummary,
   mergeShopifySyncSummaries,
 } from "@/lib/domain/external-commerce-types";
+import { syncShopifyChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { RefreshCw } from "lucide-react";
 
@@ -88,7 +86,7 @@ export function ShopifySyncPanel() {
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
-    const maxChunks = 120; // safety: 120 × ~50 orders
+    const maxChunks = 200; // safety: 200 × ~25 orders
 
     try {
       while (guard < maxChunks) {
@@ -100,7 +98,7 @@ export function ShopifySyncPanel() {
         );
         let res;
         try {
-          res = await syncShopifyCustomerCallDataAction(cursor, token);
+          res = await syncShopifyChunkViaApi(cursor, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);

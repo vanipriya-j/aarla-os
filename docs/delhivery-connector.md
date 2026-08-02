@@ -6,9 +6,10 @@ Server-side Pull tracking API that normalizes Delhivery scan status into Aarla O
 
 ```
 Shopify external_fulfilments (AWB)
-  → syncDelhiveryShipments({ offset })   # chunked (~10 AWBs / call)
-    → DelhiveryConnector.trackShipments()
-    → shipments + shipment_status_events
+  → POST /api/commerce/sync/delhivery
+    → syncDelhiveryShipments({ offset })   # chunked (~10 AWBs / call)
+      → DelhiveryConnector.trackShipments()
+      → shipments + shipment_status_events
 ```
 
 Does **not** create Customer Call queue items.

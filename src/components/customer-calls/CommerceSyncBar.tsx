@@ -4,12 +4,12 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
-import { syncShopifyCustomerCallDataAction } from "@/app/actions/shopify-sync-actions";
-import { syncDelhiveryShipmentsAction } from "@/app/actions/delhivery-sync-actions";
 import {
-  forceClearCommerceSyncLockAction,
-  getCommerceSyncLockStatusAction,
-} from "@/app/actions/commerce-sync-lock-actions";
+  clearCommerceSyncLockViaApi,
+  getCommerceSyncLockViaApi,
+  syncDelhiveryChunkViaApi,
+  syncShopifyChunkViaApi,
+} from "@/lib/client/commerce-sync-api";
 import {
   emptyShopifySyncSummary,
   mergeShopifySyncSummaries,
@@ -44,7 +44,7 @@ export function CommerceSyncBar() {
     try {
       const [diagRes, lockRes] = await Promise.all([
         fetch("/api/diagnostics", { cache: "no-store" }),
-        getCommerceSyncLockStatusAction(),
+        getCommerceSyncLockViaApi(),
       ]);
       if (diagRes.ok) {
         const body = (await diagRes.json()) as { commerce?: CommerceCounts };
@@ -65,7 +65,7 @@ export function CommerceSyncBar() {
 
   async function handleClearLock() {
     setError(null);
-    const res = await forceClearCommerceSyncLockAction();
+    const res = await clearCommerceSyncLockViaApi();
     if (!res.ok) {
       setError(res.error);
       return;
@@ -100,7 +100,7 @@ export function CommerceSyncBar() {
         );
         let res;
         try {
-          res = await syncShopifyCustomerCallDataAction(cursor, token);
+          res = await syncShopifyChunkViaApi(cursor, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setStatus(null);
@@ -134,7 +134,7 @@ export function CommerceSyncBar() {
         );
         let res;
         try {
-          res = await syncDelhiveryShipmentsAction(offset, token);
+          res = await syncDelhiveryChunkViaApi(offset, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setStatus(null);

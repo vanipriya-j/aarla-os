@@ -45,7 +45,7 @@ export function readLiveShopifyConfigFromEnv(
 
 const ORDERS_QUERY = `
 query SyncOrders($cursor: String) {
-  orders(first: 50, after: $cursor, sortKey: CREATED_AT, reverse: true) {
+  orders(first: 25, after: $cursor, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
