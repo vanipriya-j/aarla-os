@@ -90,6 +90,10 @@ export interface ShopifySyncSummary {
   pagesFetched?: number;
   /** True when this call finished the full catalog (no more pages) */
   complete?: boolean;
+  /** incremental = only orders after watermark; full = entire catalog */
+  mode?: "incremental" | "full";
+  /** Watermark used for this run (ISO), if incremental */
+  incrementalFrom?: string | null;
 }
 
 export interface CommerceCustomerDiagnostic {
@@ -122,6 +126,8 @@ export function emptyShopifySyncSummary(): ShopifySyncSummary {
     nextCursor: null,
     pagesFetched: 0,
     complete: true,
+    mode: "incremental",
+    incrementalFrom: null,
   };
 }
 
@@ -144,6 +150,8 @@ export function mergeShopifySyncSummaries(
     nextCursor: b.nextCursor ?? null,
     pagesFetched: (a.pagesFetched ?? 0) + (b.pagesFetched ?? 0),
     complete: Boolean(b.complete),
+    mode: b.mode ?? a.mode ?? "incremental",
+    incrementalFrom: b.incrementalFrom ?? a.incrementalFrom ?? null,
   };
 }
 

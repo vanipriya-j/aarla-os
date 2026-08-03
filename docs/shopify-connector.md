@@ -21,6 +21,9 @@ UI Sync Shopify Data / Sync All
 Uses a Route Handler (not a Server Action) so Vercel timeouts return JSON instead of
 Next.js “An unexpected response was received from the server.”
 
+**Default sync is incremental:** only Shopify orders newer than the last successful
+watermark are fetched. Use **Full Shopify re-sync** to walk the whole catalog again.
+
 React components never call Shopify Admin APIs.
 
 `/customer-calls` does **not** auto-sync or auto-load heavy diagnostics on page open. Shopify and Delhivery share one server lock and run serially.

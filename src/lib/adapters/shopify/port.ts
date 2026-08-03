@@ -56,6 +56,11 @@ export type ShopifyFetchOptions = {
   cursor?: string | null;
   /** Max order connection pages to fetch in this call (default connector-specific) */
   maxPages?: number;
+  /**
+   * Optional Shopify orders search query, e.g. created_at:>'2026-01-01T00:00:00Z'
+   * Used for incremental sync.
+   */
+  query?: string | null;
 };
 
 export type ShopifyCustomerCallPage = ShopifyCustomerCallPayload & {

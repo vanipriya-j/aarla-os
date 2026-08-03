@@ -111,7 +111,7 @@ export function CommerceSyncBar() {
     }
 
     setError(null);
-    setStatus("Click received — starting Shopify sync…");
+    setStatus("Click received — incremental Shopify sync (new orders only)…");
 
     try {
       let cursor: string | null = null;
@@ -128,7 +128,7 @@ export function CommerceSyncBar() {
         );
         let res;
         try {
-          res = await syncShopifyChunkViaApi(cursor, token);
+          res = await syncShopifyChunkViaApi(cursor, token, "incremental");
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setStatus("Stopped — clear the lock if needed, then try again.");
@@ -140,8 +140,11 @@ export function CommerceSyncBar() {
           return;
         }
         shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
+        const since = shopifyTotal.incrementalFrom
+          ? ` since ${new Date(shopifyTotal.incrementalFrom).toLocaleString()}`
+          : "";
         setStatus(
-          `Shopify chunk ${guard} saved · ${shopifyTotal.ordersRead} orders so far` +
+          `Shopify chunk ${guard} saved · ${shopifyTotal.ordersRead} new orders read${since}` +
             (res.data.hasMore ? " · more remaining…" : " · Shopify done"),
         );
         if (res.data.errors.length && !res.data.hasMore) {
@@ -189,9 +192,70 @@ export function CommerceSyncBar() {
 
       setStatus(
         `Done — Shopify ${shopifyTotal.ordersRead} orders` +
-          `${shopifyTotal.complete ? " (complete)" : " (more remain)"}, ` +
+          `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}` +
+          `${shopifyTotal.complete ? " complete" : " more remain"}, ` +
           `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs` +
           `${delhiveryTotal.complete ? " (complete)" : " (more remain)"}.`,
+      );
+    } catch (err) {
+      setError(formatCommerceSyncFailure(err));
+      setStatus("Stopped — clear the lock if needed, then try again.");
+    } finally {
+      await endSync(token);
+      await refreshMeta();
+    }
+  }
+
+  async function handleFullShopifyResync() {
+    if (controlsBusy) return;
+    const token = beginSync("shopify");
+    if (!token) {
+      setError("A sync is already in progress in this tab.");
+      return;
+    }
+
+    setError(null);
+    setStatus("Click received — full Shopify re-sync (entire catalog)…");
+
+    try {
+      let cursor: string | null = null;
+      let shopifyTotal = emptyShopifySyncSummary();
+      let guard = 0;
+      const maxChunks = 200;
+
+      while (guard < maxChunks) {
+        guard += 1;
+        setStatus(
+          cursor
+            ? `Full re-sync… Shopify chunk ${guard} (continuing)`
+            : `Full re-sync… Shopify chunk ${guard}`,
+        );
+        let res;
+        try {
+          res = await syncShopifyChunkViaApi(cursor, token, "full");
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setStatus("Stopped — clear the lock if needed, then try again.");
+          return;
+        }
+        if (!res.ok) {
+          setError(res.error);
+          setStatus("Stopped — clear the lock if needed, then try again.");
+          return;
+        }
+        shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
+        setStatus(
+          `Full re-sync chunk ${guard} · ${shopifyTotal.ordersRead} orders read` +
+            (res.data.hasMore ? " · more remaining…" : " · full Shopify done"),
+        );
+        if (!res.data.hasMore) break;
+        cursor = res.data.nextCursor ?? null;
+        if (!cursor) break;
+      }
+
+      setStatus(
+        `Full Shopify re-sync finished — ${shopifyTotal.ordersRead} orders read` +
+          `${shopifyTotal.complete ? " (complete)" : " (more remain)"}.`,
       );
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
@@ -205,7 +269,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. Shopify runs first, then Delhivery. Buttons show a spinner while your click is running."
+      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then Delhivery. Use Full re-sync only when you need the whole catalog again."
     >
       {counts ? (
         <p
@@ -237,7 +301,22 @@ export function CommerceSyncBar() {
           ) : (
             <Layers className="h-4 w-4" aria-hidden />
           )}
-          {syncingAll ? "Syncing…" : "Sync All (Shopify → Delhivery)"}
+          {syncingAll ? "Syncing…" : "Sync All (new only → Delhivery)"}
+        </button>
+        <button
+          type="button"
+          data-testid="full-shopify-resync"
+          onClick={() => void handleFullShopifyResync()}
+          disabled={controlsBusy}
+          aria-busy={busy && activeSync === "shopify"}
+          className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+        >
+          {busy && activeSync === "shopify" ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <RefreshCw className="h-4 w-4" aria-hidden />
+          )}
+          {busy && activeSync === "shopify" ? "Full re-sync…" : "Full Shopify re-sync"}
         </button>
         <button
           type="button"
@@ -279,20 +358,22 @@ export function CommerceSyncBar() {
         ) : null}
       </div>
 
-      {syncingAll || localAction !== "idle" || status ? (
+      {syncingAll || (busy && activeSync === "shopify") || localAction !== "idle" || status ? (
         <div
           className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-soft-beige/60 px-3 py-2.5"
           data-testid="commerce-sync-progress"
           role="status"
           aria-live="polite"
         >
-          {syncingAll || localAction !== "idle" ? (
+          {syncingAll || (busy && activeSync === "shopify") || localAction !== "idle" ? (
             <Hourglass className="h-4 w-4 mt-0.5 shrink-0 text-deep-navy animate-pulse" aria-hidden />
           ) : null}
           <div className="min-w-0">
             <p className="text-sm font-medium text-deep-navy">
               {syncingAll
                 ? "Sync in progress"
+                : busy && activeSync === "shopify"
+                  ? "Full Shopify re-sync"
                 : localAction === "clearing"
                   ? "Clearing lock"
                   : localAction === "refreshing"
@@ -307,7 +388,7 @@ export function CommerceSyncBar() {
               <p className="text-sm text-charcoal/55 mt-0.5">Working — please wait…</p>
             )}
           </div>
-          {syncingAll ? (
+          {syncingAll || (busy && activeSync === "shopify") ? (
             <Loader2 className="h-4 w-4 mt-0.5 ml-auto shrink-0 animate-spin text-deep-navy" aria-hidden />
           ) : null}
         </div>
