@@ -19,7 +19,7 @@ import {
   mergeDelhiverySyncSummaries,
 } from "@/lib/domain/shipment-types";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
-import { Layers } from "lucide-react";
+import { Hourglass, Layers, Loader2, RefreshCw, Unlock } from "lucide-react";
 
 type CommerceCounts = {
   externalCustomers: number;
@@ -29,16 +29,22 @@ type CommerceCounts = {
   shipments: number;
 };
 
+type LocalAction = "idle" | "refreshing" | "clearing";
+
 /**
  * Serial Shopify → Delhivery sync. Does not auto-run on page load.
  */
 export function CommerceSyncBar() {
   const { busy, beginSync, endSync, activeSync } = useCommerceSync();
+  const syncingAll = busy && activeSync === "all";
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [counts, setCounts] = useState<CommerceCounts | null>(null);
   const [serverLocked, setServerLocked] = useState(false);
+  const [localAction, setLocalAction] = useState<LocalAction>("idle");
   const [, startMetaTransition] = useTransition();
+
+  const controlsBusy = busy || localAction !== "idle";
 
   const refreshMeta = useCallback(async () => {
     try {
@@ -63,19 +69,41 @@ export function CommerceSyncBar() {
     });
   }, [refreshMeta]);
 
-  async function handleClearLock() {
+  async function handleRefreshCounts() {
+    if (controlsBusy) return;
+    setLocalAction("refreshing");
     setError(null);
-    const res = await clearCommerceSyncLockViaApi();
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    setStatus("Refreshing database counts…");
+    try {
+      await refreshMeta();
+      setStatus("Counts updated.");
+    } finally {
+      setLocalAction("idle");
     }
-    setServerLocked(false);
-    setStatus("Stuck sync lock cleared. You can sync again.");
-    await refreshMeta();
+  }
+
+  async function handleClearLock() {
+    if (controlsBusy) return;
+    setLocalAction("clearing");
+    setError(null);
+    setStatus("Clearing stuck sync lock…");
+    try {
+      const res = await clearCommerceSyncLockViaApi();
+      if (!res.ok) {
+        setError(res.error);
+        setStatus(null);
+        return;
+      }
+      setServerLocked(false);
+      setStatus("Stuck sync lock cleared. You can sync again.");
+      await refreshMeta();
+    } finally {
+      setLocalAction("idle");
+    }
   }
 
   async function handleSyncAll() {
+    if (controlsBusy) return;
     const token = beginSync("all");
     if (!token) {
       setError("A sync is already in progress in this tab.");
@@ -83,7 +111,7 @@ export function CommerceSyncBar() {
     }
 
     setError(null);
-    setStatus("Starting Shopify sync…");
+    setStatus("Click received — starting Shopify sync…");
 
     try {
       let cursor: string | null = null;
@@ -95,23 +123,27 @@ export function CommerceSyncBar() {
         guard += 1;
         setStatus(
           cursor
-            ? `Shopify chunk ${guard} (continuing)…`
-            : `Shopify chunk ${guard}…`,
+            ? `Working… Shopify chunk ${guard} (continuing)`
+            : `Working… Shopify chunk ${guard}`,
         );
         let res;
         try {
           res = await syncShopifyChunkViaApi(cursor, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
-          setStatus(null);
+          setStatus("Stopped — clear the lock if needed, then try again.");
           return;
         }
         if (!res.ok) {
           setError(res.error);
-          setStatus(null);
+          setStatus("Stopped — clear the lock if needed, then try again.");
           return;
         }
         shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
+        setStatus(
+          `Shopify chunk ${guard} saved · ${shopifyTotal.ordersRead} orders so far` +
+            (res.data.hasMore ? " · more remaining…" : " · Shopify done"),
+        );
         if (res.data.errors.length && !res.data.hasMore) {
           setError(res.data.errors.slice(0, 3).join(" · "));
         }
@@ -120,7 +152,7 @@ export function CommerceSyncBar() {
         if (!cursor) break;
       }
 
-      setStatus("Starting Delhivery sync…");
+      setStatus("Shopify finished — starting Delhivery…");
       let offset: number | null = 0;
       let delhiveryTotal = emptyDelhiverySyncSummary();
       guard = 0;
@@ -129,37 +161,41 @@ export function CommerceSyncBar() {
         guard += 1;
         setStatus(
           offset
-            ? `Delhivery chunk ${guard} (offset ${offset})…`
-            : `Delhivery chunk ${guard}…`,
+            ? `Working… Delhivery chunk ${guard} (offset ${offset})`
+            : `Working… Delhivery chunk ${guard}`,
         );
         let res;
         try {
           res = await syncDelhiveryChunkViaApi(offset, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
-          setStatus(null);
+          setStatus("Stopped during Delhivery — clear the lock if needed, then try again.");
           return;
         }
         if (!res.ok) {
           setError(res.error);
-          setStatus(null);
+          setStatus("Stopped during Delhivery — clear the lock if needed, then try again.");
           return;
         }
         delhiveryTotal = mergeDelhiverySyncSummaries(delhiveryTotal, res.data);
+        setStatus(
+          `Delhivery chunk ${guard} saved · ${delhiveryTotal.awbsProcessed ?? 0} AWBs so far` +
+            (res.data.hasMore ? " · more remaining…" : " · Delhivery done"),
+        );
         if (!res.data.hasMore) break;
         offset = res.data.nextOffset ?? null;
         if (offset == null) break;
       }
 
       setStatus(
-        `Done — Shopify ${shopifyTotal.ordersRead} orders read` +
+        `Done — Shopify ${shopifyTotal.ordersRead} orders` +
           `${shopifyTotal.complete ? " (complete)" : " (more remain)"}, ` +
           `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs` +
           `${delhiveryTotal.complete ? " (complete)" : " (more remain)"}.`,
       );
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
-      setStatus(null);
+      setStatus("Stopped — clear the lock if needed, then try again.");
     } finally {
       await endSync(token);
       await refreshMeta();
@@ -169,7 +205,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. Shopify runs first, then Delhivery. If a request times out, clear the lock and click Sync again — saved rows are kept."
+      description="Nothing syncs on page load. Shopify runs first, then Delhivery. Buttons show a spinner while your click is running."
     >
       {counts ? (
         <p
@@ -181,7 +217,8 @@ export function CommerceSyncBar() {
           {counts.fulfilmentsWithAwb} AWBs · {counts.shipments} shipments
         </p>
       ) : (
-        <p className="text-sm text-charcoal/55 mb-3" data-testid="commerce-sync-counts-loading">
+        <p className="text-sm text-charcoal/55 mb-3 inline-flex items-center gap-2" data-testid="commerce-sync-counts-loading">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           Loading saved commerce counts…
         </p>
       )}
@@ -191,45 +228,91 @@ export function CommerceSyncBar() {
           type="button"
           data-testid="sync-all-commerce"
           onClick={() => void handleSyncAll()}
-          disabled={busy}
+          disabled={controlsBusy}
+          aria-busy={syncingAll}
           className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
         >
-          <Layers className="h-4 w-4" />
-          Sync All (Shopify → Delhivery)
+          {syncingAll ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <Layers className="h-4 w-4" aria-hidden />
+          )}
+          {syncingAll ? "Syncing…" : "Sync All (Shopify → Delhivery)"}
         </button>
         <button
           type="button"
           data-testid="refresh-commerce-counts"
-          onClick={() => void refreshMeta()}
-          disabled={busy}
+          onClick={() => void handleRefreshCounts()}
+          disabled={controlsBusy}
+          aria-busy={localAction === "refreshing"}
           className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
         >
-          Refresh DB counts
+          <RefreshCw
+            className={`h-4 w-4 ${localAction === "refreshing" ? "animate-spin" : ""}`}
+            aria-hidden
+          />
+          {localAction === "refreshing" ? "Refreshing…" : "Refresh DB counts"}
         </button>
         <button
           type="button"
           data-testid="clear-commerce-sync-lock"
           onClick={() => void handleClearLock()}
-          disabled={busy}
+          disabled={controlsBusy}
+          aria-busy={localAction === "clearing"}
           className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
         >
-          Clear stuck sync lock
+          {localAction === "clearing" ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <Unlock className="h-4 w-4" aria-hidden />
+          )}
+          {localAction === "clearing" ? "Clearing lock…" : "Clear stuck sync lock"}
         </button>
-        {busy && activeSync === "all" ? (
-          <StatusChip label="Syncing…" tone="neutral" />
-        ) : null}
         {busy && activeSync !== "all" ? (
           <StatusChip label={`Busy: ${activeSync}`} tone="neutral" />
         ) : null}
         {!busy && serverLocked ? (
           <StatusChip label="Server lock held" tone="danger" />
         ) : null}
-        {status ? (
-          <span className="text-sm text-charcoal/65" data-testid="commerce-sync-status">
-            {status}
-          </span>
+        {!busy && !serverLocked && localAction === "idle" ? (
+          <StatusChip label="Ready" tone="success" />
         ) : null}
       </div>
+
+      {syncingAll || localAction !== "idle" || status ? (
+        <div
+          className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-soft-beige/60 px-3 py-2.5"
+          data-testid="commerce-sync-progress"
+          role="status"
+          aria-live="polite"
+        >
+          {syncingAll || localAction !== "idle" ? (
+            <Hourglass className="h-4 w-4 mt-0.5 shrink-0 text-deep-navy animate-pulse" aria-hidden />
+          ) : null}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-deep-navy">
+              {syncingAll
+                ? "Sync in progress"
+                : localAction === "clearing"
+                  ? "Clearing lock"
+                  : localAction === "refreshing"
+                    ? "Refreshing counts"
+                    : "Last update"}
+            </p>
+            {status ? (
+              <p className="text-sm text-charcoal/70 mt-0.5" data-testid="commerce-sync-status">
+                {status}
+              </p>
+            ) : (
+              <p className="text-sm text-charcoal/55 mt-0.5">Working — please wait…</p>
+            )}
+          </div>
+          {syncingAll ? (
+            <Loader2 className="h-4 w-4 mt-0.5 ml-auto shrink-0 animate-spin text-deep-navy" aria-hidden />
+          ) : null}
+        </div>
+      ) : null}
+
       {error ? (
         <p className="text-sm text-aarla-red mt-3" data-testid="commerce-sync-error">
           {error}

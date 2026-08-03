@@ -15,7 +15,7 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import { syncShopifyChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
-import { RefreshCw } from "lucide-react";
+import { Hourglass, Loader2, RefreshCw } from "lucide-react";
 
 function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
   const items: Array<[string, number | string]> = [
@@ -82,7 +82,7 @@ export function ShopifySyncPanel() {
     }
 
     setError(null);
-    setStatus("Starting Shopify sync…");
+    setStatus("Click received — starting Shopify sync…");
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
@@ -151,23 +151,40 @@ export function ShopifySyncPanel() {
             data-testid="sync-shopify-data"
             onClick={() => void handleSync()}
             disabled={busy}
+            aria-busy={syncingHere}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
           >
-            <RefreshCw className={`h-4 w-4 ${syncingHere ? "animate-spin" : ""}`} />
-            Sync Shopify Data
+            {syncingHere ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            )}
+            {syncingHere ? "Syncing Shopify…" : "Sync Shopify Data"}
           </button>
           {busy ? (
             <StatusChip
-              label={syncingHere ? "Syncing…" : "Waiting — another sync is running"}
+              label={syncingHere ? "Working…" : "Waiting — another sync is running"}
               tone="neutral"
             />
           ) : null}
-          {status ? (
-            <span className="text-sm text-charcoal/65" data-testid="shopify-sync-status">
-              {status}
-            </span>
-          ) : null}
         </div>
+        {syncingHere || status ? (
+          <div
+            className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-soft-beige/60 px-3 py-2.5"
+            role="status"
+            aria-live="polite"
+          >
+            {syncingHere ? (
+              <Hourglass className="h-4 w-4 mt-0.5 shrink-0 text-deep-navy animate-pulse" aria-hidden />
+            ) : null}
+            <p className="text-sm text-charcoal/70" data-testid="shopify-sync-status">
+              {status ?? "Working — please wait…"}
+            </p>
+            {syncingHere ? (
+              <Loader2 className="h-4 w-4 mt-0.5 ml-auto shrink-0 animate-spin text-deep-navy" aria-hidden />
+            ) : null}
+          </div>
+        ) : null}
 
         {error ? (
           <p className="text-sm text-aarla-red mb-3" data-testid="shopify-sync-error">
