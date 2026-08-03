@@ -6,7 +6,6 @@ import type {
   NormalizedShipmentStatus,
   Shipment,
   ShipmentCarrier,
-  ShipmentDiagnosticRow,
   ShipmentSyncStatus,
 } from "@/lib/domain/shipment-types";
 import type {
@@ -264,32 +263,52 @@ export function createShipmentRepository(): ShipmentRepository {
       return inserted;
     },
 
-    async listDiagnostics(): Promise<ShipmentDiagnosticRow[]> {
+    async listDiagnostics(options = {}) {
+      const pageSize = Math.min(Math.max(Math.floor(options.pageSize ?? 50), 1), 100);
+      const page = Math.max(Math.floor(options.page ?? 1), 1);
+
+      const countRows = await q<{ c: string }>(
+        `select count(*)::text as c from shipments where organization_id = $1`,
+        [ORG_ID],
+      );
+      const total = Number(countRows[0]?.c ?? 0);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const offset = (safePage - 1) * pageSize;
+
       const rows = await q(
         `select s.*, o.order_number
          from shipments s
          left join external_orders o on o.id = s.external_order_id
          where s.organization_id = $1
-         order by s.last_synced_at desc, s.awb`,
-        [ORG_ID],
+         order by s.last_synced_at desc, s.awb
+         limit $2 offset $3`,
+        [ORG_ID, pageSize, total === 0 ? 0 : offset],
       );
-      return rows.map((r) => {
-        const s = mapShipment(r);
-        return {
-          id: s.id,
-          awb: s.awb,
-          orderNumber: r.order_number == null ? null : String(r.order_number),
-          carrier: s.carrier,
-          normalizedStatus: s.normalizedStatus,
-          providerStatus: s.providerStatus,
-          deliveredAt: s.deliveredAt,
-          latestScanAt: s.latestScanAt,
-          latestScanLocation: s.latestScanLocation,
-          lastSyncedAt: s.lastSyncedAt,
-          syncError: s.syncError,
-          syncStatus: s.syncStatus,
-        };
-      });
+
+      return {
+        rows: rows.map((r) => {
+          const s = mapShipment(r);
+          return {
+            id: s.id,
+            awb: s.awb,
+            orderNumber: r.order_number == null ? null : String(r.order_number),
+            carrier: s.carrier,
+            normalizedStatus: s.normalizedStatus,
+            providerStatus: s.providerStatus,
+            deliveredAt: s.deliveredAt,
+            latestScanAt: s.latestScanAt,
+            latestScanLocation: s.latestScanLocation,
+            lastSyncedAt: s.lastSyncedAt,
+            syncError: s.syncError,
+            syncStatus: s.syncStatus,
+          };
+        }),
+        total,
+        page: total === 0 ? 1 : safePage,
+        pageSize,
+        totalPages: total === 0 ? 1 : totalPages,
+      };
     },
 
     async countByAwb(carrier, awb) {

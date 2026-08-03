@@ -15,7 +15,10 @@ import {
 } from "@/lib/domain/shipment-types";
 import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
+import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
 import { Hourglass, Loader2, Truck } from "lucide-react";
+
+const PAGE_SIZE = 50;
 
 function SummaryGrid({ summary }: { summary: DelhiverySyncSummary }) {
   const items: Array<[string, number | string]> = [
@@ -57,25 +60,31 @@ export function DelhiverySyncPanel() {
   const [summary, setSummary] = useState<DelhiverySyncSummary | null>(null);
   const [rows, setRows] = useState<ShipmentDiagnosticRow[]>([]);
   const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
+  const [diagPage, setDiagPage] = useState(1);
+  const [diagTotal, setDiagTotal] = useState(0);
+  const [diagTotalPages, setDiagTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  const loadDiagnostics = useCallback(() => {
+  const loadDiagnostics = useCallback((page = 1) => {
     startDiagTransition(async () => {
-      const res = await getDelhiveryShipmentDiagnosticsAction();
+      const res = await getDelhiveryShipmentDiagnosticsAction(page, PAGE_SIZE);
       setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      setRows(res.data);
+      setRows(res.data.rows);
+      setDiagPage(res.data.page);
+      setDiagTotal(res.data.total);
+      setDiagTotalPages(res.data.totalPages);
     });
   }, []);
 
   // Read-only table load — not a Delhivery API sync.
   useEffect(() => {
-    loadDiagnostics();
+    loadDiagnostics(1);
   }, [loadDiagnostics]);
 
   async function handleSync() {
@@ -136,9 +145,14 @@ export function DelhiverySyncPanel() {
           ? "Delhivery sync complete."
           : "Delhivery sync paused — click Sync again to continue.",
       );
-      const diag = await getDelhiveryShipmentDiagnosticsAction();
+      const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
-      if (diag.ok) setRows(diag.data);
+      if (diag.ok) {
+        setRows(diag.data.rows);
+        setDiagPage(diag.data.page);
+        setDiagTotal(diag.data.total);
+        setDiagTotalPages(diag.data.totalPages);
+      }
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
       setStatus(null);
@@ -212,13 +226,13 @@ export function DelhiverySyncPanel() {
 
       <FormSection
         title="Shipment diagnostics"
-        description="Normalized Delhivery status only — not proof for call eligibility yet. Empty until Delhivery sync completes."
+        description="Normalized Delhivery status only — 50 rows per page. Empty until Delhivery sync completes."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
             type="button"
             data-testid="load-delhivery-diagnostics"
-            onClick={loadDiagnostics}
+            onClick={() => loadDiagnostics(diagPage)}
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
@@ -234,55 +248,66 @@ export function DelhiverySyncPanel() {
             No shipment records yet. Sync after Shopify fulfilments with AWBs exist.
           </p>
         ) : (
-          <div className="overflow-x-auto" data-testid="delhivery-diagnostics-table">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-charcoal/55 border-b border-border">
-                <tr>
-                  <th className="py-2 pr-3 font-medium">AWB</th>
-                  <th className="py-2 pr-3 font-medium">Order</th>
-                  <th className="py-2 pr-3 font-medium">Carrier</th>
-                  <th className="py-2 pr-3 font-medium">Normalized</th>
-                  <th className="py-2 pr-3 font-medium">Provider</th>
-                  <th className="py-2 pr-3 font-medium">Delivered</th>
-                  <th className="py-2 pr-3 font-medium">Latest scan</th>
-                  <th className="py-2 pr-3 font-medium">Location</th>
-                  <th className="py-2 pr-3 font-medium">Last sync</th>
-                  <th className="py-2 font-medium">Sync error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-border/70"
-                    data-testid={`shipment-row-${row.awb}`}
-                    data-status={row.normalizedStatus}
-                  >
-                    <td className="py-2.5 pr-3 text-deep-navy font-medium">{row.awb}</td>
-                    <td className="py-2.5 pr-3">{row.orderNumber ?? "—"}</td>
-                    <td className="py-2.5 pr-3">{row.carrier}</td>
-                    <td className="py-2.5 pr-3">{row.normalizedStatus}</td>
-                    <td className="py-2.5 pr-3">{row.providerStatus ?? "—"}</td>
-                    <td className="py-2.5 pr-3">
-                      {row.deliveredAt
-                        ? new Date(row.deliveredAt).toLocaleString()
-                        : "—"}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {row.latestScanAt
-                        ? new Date(row.latestScanAt).toLocaleString()
-                        : "—"}
-                    </td>
-                    <td className="py-2.5 pr-3">{row.latestScanLocation ?? "—"}</td>
-                    <td className="py-2.5 pr-3">
-                      {new Date(row.lastSyncedAt).toLocaleString()}
-                    </td>
-                    <td className="py-2.5 text-aarla-red/90">{row.syncError ?? "—"}</td>
+          <>
+            <div className="overflow-x-auto" data-testid="delhivery-diagnostics-table">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-charcoal/55 border-b border-border">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">AWB</th>
+                    <th className="py-2 pr-3 font-medium">Order</th>
+                    <th className="py-2 pr-3 font-medium">Carrier</th>
+                    <th className="py-2 pr-3 font-medium">Normalized</th>
+                    <th className="py-2 pr-3 font-medium">Provider</th>
+                    <th className="py-2 pr-3 font-medium">Delivered</th>
+                    <th className="py-2 pr-3 font-medium">Latest scan</th>
+                    <th className="py-2 pr-3 font-medium">Location</th>
+                    <th className="py-2 pr-3 font-medium">Last sync</th>
+                    <th className="py-2 font-medium">Sync error</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-border/70"
+                      data-testid={`shipment-row-${row.awb}`}
+                      data-status={row.normalizedStatus}
+                    >
+                      <td className="py-2.5 pr-3 text-deep-navy font-medium">{row.awb}</td>
+                      <td className="py-2.5 pr-3">{row.orderNumber ?? "—"}</td>
+                      <td className="py-2.5 pr-3">{row.carrier}</td>
+                      <td className="py-2.5 pr-3">{row.normalizedStatus}</td>
+                      <td className="py-2.5 pr-3">{row.providerStatus ?? "—"}</td>
+                      <td className="py-2.5 pr-3">
+                        {row.deliveredAt
+                          ? new Date(row.deliveredAt).toLocaleString()
+                          : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {row.latestScanAt
+                          ? new Date(row.latestScanAt).toLocaleString()
+                          : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">{row.latestScanLocation ?? "—"}</td>
+                      <td className="py-2.5 pr-3">
+                        {new Date(row.lastSyncedAt).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 text-aarla-red/90">{row.syncError ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <DiagnosticsPagination
+              page={diagPage}
+              totalPages={diagTotalPages}
+              total={diagTotal}
+              pageSize={PAGE_SIZE}
+              pending={diagPending}
+              onPageChange={(next) => loadDiagnostics(next)}
+              testId="delhivery-diagnostics-pagination"
+            />
+          </>
         )}
       </FormSection>
     </div>

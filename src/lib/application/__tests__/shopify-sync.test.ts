@@ -225,14 +225,37 @@ describe.runIf(hasDb)("Shopify customer-call commerce sync", () => {
       connector: new FixtureShopifyConnector(),
       repo: repo(),
     });
-    const rows = await getShopifyCommerceDiagnostics({ repo: repo() });
-    const ananya = rows.find((r) => r.externalId === "1001");
+    const page = await getShopifyCommerceDiagnostics({ repo: repo() });
+    const ananya = page.rows.find((r) => r.externalId === "1001");
     expect(ananya).toBeTruthy();
     expect(ananya?.phoneMasked).toMatch(/1001$/);
     expect(ananya?.emailMasked).toBe("••••@aarla.test");
     expect(ananya?.awbAvailable).toBe(true);
     expect(ananya?.carriers).toContain("Delhivery");
-    expect(JSON.stringify(rows)).not.toContain("ananya.fixture@aarla.test");
+    expect(JSON.stringify(page.rows)).not.toContain("ananya.fixture@aarla.test");
+    expect(page.total).toBeGreaterThanOrEqual(page.rows.length);
+  });
+
+  it("diagnostics pagination returns later pages", async () => {
+    await clearExternalCommerce();
+    await syncShopifyCustomerCallData({
+      connector: new FixtureShopifyConnector(),
+      repo: repo(),
+    });
+    const first = await getShopifyCommerceDiagnostics({
+      repo: repo(),
+      page: 1,
+      pageSize: 1,
+    });
+    expect(first.rows).toHaveLength(1);
+    expect(first.totalPages).toBeGreaterThanOrEqual(2);
+    const second = await getShopifyCommerceDiagnostics({
+      repo: repo(),
+      page: 2,
+      pageSize: 1,
+    });
+    expect(second.rows).toHaveLength(1);
+    expect(second.rows[0]?.externalId).not.toBe(first.rows[0]?.externalId);
   });
 });
 

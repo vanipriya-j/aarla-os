@@ -110,6 +110,20 @@ export interface CommerceCustomerDiagnostic {
   awbAvailable: boolean;
 }
 
+export type DiagnosticsPageOptions = {
+  /** 1-based page index */
+  page?: number;
+  pageSize?: number;
+};
+
+export type CommerceDiagnosticsPage = {
+  rows: CommerceCustomerDiagnostic[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export function emptyShopifySyncSummary(): ShopifySyncSummary {
   return {
     customersRead: 0,

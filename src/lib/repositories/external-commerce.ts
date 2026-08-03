@@ -73,7 +73,16 @@ export interface ExternalCommerceRepository {
   listFulfilmentsForOrder(orderId: string): Promise<ExternalFulfilment[]>;
   countOrdersByExternalId(provider: CommerceProvider, externalId: string): Promise<number>;
   countCustomers(): Promise<number>;
-  diagnostics(): Promise<CommerceCustomerDiagnostic[]>;
+  diagnostics(options?: {
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    rows: CommerceCustomerDiagnostic[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }>;
   /** Integrity helpers for sync tests — do not expose PII dumps. */
   countInteractionsForExternalCustomer(externalCustomerId: string): Promise<number>;
   isDoNotContact(externalCustomerId: string): Promise<boolean>;
