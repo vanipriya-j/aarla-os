@@ -13,7 +13,7 @@ import {
 } from "@/lib/application/commerce-sync-lock";
 import type {
   DelhiverySyncSummary,
-  ShipmentDiagnosticRow,
+  ShipmentDiagnosticsPage,
 } from "@/lib/domain/shipment-types";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -49,8 +49,9 @@ export async function syncDelhiveryShipmentsAction(
   });
 }
 
-export async function getDelhiveryShipmentDiagnosticsAction(): Promise<
-  ActionResult<ShipmentDiagnosticRow[]>
-> {
-  return wrap(() => getDelhiveryShipmentDiagnostics());
+export async function getDelhiveryShipmentDiagnosticsAction(
+  page = 1,
+  pageSize = 50,
+): Promise<ActionResult<ShipmentDiagnosticsPage>> {
+  return wrap(() => getDelhiveryShipmentDiagnostics({ page, pageSize }));
 }

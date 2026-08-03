@@ -398,8 +398,27 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
       return Number(rows[0]?.c ?? 0);
     },
 
-    async diagnostics(): Promise<CommerceCustomerDiagnostic[]> {
-      // Single aggregated query — avoids N+1 over every customer on page load.
+    async diagnostics(options = {}): Promise<{
+      rows: CommerceCustomerDiagnostic[];
+      total: number;
+      page: number;
+      pageSize: number;
+      totalPages: number;
+    }> {
+      const pageSize = Math.min(Math.max(Math.floor(options.pageSize ?? 50), 1), 100);
+      const page = Math.max(Math.floor(options.page ?? 1), 1);
+      const offset = (page - 1) * pageSize;
+
+      const countRows = await q<{ c: string }>(
+        `select count(*)::text as c from external_customers where organization_id = $1`,
+        [ORG_ID],
+      );
+      const total = Number(countRows[0]?.c ?? 0);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const safeOffset = (safePage - 1) * pageSize;
+
+      // Single aggregated query — avoids N+1 over every customer.
       const rows = await q<{
         external_id: string;
         name: string;
@@ -453,23 +472,29 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
          left join ful_stats fs on fs.external_customer_id = c.id
          where c.organization_id = $1
          order by c.name
-         limit 100`,
-        [ORG_ID],
+         limit $2 offset $3`,
+        [ORG_ID, pageSize, total === 0 ? offset : safeOffset],
       );
 
-      return rows.map((r) => ({
-        externalId: String(r.external_id),
-        displayName: String(r.name ?? ""),
-        phoneMasked: maskPhone(r.phone),
-        emailMasked: maskEmail(r.email),
-        latestValidOrderAt: isoOrNull(r.latest_valid_order_at),
-        orderCount: num(r.order_count),
-        lastOrderNumber: r.last_order_number == null ? null : String(r.last_order_number),
-        lastOrderDate: isoOrNull(r.last_order_date),
-        fulfilmentCount: num(r.fulfilment_count),
-        carriers: Array.isArray(r.carriers) ? r.carriers.filter(Boolean) : [],
-        awbAvailable: Boolean(r.awb_available),
-      }));
+      return {
+        rows: rows.map((r) => ({
+          externalId: String(r.external_id),
+          displayName: String(r.name ?? ""),
+          phoneMasked: maskPhone(r.phone),
+          emailMasked: maskEmail(r.email),
+          latestValidOrderAt: isoOrNull(r.latest_valid_order_at),
+          orderCount: num(r.order_count),
+          lastOrderNumber: r.last_order_number == null ? null : String(r.last_order_number),
+          lastOrderDate: isoOrNull(r.last_order_date),
+          fulfilmentCount: num(r.fulfilment_count),
+          carriers: Array.isArray(r.carriers) ? r.carriers.filter(Boolean) : [],
+          awbAvailable: Boolean(r.awb_available),
+        })),
+        total,
+        page: total === 0 ? 1 : safePage,
+        pageSize,
+        totalPages: total === 0 ? 1 : totalPages,
+      };
     },
 
     async countInteractionsForExternalCustomer(externalCustomerId) {

@@ -54,6 +54,15 @@ export interface ShipmentRepository {
     syncError: string,
   ): Promise<Shipment | null>;
   appendStatusEvents(input: AppendEventsInput): Promise<number>;
-  listDiagnostics(): Promise<ShipmentDiagnosticRow[]>;
+  listDiagnostics(options?: {
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    rows: ShipmentDiagnosticRow[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }>;
   countByAwb(carrier: ShipmentCarrier, awb: string): Promise<number>;
 }

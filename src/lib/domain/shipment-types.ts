@@ -71,6 +71,14 @@ export interface ShipmentDiagnosticRow {
   syncStatus: ShipmentSyncStatus;
 }
 
+export type ShipmentDiagnosticsPage = {
+  rows: ShipmentDiagnosticRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export interface DelhiverySyncSummary {
   fulfilmentsEvaluated: number;
   delhiveryAwbsFound: number;

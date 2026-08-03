@@ -16,7 +16,7 @@ import {
   emptyDelhiverySyncSummary,
   tallyNormalizedStatus,
   type DelhiverySyncSummary,
-  type ShipmentDiagnosticRow,
+  type ShipmentDiagnosticsPage,
 } from "@/lib/domain/shipment-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
 
@@ -219,8 +219,12 @@ export async function syncDelhiveryShipments(
 }
 
 export async function getDelhiveryShipmentDiagnostics(
-  deps: { repo?: ShipmentRepository } = {},
-): Promise<ShipmentDiagnosticRow[]> {
+  deps: {
+    repo?: ShipmentRepository;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<ShipmentDiagnosticsPage> {
   const repo = deps.repo ?? createShipmentRepository();
-  return repo.listDiagnostics();
+  return repo.listDiagnostics({ page: deps.page, pageSize: deps.pageSize });
 }

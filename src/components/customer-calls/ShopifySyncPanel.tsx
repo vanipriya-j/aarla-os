@@ -15,7 +15,10 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import { syncShopifyChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
+import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
 import { Hourglass, Loader2, RefreshCw } from "lucide-react";
+
+const PAGE_SIZE = 50;
 
 function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
   const items: Array<[string, number | string]> = [
@@ -53,25 +56,31 @@ export function ShopifySyncPanel() {
   const [summary, setSummary] = useState<ShopifySyncSummary | null>(null);
   const [diagnostics, setDiagnostics] = useState<CommerceCustomerDiagnostic[]>([]);
   const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
+  const [diagPage, setDiagPage] = useState(1);
+  const [diagTotal, setDiagTotal] = useState(0);
+  const [diagTotalPages, setDiagTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  const loadDiagnostics = useCallback(() => {
+  const loadDiagnostics = useCallback((page = 1) => {
     startDiagTransition(async () => {
-      const res = await getShopifyCommerceDiagnosticsAction();
+      const res = await getShopifyCommerceDiagnosticsAction(page, PAGE_SIZE);
       setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      setDiagnostics(res.data);
+      setDiagnostics(res.data.rows);
+      setDiagPage(res.data.page);
+      setDiagTotal(res.data.total);
+      setDiagTotalPages(res.data.totalPages);
     });
   }, []);
 
   // Cheap aggregated query — safe to show on open (not a sync).
   useEffect(() => {
-    loadDiagnostics();
+    loadDiagnostics(1);
   }, [loadDiagnostics]);
 
   async function handleSync() {
@@ -128,9 +137,14 @@ export function ShopifySyncPanel() {
           ? "Shopify sync complete."
           : "Shopify sync paused — click Sync again to continue.",
       );
-      const diag = await getShopifyCommerceDiagnosticsAction();
+      const diag = await getShopifyCommerceDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
-      if (diag.ok) setDiagnostics(diag.data);
+      if (diag.ok) {
+        setDiagnostics(diag.data.rows);
+        setDiagPage(diag.data.page);
+        setDiagTotal(diag.data.total);
+        setDiagTotalPages(diag.data.totalPages);
+      }
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
       setStatus(null);
@@ -204,13 +218,13 @@ export function ShopifySyncPanel() {
 
       <FormSection
         title="Synced commerce diagnostics"
-        description="Review-only view (up to 100 rows). Personal data is masked. Sync progress cards above clear on refresh — these rows are what is saved."
+        description="Review-only view, 50 customers per page (A–Z). Personal data is masked."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
             type="button"
             data-testid="load-shopify-diagnostics"
-            onClick={loadDiagnostics}
+            onClick={() => loadDiagnostics(diagPage)}
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
@@ -226,50 +240,61 @@ export function ShopifySyncPanel() {
             No synchronized Shopify customers yet.
           </p>
         ) : (
-          <div className="overflow-x-auto" data-testid="shopify-diagnostics-table">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-charcoal/55 border-b border-border">
-                <tr>
-                  <th className="py-2 pr-3 font-medium">Customer</th>
-                  <th className="py-2 pr-3 font-medium">Contact</th>
-                  <th className="py-2 pr-3 font-medium">Latest purchase</th>
-                  <th className="py-2 pr-3 font-medium">Orders</th>
-                  <th className="py-2 pr-3 font-medium">Last order</th>
-                  <th className="py-2 pr-3 font-medium">Fulfilments</th>
-                  <th className="py-2 pr-3 font-medium">Carrier</th>
-                  <th className="py-2 font-medium">AWB</th>
-                </tr>
-              </thead>
-              <tbody>
-                {diagnostics.map((row) => (
-                  <tr key={row.externalId} className="border-b border-border/70">
-                    <td className="py-2.5 pr-3 text-deep-navy">{row.displayName}</td>
-                    <td className="py-2.5 pr-3 text-charcoal/70">
-                      {[row.phoneMasked, row.emailMasked].filter(Boolean).join(" · ") || "—"}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {row.latestValidOrderAt
-                        ? new Date(row.latestValidOrderAt).toLocaleDateString()
-                        : "—"}
-                    </td>
-                    <td className="py-2.5 pr-3">{row.orderCount}</td>
-                    <td className="py-2.5 pr-3">
-                      {row.lastOrderNumber
-                        ? `${row.lastOrderNumber}${
-                            row.lastOrderDate
-                              ? ` · ${new Date(row.lastOrderDate).toLocaleDateString()}`
-                              : ""
-                          }`
-                        : "—"}
-                    </td>
-                    <td className="py-2.5 pr-3">{row.fulfilmentCount}</td>
-                    <td className="py-2.5 pr-3">{row.carriers.join(", ") || "—"}</td>
-                    <td className="py-2.5">{row.awbAvailable ? "Yes" : "No"}</td>
+          <>
+            <div className="overflow-x-auto" data-testid="shopify-diagnostics-table">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-charcoal/55 border-b border-border">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Customer</th>
+                    <th className="py-2 pr-3 font-medium">Contact</th>
+                    <th className="py-2 pr-3 font-medium">Latest purchase</th>
+                    <th className="py-2 pr-3 font-medium">Orders</th>
+                    <th className="py-2 pr-3 font-medium">Last order</th>
+                    <th className="py-2 pr-3 font-medium">Fulfilments</th>
+                    <th className="py-2 pr-3 font-medium">Carrier</th>
+                    <th className="py-2 font-medium">AWB</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {diagnostics.map((row) => (
+                    <tr key={row.externalId} className="border-b border-border/70">
+                      <td className="py-2.5 pr-3 text-deep-navy">{row.displayName}</td>
+                      <td className="py-2.5 pr-3 text-charcoal/70">
+                        {[row.phoneMasked, row.emailMasked].filter(Boolean).join(" · ") || "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {row.latestValidOrderAt
+                          ? new Date(row.latestValidOrderAt).toLocaleDateString()
+                          : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">{row.orderCount}</td>
+                      <td className="py-2.5 pr-3">
+                        {row.lastOrderNumber
+                          ? `${row.lastOrderNumber}${
+                              row.lastOrderDate
+                                ? ` · ${new Date(row.lastOrderDate).toLocaleDateString()}`
+                                : ""
+                            }`
+                          : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">{row.fulfilmentCount}</td>
+                      <td className="py-2.5 pr-3">{row.carriers.join(", ") || "—"}</td>
+                      <td className="py-2.5">{row.awbAvailable ? "Yes" : "No"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <DiagnosticsPagination
+              page={diagPage}
+              totalPages={diagTotalPages}
+              total={diagTotal}
+              pageSize={PAGE_SIZE}
+              pending={diagPending}
+              onPageChange={(next) => loadDiagnostics(next)}
+              testId="shopify-diagnostics-pagination"
+            />
+          </>
         )}
       </FormSection>
     </div>

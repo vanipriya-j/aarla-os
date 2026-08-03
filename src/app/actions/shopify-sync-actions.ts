@@ -12,7 +12,7 @@ import {
   acquireOrRenewCommerceSyncLock,
 } from "@/lib/application/commerce-sync-lock";
 import type {
-  CommerceCustomerDiagnostic,
+  CommerceDiagnosticsPage,
   ShopifySyncSummary,
 } from "@/lib/domain/external-commerce-types";
 
@@ -49,8 +49,9 @@ export async function syncShopifyCustomerCallDataAction(
   });
 }
 
-export async function getShopifyCommerceDiagnosticsAction(): Promise<
-  ActionResult<CommerceCustomerDiagnostic[]>
-> {
-  return wrap(() => getShopifyCommerceDiagnostics());
+export async function getShopifyCommerceDiagnosticsAction(
+  page = 1,
+  pageSize = 50,
+): Promise<ActionResult<CommerceDiagnosticsPage>> {
+  return wrap(() => getShopifyCommerceDiagnostics({ page, pageSize }));
 }

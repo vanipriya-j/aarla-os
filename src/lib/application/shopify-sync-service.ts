@@ -10,7 +10,7 @@ import { createExternalCommerceRepository } from "@/lib/infra/repositories/postg
 import type { ExternalCommerceRepository } from "@/lib/repositories/external-commerce";
 import {
   emptyShopifySyncSummary,
-  type CommerceCustomerDiagnostic,
+  type CommerceDiagnosticsPage,
   type ShopifySyncSummary,
 } from "@/lib/domain/external-commerce-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
@@ -236,8 +236,12 @@ export async function syncShopifyCustomerCallData(
 }
 
 export async function getShopifyCommerceDiagnostics(
-  deps: { repo?: ExternalCommerceRepository } = {},
-): Promise<CommerceCustomerDiagnostic[]> {
+  deps: {
+    repo?: ExternalCommerceRepository;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<CommerceDiagnosticsPage> {
   const repo = deps.repo ?? createExternalCommerceRepository();
-  return repo.diagnostics();
+  return repo.diagnostics({ page: deps.page, pageSize: deps.pageSize });
 }
