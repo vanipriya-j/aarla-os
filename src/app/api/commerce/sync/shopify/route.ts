@@ -21,16 +21,14 @@ function toErrorMessage(err: unknown): string {
 
 /**
  * POST /api/commerce/sync/shopify
- * Body: { cursor?: string | null, lockToken: string }
- *
- * JSON API (not a Server Action) so timeouts return a parseable error instead of
- * Next.js "An unexpected response was received from the server."
+ * Body: { cursor?: string | null, lockToken: string, mode?: "incremental" | "full" }
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       cursor?: string | null;
       lockToken?: string;
+      mode?: "incremental" | "full";
     };
     const lockToken = body.lockToken?.trim();
     if (!lockToken) {
@@ -47,6 +45,8 @@ export async function POST(request: Request) {
 
     const data = await syncShopifyCustomerCallData({
       cursor: body.cursor ?? null,
+      mode: body.mode === "full" ? "full" : "incremental",
+      runId: lockToken,
     });
     return NextResponse.json({ ok: true, data });
   } catch (err) {

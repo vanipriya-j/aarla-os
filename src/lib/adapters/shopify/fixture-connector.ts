@@ -269,10 +269,25 @@ export class FixtureShopifyConnector implements ShopifyConnector {
   async fetchCustomerCallPage(
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyCustomerCallPage> {
-    void options;
     const payload = await this.fetchCustomerCallPayload();
+    let orders = payload.orders;
+    let customers = payload.customers;
+
+    const match = options.query?.match(/created_at:>'([^']+)'/);
+    if (match?.[1]) {
+      const afterMs = new Date(match[1]).getTime();
+      if (Number.isFinite(afterMs)) {
+        orders = orders.filter((o) => new Date(o.orderDate).getTime() > afterMs);
+        const ids = new Set(
+          orders.map((o) => o.externalCustomerId).filter((id): id is string => Boolean(id)),
+        );
+        customers = customers.filter((c) => ids.has(c.externalId));
+      }
+    }
+
     return {
-      ...payload,
+      customers,
+      orders,
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,

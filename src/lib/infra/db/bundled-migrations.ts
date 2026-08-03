@@ -23,5 +23,9 @@ export const BUNDLED_MIGRATIONS: { filename: string; sql: string }[] = [
   {
     "filename": "20260805120000_commerce_sync_locks.sql",
     "sql": "-- Global lock so Shopify and Delhivery syncs never run in parallel.\n-- Client passes a holder token across chunks; stale locks expire after 15 minutes.\n\ncreate table commerce_sync_locks (\n  id text primary key check (id = 'global'),\n  holder text not null,\n  channel text not null check (channel in ('shopify', 'delhivery', 'commerce')),\n  started_at timestamptz not null default now(),\n  updated_at timestamptz not null default now()\n);\n"
+  },
+  {
+    "filename": "20260806120000_commerce_sync_watermarks.sql",
+    "sql": "-- Watermarks for incremental commerce sync (Shopify orders, etc.)\n\ncreate table commerce_sync_watermarks (\n  channel text primary key check (channel in ('shopify_orders')),\n  organization_id uuid not null references organizations(id) on delete cascade,\n  -- Committed high-water: only orders after this are fetched on incremental sync\n  watermark_at timestamptz,\n  -- In-flight run tracking so we only commit after the final chunk\n  run_id text,\n  run_high_water_at timestamptz,\n  updated_at timestamptz not null default now()\n);\n\ncreate index commerce_sync_watermarks_org_idx\n  on commerce_sync_watermarks(organization_id);\n"
   }
 ];

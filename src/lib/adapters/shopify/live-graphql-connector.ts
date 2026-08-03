@@ -44,8 +44,8 @@ export function readLiveShopifyConfigFromEnv(
 }
 
 const ORDERS_QUERY = `
-query SyncOrders($cursor: String) {
-  orders(first: 25, after: $cursor, sortKey: CREATED_AT, reverse: true) {
+query SyncOrders($cursor: String, $query: String) {
+  orders(first: 25, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -272,7 +272,10 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     while (hasNext && pages < maxPages) {
       pages += 1;
-      const variables: { cursor: string | null } = { cursor };
+      const variables: { cursor: string | null; query: string | null } = {
+        cursor,
+        query: options.query?.trim() ? options.query.trim() : null,
+      };
       const data: OrdersQueryData = await this.graphql<OrdersQueryData>(
         ORDERS_QUERY,
         variables,
@@ -304,6 +307,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     const page = await this.fetchCustomerCallPage({
       cursor: options.cursor,
       maxPages: options.maxPages ?? 1,
+      query: options.query,
     });
     return { customers: page.customers, orders: page.orders };
   }

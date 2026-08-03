@@ -82,7 +82,7 @@ export function ShopifySyncPanel() {
     }
 
     setError(null);
-    setStatus("Click received — starting Shopify sync…");
+    setStatus("Click received — incremental Shopify sync (new orders only)…");
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
@@ -98,7 +98,7 @@ export function ShopifySyncPanel() {
         );
         let res;
         try {
-          res = await syncShopifyChunkViaApi(cursor, token);
+          res = await syncShopifyChunkViaApi(cursor, token, "incremental");
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setSummary(total.ordersRead > 0 || total.customersRead > 0 ? total : null);
@@ -143,7 +143,7 @@ export function ShopifySyncPanel() {
     <div className="space-y-4" data-testid="shopify-sync-panel">
       <FormSection
         title="Shopify commerce sync"
-        description="Pulls orders in small chunks so Vercel does not time out. Keeps going automatically until complete. Does not start on page load. Does not refresh call queues."
+        description="Default sync is incremental (new orders since last success). Pulls in small chunks. Does not start on page load. Does not refresh call queues."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -159,7 +159,7 @@ export function ShopifySyncPanel() {
             ) : (
               <RefreshCw className="h-4 w-4" aria-hidden />
             )}
-            {syncingHere ? "Syncing Shopify…" : "Sync Shopify Data"}
+            {syncingHere ? "Syncing new orders…" : "Sync new Shopify orders"}
           </button>
           {busy ? (
             <StatusChip

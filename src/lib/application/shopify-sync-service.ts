@@ -14,14 +14,27 @@ import {
   type ShopifySyncSummary,
 } from "@/lib/domain/external-commerce-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
+import {
+  commitShopifyOrdersWatermark,
+  getShopifyOrdersWatermark,
+  noteShopifyOrdersSyncProgress,
+  shopifyOrdersCreatedAfterQuery,
+} from "@/lib/application/commerce-sync-watermarks";
 
 export type SyncShopifyDeps = {
   connector?: ShopifyConnector;
   repo?: ExternalCommerceRepository;
   /** Resume cursor from a previous chunk */
   cursor?: string | null;
-  /** Order pages per invocation (default 3 ≈ 150 orders) */
+  /** Order pages per invocation (default 1 ≈ 25 orders) */
   maxPages?: number;
+  /**
+   * incremental (default): only orders after the last successful sync watermark.
+   * full: walk the entire order catalog.
+   */
+  mode?: "incremental" | "full";
+  /** Sync run id (lock token) — required to commit the watermark after the last chunk */
+  runId?: string | null;
 };
 
 function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
@@ -43,10 +56,19 @@ function defaultMaxPages(): number {
   return Math.min(Math.floor(n), 10);
 }
 
+function maxOrderDateIso(orders: Array<{ orderDate: string }>): string | null {
+  let maxMs = 0;
+  for (const o of orders) {
+    const ms = new Date(o.orderDate).getTime();
+    if (Number.isFinite(ms) && ms > maxMs) maxMs = ms;
+  }
+  return maxMs > 0 ? new Date(maxMs).toISOString() : null;
+}
+
 /**
  * Server-side Shopify → Aarla OS commerce sync for Customer Calls foundation.
  * Chunked for Vercel timeouts — pass `cursor` from the previous summary to continue.
- * Does not regenerate call queues or mutate interactions / contact preferences.
+ * Default mode is incremental (new orders only). Does not regenerate call queues.
  */
 export async function syncShopifyCustomerCallData(
   deps: SyncShopifyDeps = {},
@@ -55,6 +77,19 @@ export async function syncShopifyCustomerCallData(
   const repo = deps.repo ?? createExternalCommerceRepository();
   const connector = resolveConnector(deps);
   const maxPages = deps.maxPages ?? defaultMaxPages();
+  const mode = deps.mode === "full" ? "full" : "incremental";
+  summary.mode = mode;
+
+  let query: string | null = null;
+  if (mode === "incremental") {
+    const watermark = await getShopifyOrdersWatermark();
+    summary.incrementalFrom = watermark;
+    if (watermark) {
+      query = shopifyOrdersCreatedAfterQuery(watermark);
+    }
+  } else {
+    summary.incrementalFrom = null;
+  }
 
   let payload;
   let hasMore = false;
@@ -66,6 +101,7 @@ export async function syncShopifyCustomerCallData(
       const page = await connector.fetchCustomerCallPage({
         cursor: deps.cursor ?? null,
         maxPages,
+        query,
       });
       payload = { customers: page.customers, orders: page.orders };
       hasMore = page.hasMore;
@@ -75,6 +111,7 @@ export async function syncShopifyCustomerCallData(
       payload = await connector.fetchCustomerCallPayload({
         cursor: deps.cursor ?? null,
         maxPages,
+        query,
       });
       hasMore = false;
       nextCursor = null;
@@ -96,6 +133,13 @@ export async function syncShopifyCustomerCallData(
   summary.nextCursor = nextCursor;
   summary.pagesFetched = pagesFetched;
   summary.complete = !hasMore;
+
+  if (deps.runId) {
+    await noteShopifyOrdersSyncProgress({
+      runId: deps.runId,
+      maxOrderAt: maxOrderDateIso(payload.orders),
+    });
+  }
 
   const customerExternalIds = new Set<string>();
 
@@ -230,6 +274,10 @@ export async function syncShopifyCustomerCallData(
         `Latest order ${externalId}: ${err instanceof Error ? err.message : "update failed"}`,
       );
     }
+  }
+
+  if (summary.complete && deps.runId) {
+    await commitShopifyOrdersWatermark(deps.runId);
   }
 
   return summary;

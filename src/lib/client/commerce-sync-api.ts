@@ -82,10 +82,12 @@ async function postJson<T>(url: string, body: unknown): Promise<ActionResult<T>>
 export async function syncShopifyChunkViaApi(
   cursor: string | null,
   lockToken: string,
+  mode: "incremental" | "full" = "incremental",
 ): Promise<ActionResult<ShopifySyncSummary>> {
   return postJson<ShopifySyncSummary>("/api/commerce/sync/shopify", {
     cursor,
     lockToken,
+    mode,
   });
 }
 
