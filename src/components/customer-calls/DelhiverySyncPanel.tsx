@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
-import {
-  getDelhiveryShipmentDiagnosticsAction,
-  syncDelhiveryShipmentsAction,
-} from "@/app/actions/delhivery-sync-actions";
+import { getDelhiveryShipmentDiagnosticsAction } from "@/app/actions/delhivery-sync-actions";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
 import type {
   DelhiverySyncSummary,
@@ -16,6 +13,7 @@ import {
   emptyDelhiverySyncSummary,
   mergeDelhiverySyncSummaries,
 } from "@/lib/domain/shipment-types";
+import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { Truck } from "lucide-react";
 
@@ -104,7 +102,7 @@ export function DelhiverySyncPanel() {
         );
         let res;
         try {
-          res = await syncDelhiveryShipmentsAction(offset, token);
+          res = await syncDelhiveryChunkViaApi(offset, token);
         } catch (err) {
           setError(formatCommerceSyncFailure(err));
           setSummary(

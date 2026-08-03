@@ -36,7 +36,7 @@ function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
 }
 
 function defaultMaxPages(): number {
-  // Default 1 page (~50 orders) per invocation — safer under Vercel 60s limits.
+  // Default 1 page (~25 orders) per invocation — safer under Vercel 60s limits.
   const raw = process.env.SHOPIFY_SYNC_MAX_PAGES?.trim();
   const n = raw ? Number(raw) : 1;
   if (!Number.isFinite(n) || n < 1) return 1;

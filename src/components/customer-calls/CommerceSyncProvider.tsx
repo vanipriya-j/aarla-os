@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { releaseCommerceSyncLockAction } from "@/app/actions/commerce-sync-lock-actions";
+import { clearCommerceSyncLockViaApi } from "@/lib/client/commerce-sync-api";
 
 export type CommerceSyncChannel = "shopify" | "delhivery" | "all";
 
@@ -48,7 +48,13 @@ export function CommerceSyncProvider({ children }: { children: ReactNode }) {
   const endSync = useCallback(async (lockToken: string | null) => {
     try {
       if (lockToken) {
-        await releaseCommerceSyncLockAction(lockToken);
+        // Prefer release-by-token via lock API; clear is safe if release fails mid-timeout.
+        await fetch("/api/commerce/sync/lock", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "release", lockToken }),
+          cache: "no-store",
+        }).catch(() => clearCommerceSyncLockViaApi());
       }
     } finally {
       activeRef.current = null;
