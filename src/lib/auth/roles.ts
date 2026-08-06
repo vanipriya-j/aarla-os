@@ -17,12 +17,18 @@ const CRM_PATH_PREFIXES = [
   "/api/commerce/sync",
 ] as const;
 
-/** Always public (no login), even when auth is enabled. */
+/**
+ * Always public (no login), even when auth is enabled.
+ * /setup + /api/setup stay open so first-time migration can create auth_sessions
+ * before anyone can log in; /api/setup is still gated by SETUP_SECRET.
+ */
 const PUBLIC_PATH_PREFIXES = [
   "/api/health",
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
+  "/setup",
+  "/api/setup",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

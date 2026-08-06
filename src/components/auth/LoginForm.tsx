@@ -25,7 +25,12 @@ export function LoginForm({ nextPath }: { nextPath?: string }) {
           redirectTo?: string;
         };
         if (!res.ok) {
-          setError(body.error || "Sign in failed");
+          const msg = body.error || "Sign in failed";
+          setError(
+            res.status === 503
+              ? `${msg} Open /setup and apply migrations first.`
+              : msg,
+          );
           return;
         }
         router.replace(body.redirectTo || "/");
