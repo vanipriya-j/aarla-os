@@ -97,7 +97,7 @@ export function ShopifySyncPanel() {
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
-    const maxChunks = 200; // safety: 200 × ~25 orders
+    const maxChunks = 80; // safety: 80 × ~100 orders
 
     try {
       while (guard < maxChunks) {

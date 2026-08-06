@@ -43,6 +43,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 1890,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5001-1",
@@ -84,6 +85,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 2490,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5002-1",
@@ -116,6 +118,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 990,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5003-1",
@@ -148,6 +151,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 1500,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5004-1",
@@ -172,6 +176,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 800,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5005-1",
@@ -196,6 +201,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: true,
     totalAmount: 100,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5006-1",
@@ -220,6 +226,7 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 500,
     currency: "INR",
+    contactPhone: null,
     lineItems: [
       {
         externalLineItemId: "li-5007-1",
@@ -278,6 +285,27 @@ export class FixtureShopifyConnector implements ShopifyConnector {
       const afterMs = new Date(match[1]).getTime();
       if (Number.isFinite(afterMs)) {
         orders = orders.filter((o) => new Date(o.orderDate).getTime() > afterMs);
+        const ids = new Set(
+          orders.map((o) => o.externalCustomerId).filter((id): id is string => Boolean(id)),
+        );
+        customers = customers.filter((c) => ids.has(c.externalId));
+      }
+    }
+
+    // Targeted phone backfill: name:"#10450" OR name:#10451
+    if (options.query && /name:/i.test(options.query)) {
+      const names = [
+        ...options.query.matchAll(/name:(?:"([^"]+)"|#?([\w-]+))/g),
+      ].map((m) => {
+        const raw = (m[1] ?? m[2] ?? "").trim();
+        return raw.startsWith("#") ? raw : `#${raw}`;
+      });
+      if (names.length) {
+        const want = new Set(names);
+        orders = orders.filter((o) => {
+          const n = o.orderNumber.startsWith("#") ? o.orderNumber : `#${o.orderNumber}`;
+          return want.has(n);
+        });
         const ids = new Set(
           orders.map((o) => o.externalCustomerId).filter((id): id is string => Boolean(id)),
         );

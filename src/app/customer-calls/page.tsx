@@ -232,7 +232,7 @@ export default function CustomerCallsPage() {
                 : stage === "shipments"
                   ? "Stage 2 — Track every Delhivery AWB in the database (not just the last Shopify page)."
                   : stage === "delivery-follow-up"
-                    ? "Stage 3 — Call customers with recent deliveries. Click Refresh call queues after syncing."
+                    ? "Stage 3 — Call customers with recent deliveries. Refresh also fills missing phones for those orders only."
                     : "Stage 4 — Re-engage buyers with no purchase in 90+ days."}
             </p>
           </div>
@@ -331,6 +331,9 @@ export default function CustomerCallsPage() {
                         : ""}
                       {" · "}
                       {queueGen.reengagementCandidates} re-engagement
+                      {queueGen.phonesEnriched
+                        ? ` · filled ${queueGen.phonesEnriched} phones`
+                        : ""}
                       {queueGen.seedPendingCleared
                         ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
                         : ""}

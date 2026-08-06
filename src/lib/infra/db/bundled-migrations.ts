@@ -31,5 +31,9 @@ export const BUNDLED_MIGRATIONS: { filename: string; sql: string }[] = [
   {
     "filename": "20260807120000_call_queue_natural_key.sql",
     "sql": "-- Idempotent live call-queue upserts via explicit source_key.\n-- Delivery: delivery:{shopifyCustomerId}:{orderNumber}\n-- Re-engagement: reeng:{shopifyCustomerId}\n-- Legacy seed rows get a stable legacy:{id} key so the unique index can apply.\n\nalter table customer_call_queue_items\n  add column if not exists source_key text;\n\nupdate customer_call_queue_items\nset source_key = 'legacy:' || id::text\nwhere source_key is null;\n\nalter table customer_call_queue_items\n  alter column source_key set not null;\n\ncreate unique index if not exists customer_call_queue_source_key_uidx\n  on customer_call_queue_items (organization_id, segment_id, source_key);\n"
+  },
+  {
+    "filename": "20260808120000_order_contact_phone.sql",
+    "sql": "-- Persist best-known contact phone from Shopify order (shipping/billing/customer).\n-- Lets call queues use order-level phones without a full catalog re-sync.\n-- Idempotent for runtime ensure + /setup.\n\nalter table external_orders\n  add column if not exists contact_phone text;\n"
   }
 ]

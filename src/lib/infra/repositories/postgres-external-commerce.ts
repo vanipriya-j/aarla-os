@@ -219,6 +219,7 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
              exclusion_reason = $11,
              total_amount = $12,
              currency = $13,
+             contact_phone = coalesce(nullif(btrim($14), ''), contact_phone),
              last_synced_at = now()
            where id = $1 and organization_id = $2`,
           [
@@ -235,6 +236,7 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.exclusionReason,
             input.totalAmount,
             input.currency,
+            input.contactPhone ?? null,
           ],
         );
       } else {
@@ -243,8 +245,9 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
           `insert into external_orders (
              organization_id, provider, external_id, order_number, external_customer_id,
              order_date, financial_status, fulfilment_status, cancelled_at,
-             is_test, is_valid, exclusion_reason, total_amount, currency, last_synced_at
-           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+             is_test, is_valid, exclusion_reason, total_amount, currency, contact_phone,
+             last_synced_at
+           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())
            returning id`,
           [
             ORG_ID,
@@ -261,6 +264,7 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.exclusionReason,
             input.totalAmount,
             input.currency,
+            input.contactPhone ?? null,
           ],
         );
         orderId = rows[0]!.id;
@@ -293,6 +297,75 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
       }
 
       return { id: orderId, created };
+    },
+
+    async ensureOrderContactPhoneSchema() {
+      await q(`
+        alter table external_orders
+          add column if not exists contact_phone text
+      `);
+    },
+
+    async listDeliveredOrdersMissingPhone(limit = 40) {
+      const cap = Math.max(1, Math.min(Math.floor(limit), 80));
+      const rows = await q<{
+        order_number: string;
+        customer_external_id: string;
+      }>(
+        `select distinct
+           coalesce(nullif(btrim(o.order_number), ''), o.external_id) as order_number,
+           c.external_id as customer_external_id
+         from shipments s
+         left join external_fulfilments f on f.id = s.external_fulfilment_id
+         join external_orders o
+           on o.id = coalesce(s.external_order_id, f.external_order_id)
+         join external_customers c on c.id = o.external_customer_id
+         where s.organization_id = $1
+           and s.carrier = 'delhivery'
+           and s.normalized_status = 'delivered'
+           and s.delivered_at is not null
+           and (c.phone is null or btrim(c.phone) = '')
+           and (o.contact_phone is null or btrim(o.contact_phone) = '')
+         order by order_number
+         limit $2`,
+        [ORG_ID, cap],
+      );
+      return rows.map((r) => ({
+        orderNumber: String(r.order_number),
+        customerExternalId: String(r.customer_external_id),
+      }));
+    },
+
+    async applyContactPhone(input) {
+      const phone = input.phone.trim();
+      if (!phone) return { orderUpdated: false, customerUpdated: false };
+
+      const orderRows = await q<{ id: string }>(
+        `update external_orders
+         set contact_phone = $4, last_synced_at = now()
+         where organization_id = $1 and provider = $2 and external_id = $3
+           and (contact_phone is null or btrim(contact_phone) = '')
+         returning id`,
+        [ORG_ID, input.provider, input.orderExternalId, phone],
+      );
+
+      let customerUpdated = false;
+      if (input.customerExternalId) {
+        const cust = await q<{ id: string }>(
+          `update external_customers
+           set phone = $4, last_synced_at = now()
+           where organization_id = $1 and provider = $2 and external_id = $3
+             and (phone is null or btrim(phone) = '')
+           returning id`,
+          [ORG_ID, input.provider, input.customerExternalId, phone],
+        );
+        customerUpdated = Boolean(cust[0]);
+      }
+
+      return {
+        orderUpdated: Boolean(orderRows[0]),
+        customerUpdated,
+      };
     },
 
     async upsertFulfilment(input: UpsertFulfilmentInput) {

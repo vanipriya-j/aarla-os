@@ -26,7 +26,7 @@ export type SyncShopifyDeps = {
   repo?: ExternalCommerceRepository;
   /** Resume cursor from a previous chunk */
   cursor?: string | null;
-  /** Order pages per invocation (default 1 ≈ 25 orders) */
+  /** Order pages per invocation (default 1 ≈ 100 orders) */
   maxPages?: number;
   /**
    * incremental (default): only orders after the last successful sync watermark.
@@ -49,7 +49,7 @@ function resolveConnector(deps: SyncShopifyDeps): ShopifyConnector {
 }
 
 function defaultMaxPages(): number {
-  // Default 1 page (~25 orders) per invocation — safer under Vercel 60s limits.
+  // Default 1 page (~100 orders) per invocation — safer under Vercel 60s limits.
   const raw = process.env.SHOPIFY_SYNC_MAX_PAGES?.trim();
   const n = raw ? Number(raw) : 1;
   if (!Number.isFinite(n) || n < 1) return 1;
@@ -220,6 +220,7 @@ export async function syncShopifyCustomerCallData(
         exclusionReason,
         totalAmount: order.totalAmount,
         currency: order.currency,
+        contactPhone: order.contactPhone ?? null,
         lineItems: order.lineItems,
       });
       if (result.created) summary.ordersAdded += 1;

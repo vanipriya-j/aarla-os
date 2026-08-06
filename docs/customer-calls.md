@@ -34,5 +34,5 @@ Commerce sync does **not** invent queue rows by itself; generation reads already
 
 1. Run `/setup` Initialize (or `db:migrate` + `db:seed`) so segments exist.  
 2. Open **Shipments** → **Sync Delhivery Shipments** (or **Sync All**) and let it finish all AWB chunks.  
-3. Open **Delivery Follow-up** → **Refresh call queues**.  
+3. Open **Delivery Follow-up** → **Refresh call queues** (also backfills missing phones for those delivered orders only — no full Shopify re-upload).  
 4. If you still see Meera Iyer / demo names, click **Refresh call queues** once after this deploy — demo rows are cleared whenever synced shipments exist.
