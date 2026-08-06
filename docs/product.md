@@ -28,7 +28,7 @@ A single founder operating Aarla day to day.
 
 ## Non-goals (v0.1)
 
-- Per-user SSO / multi-tenant accounts (Basic Auth roles only — see `docs/auth.md`)
+- Per-user SSO / multi-tenant accounts (shared role logins only — see `docs/auth.md`)
 - Paid services
 - Email / WhatsApp integrations
 

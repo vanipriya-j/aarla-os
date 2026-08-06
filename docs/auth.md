@@ -1,13 +1,13 @@
-# Role-based HTTP Basic Auth
+# Role-based cookie sessions
 
-Aarla OS supports two browser logins via HTTP Basic Auth.
+Aarla OS supports two shared logins via a sign-in form and HttpOnly cookies.
 
 | Role | Access |
 |------|--------|
 | **admin** | Full founder OS (all pages + `/setup` + diagnostics) |
 | **crm** | Outreach only: `/customer-calls` and `/api/commerce/sync/*` |
 
-`/api/health` stays public for uptime checks.
+`/api/health` stays public for uptime checks. `/login` and `/api/auth/login` are public so users can sign in.
 
 ## Enable (Vercel / production)
 
@@ -20,19 +20,30 @@ AUTH_CRM_USERNAME=crm
 AUTH_CRM_PASSWORD=…
 ```
 
+Optional:
+
+```
+AUTH_SESSION_TTL_DAYS=14
+```
+
 Usernames default to `admin` / `crm` if omitted. Auth turns on when **at least one** password is non-empty.
+
+Also run DB migrations (`/setup` or `npm run db:migrate`) so the `auth_sessions` table exists.
 
 Locally, leave passwords unset to keep the open-dev experience (treated as admin for navigation).
 
 ## Behaviour
 
-1. Browser shows the native Basic Auth dialog.
-2. CRM users opening `/`, `/diagnostics`, `/setup`, etc. are redirected to `/customer-calls`.
-3. Sidebar / mobile nav only list screens the role can open.
-4. Server Actions on Customer Calls inherit the same Basic Auth (same origin).
+1. Unauthenticated browsers are redirected to `/login`.
+2. Successful login creates a row in `auth_sessions` and sets the `aarla_session` cookie.
+3. CRM users opening `/`, `/diagnostics`, `/setup`, etc. are redirected to `/customer-calls`.
+4. Sidebar / mobile nav only list screens the role can open.
+5. **Sign out** (sidebar / mobile) revokes the current session and clears the cookie.
+6. **Admin → Diagnostics → Login sessions** lists active sessions and can sign out any other session (or all others at once). Revoked sessions fail on the next request.
 
 ## Notes
 
-- This is intentionally simple shared-secret auth — not SSO / per-user accounts.
-- Rotate passwords by changing env vars and redeploying.
+- This replaces HTTP Basic Auth so logout and remote session revoke work reliably.
+- Shared-secret roles — not SSO / per-user accounts.
+- Rotate passwords by changing env vars and redeploying; also revoke active sessions from Diagnostics if needed.
 - Playwright / local tests run with auth **off** unless passwords are set in the test env.

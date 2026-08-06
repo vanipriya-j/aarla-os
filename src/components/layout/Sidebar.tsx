@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Boxes } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { LogoutButton } from "@/components/auth/LogoutButton";
 import { navForRole } from "@/lib/auth/nav";
 import { homePathForRole } from "@/lib/auth/roles";
 
@@ -130,11 +131,14 @@ export function Sidebar() {
 
       <div className="p-4 border-t border-border space-y-2">
         {authEnabled ? (
-          <p className="px-1 text-xs text-charcoal/55" data-testid="auth-session-label">
-            Signed in as <span className="font-medium text-deep-navy">{username}</span>
-            {" · "}
-            {role}
-          </p>
+          <div className="px-1 space-y-2">
+            <p className="text-xs text-charcoal/55" data-testid="auth-session-label">
+              Signed in as <span className="font-medium text-deep-navy">{username}</span>
+              {" · "}
+              {role}
+            </p>
+            <LogoutButton />
+          </div>
         ) : null}
         <div className="rounded-xl bg-pale-cream border border-border p-3">
           <p className="text-xs font-medium text-deep-navy">Version 0.2 · Domain Phase 1</p>

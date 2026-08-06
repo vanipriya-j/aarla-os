@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { AdminSessionsPanel } from "@/components/auth/AdminSessionsPanel";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { DiagnosticsReport } from "@/lib/application/system-diagnostics";
 import { Activity } from "lucide-react";
 
@@ -17,6 +19,7 @@ function Flag({ ok, label }: { ok: boolean; label: string }) {
 }
 
 export default function DiagnosticsPage() {
+  const { role, authEnabled } = useAuth();
   const [report, setReport] = useState<DiagnosticsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -197,6 +200,15 @@ export default function DiagnosticsPage() {
               </dl>
             </FormSection>
           </>
+        ) : null}
+
+        {authEnabled && role === "admin" ? (
+          <FormSection
+            title="Login sessions"
+            description="Revoke browser sessions without rotating passwords."
+          >
+            <AdminSessionsPanel />
+          </FormSection>
         ) : null}
 
         <p className="text-xs text-charcoal/50">
