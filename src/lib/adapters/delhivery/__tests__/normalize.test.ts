@@ -47,10 +47,14 @@ describe("Delhivery status normalization", () => {
     expect(chunkAwbs(Array.from({ length: 35 }, (_, i) => `A${i}`), 30)).toHaveLength(2);
   });
 
-  it("detects Delhivery carrier from company or URL", () => {
+  it("detects Delhivery carrier from company, URL, or blank Shopify company", () => {
     expect(isDelhiveryCarrier("Delhivery", null)).toBe(true);
     expect(isDelhiveryCarrier("BlueDart", "https://www.delhivery.com/track/x")).toBe(true);
     expect(isDelhiveryCarrier("BlueDart", "https://bluedart.com/x")).toBe(false);
+    expect(isDelhiveryCarrier(null, null)).toBe(true);
+    expect(isDelhiveryCarrier("", null)).toBe(true);
+    expect(isDelhiveryCarrier("Other", null)).toBe(true);
+    expect(isDelhiveryCarrier("DTDC", null)).toBe(false);
   });
 
   it("builds stable event fingerprints", () => {

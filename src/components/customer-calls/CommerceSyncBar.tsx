@@ -156,16 +156,18 @@ export function CommerceSyncBar() {
         if (!cursor) break;
       }
 
-      setStatus("Shopify finished — starting Delhivery…");
+      setStatus("Shopify finished — tracking all Delhivery AWBs in the database…");
       let offset: number | null = 0;
       let delhiveryTotal = emptyDelhiverySyncSummary();
       guard = 0;
+      // Separate budget from Shopify — full AWB backfill can need many chunks.
+      const delhiveryMaxChunks = 200;
 
-      while (guard < maxChunks) {
+      while (guard < delhiveryMaxChunks) {
         guard += 1;
         setStatus(
           offset
-            ? `Working… Delhivery chunk ${guard} (offset ${offset})`
+            ? `Working… Delhivery chunk ${guard} (AWB offset ${offset})`
             : `Working… Delhivery chunk ${guard}`,
         );
         let res;
@@ -182,8 +184,10 @@ export function CommerceSyncBar() {
           return;
         }
         delhiveryTotal = mergeDelhiverySyncSummaries(delhiveryTotal, res.data);
+        const done = delhiveryTotal.awbsProcessed ?? 0;
+        const of = delhiveryTotal.uniqueAwbsTracked || "?";
         setStatus(
-          `Delhivery chunk ${guard} saved · ${delhiveryTotal.awbsProcessed ?? 0} AWBs so far` +
+          `Delhivery ${done} / ${of} unique AWBs` +
             (res.data.hasMore ? " · more remaining…" : " · Delhivery done"),
         );
         if (!res.data.hasMore) break;

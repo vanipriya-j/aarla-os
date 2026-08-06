@@ -1,20 +1,20 @@
 # Customer Calls
 
-Founder outreach queues for Vyshali. Shopify + Delhivery sync into `external_*` and `shipments`; **Refresh call queues** (also runs after Sync All and on page open) builds live queue rows from that local data.
+Founder outreach queues for Vyshali. Shopify + Delhivery sync into `external_*` and `shipments`; **Refresh call queues** (also runs after Sync All) builds live queue rows from that local data.
 
 ## Queues
 
-1. **Delivery Follow-up** — Delhivery `normalized_status = delivered` within the last 45 days, with a phone number  
+1. **Delivery Follow-up** — Delhivery `normalized_status = delivered` within the last 120 days (phone preferred; rows still appear if Shopify phone is missing)  
 2. **Re-engagement — No Purchase in 90 Days** — `latest_valid_order_at` older than the segment cooldown (default 90 days), with a phone number  
 
-Do Not Contact preferences exclude customers. Completed / in-progress / call-later / skipped rows are preserved; stale **pending** seed rows are retired only when live candidates exist for that segment.
+Do Not Contact preferences exclude customers. Completed / in-progress / call-later / skipped rows are preserved. When synced commerce exists, demo/seed pending rows are cleared so Meera Iyer cannot mask live data.
 
 ## UI stages
 
 `/customer-calls` uses one stage tab at a time:
 
 1. **Shopify** — Sync All / Shopify sync + customer diagnostics table  
-2. **Shipments** — Delhivery sync + shipment details table  
+2. **Shipments** — Delhivery sync of **all** AWBs in the database (not capped to the last Shopify page of 25) + shipment details table  
 3. **Delivery Follow-up** — live call queue for recent deliveries  
 4. **Re-engagement** — live call queue for 90-day lapse  
 
@@ -33,5 +33,6 @@ Commerce sync does **not** invent queue rows by itself; generation reads already
 ## After deploy
 
 1. Run `/setup` Initialize (or `db:migrate` + `db:seed`) so segments exist.  
-2. **Sync All (Shopify → Delhivery)** on `/customer-calls`.  
-3. Queues rebuild automatically after sync (or click **Refresh call queues**).
+2. Open **Shipments** → **Sync Delhivery Shipments** (or **Sync All**) and let it finish all AWB chunks.  
+3. Open **Delivery Follow-up** → **Refresh call queues**.  
+4. If you still see Meera Iyer / demo names, click **Refresh call queues** once after this deploy — demo rows are cleared whenever synced shipments exist.

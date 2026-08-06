@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResult } from "pg";
 import { ORG_ID, stableId } from "./ids";
 import { DELIVERY_SCRIPT, REENGAGEMENT_SCRIPT } from "@/lib/domain/customer-calls-types";
 
@@ -21,8 +21,8 @@ type SeedQueue = {
   products: string;
 };
 
-const QUEUE: SeedQueue[] = [
-  // Delivery follow-up
+/** Offline demo rows — only inserted when no Shopify/Delhivery commerce exists. */
+export const DEMO_CALL_QUEUE: SeedQueue[] = [
   {
     slug: "del-1",
     segment: "delivery",
@@ -50,205 +50,55 @@ const QUEUE: SeedQueue[] = [
     products: "Muruga Water Bottle — 750ml ×2",
   },
   {
-    slug: "del-3",
-    segment: "delivery",
-    customerId: "cust-nisha-krishnan",
-    orderId: "ORD-10418",
-    name: "Nisha Krishnan",
-    phone: "+91 98400 11103",
-    reason: "Festival hamper delivered — confirm intact",
-    lastOrderDate: "2026-07-25",
-    deliveredAt: "2026-07-29T09:15:00Z",
-    products: "Navarathri Magnet Assortment, Story card pack",
-  },
-  {
-    slug: "del-4",
-    segment: "delivery",
-    customerId: "cust-vikram-s",
-    orderId: "ORD-10425",
-    name: "Vikram S",
-    phone: "+91 98400 11104",
-    email: "vikram.demo@aarla.test",
-    reason: "First-time buyer follow-up",
-    lastOrderDate: "2026-07-30",
-    deliveredAt: "2026-08-01T11:00:00Z",
-    products: "Chennai Market Tote ×1",
-  },
-  {
-    slug: "del-5",
-    segment: "delivery",
-    customerId: "cust-priya-menon",
-    orderId: "ORD-10419",
-    name: "Priya Menon",
-    phone: "+91 98400 11105",
-    reason: "Gift order delivered to recipient",
-    lastOrderDate: "2026-07-26",
-    deliveredAt: "2026-07-30T16:45:00Z",
-    products: "Bharatanatyam Gesture Pouch ×1, Amman Stories book ×1",
-  },
-  {
-    slug: "del-6",
-    segment: "delivery",
-    customerId: "cust-karthik-n",
-    orderId: "ORD-10427",
-    name: "Karthik N",
-    phone: "+91 98400 11106",
-    reason: "Bulk family order delivered",
-    lastOrderDate: "2026-07-31",
-    deliveredAt: "2026-08-01T08:20:00Z",
-    products: "Ganapathi Fridge Magnet Set ×4",
-  },
-  {
-    slug: "del-7",
-    segment: "delivery",
-    customerId: "cust-ananya-p",
-    orderId: "ORD-10415",
-    name: "Ananya P",
-    phone: "+91 98400 11107",
-    email: "ananya.demo@aarla.test",
-    reason: "Delayed delivery — confirm arrival quality",
-    lastOrderDate: "2026-07-20",
-    deliveredAt: "2026-07-28T12:00:00Z",
-    products: "Lakshmi Brass Davara Tumbler ×1",
-  },
-  {
-    slug: "del-8",
-    segment: "delivery",
-    customerId: "cust-rahul-desai",
-    orderId: "ORD-10428",
-    name: "Rahul Desai",
-    phone: "+91 98400 11108",
-    reason: "Corporate sample pack delivered",
-    lastOrderDate: "2026-07-31",
-    deliveredAt: "2026-08-01T15:10:00Z",
-    products: "Assorted magnets ×10, thank-you cards ×10",
-  },
-  // Re-engagement
-  {
-    slug: "re-1",
+    slug: "reeng-1",
     segment: "reeng",
-    customerId: "cust-lakshmi-r",
-    orderId: "ORD-9801",
-    name: "Lakshmi R",
+    customerId: "cust-deepa-r",
+    name: "Deepa R",
     phone: "+91 98400 22201",
-    email: "lakshmi.demo@aarla.test",
-    reason: "No purchase in 90+ days — Varalakshmi / Navarathri",
+    reason: "No purchase in 90+ days",
     lastOrderDate: "2026-04-15",
-    products: "Previously: Lakshmi tumbler",
+    products: "Previously: Muruga world items",
   },
   {
-    slug: "re-2",
+    slug: "reeng-2",
     segment: "reeng",
     customerId: "cust-suresh-k",
-    orderId: "ORD-9720",
     name: "Suresh K",
     phone: "+91 98400 22202",
-    reason: "No purchase in 90+ days — corporate gifting angle",
+    reason: "No purchase in 90+ days",
     lastOrderDate: "2026-03-22",
-    products: "Previously: Muruga bottles ×6",
-  },
-  {
-    slug: "re-3",
-    segment: "reeng",
-    customerId: "cust-divya-m",
-    name: "Divya M",
-    phone: "+91 98400 22203",
-    email: "divya.demo@aarla.test",
-    reason: "No purchase in 90+ days — festival season",
-    lastOrderDate: "2026-04-01",
-    products: "Previously: Navarathri magnets",
-  },
-  {
-    slug: "re-4",
-    segment: "reeng",
-    customerId: "cust-harini-v",
-    orderId: "ORD-9655",
-    name: "Harini V",
-    phone: "+91 98400 22204",
-    reason: "No purchase in 90+ days — personal gifting",
-    lastOrderDate: "2026-03-10",
-    products: "Previously: Bharatanatyam pouch",
-  },
-  {
-    slug: "re-5",
-    segment: "reeng",
-    customerId: "cust-mohan-t",
-    name: "Mohan T",
-    phone: "+91 98400 22205",
-    reason: "No purchase in 90+ days",
-    lastOrderDate: "2026-04-20",
-    products: "Previously: Chennai tote",
-  },
-  {
-    slug: "re-6",
-    segment: "reeng",
-    customerId: "cust-shreya-b",
-    orderId: "ORD-9510",
-    name: "Shreya B",
-    phone: "+91 98400 22206",
-    email: "shreya.demo@aarla.test",
-    reason: "No purchase in 90+ days — WhatsApp preferred",
-    lastOrderDate: "2026-02-28",
-    products: "Previously: Amman Stories book",
-  },
-  {
-    slug: "re-7",
-    segment: "reeng",
-    customerId: "cust-gopal-a",
-    name: "Gopal A",
-    phone: "+91 98400 22207",
-    reason: "No purchase in 90+ days — temple essentials",
-    lastOrderDate: "2026-03-05",
-    products: "Previously: Ganapathi magnets",
-  },
-  {
-    slug: "re-8",
-    segment: "reeng",
-    customerId: "cust-revathi-s",
-    orderId: "ORD-9402",
-    name: "Revathi S",
-    phone: "+91 98400 22208",
-    reason: "No purchase in 90+ days — family gifting",
-    lastOrderDate: "2026-04-08",
-    products: "Previously: hamper set",
-  },
-  {
-    slug: "re-9",
-    segment: "reeng",
-    customerId: "cust-imran-h",
-    name: "Imran H",
-    phone: "+91 98400 22209",
-    email: "imran.demo@aarla.test",
-    reason: "No purchase in 90+ days — corporate HR sample buyer",
-    lastOrderDate: "2026-03-18",
-    products: "Previously: thank-you cards ×50",
-  },
-  {
-    slug: "re-10",
-    segment: "reeng",
-    customerId: "cust-kavitha-l",
-    name: "Kavitha L",
-    phone: "+91 98400 22210",
-    reason: "No purchase in 90+ days",
-    lastOrderDate: "2026-04-12",
-    products: "Previously: Lakshmi world items",
+    products: "Previously: festival magnets",
   },
 ];
 
-export async function seedCustomerCalls(client: DbClient): Promise<void> {
-  console.log("[seed-db] customer_call_segments…");
-  await client.query(
-    `insert into customer_call_segments (
-      id, organization_id, name, description, segment_type, script, is_active, cooldown_days
-    ) values
-      ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
-      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90)
-    on conflict (organization_id, segment_type) do nothing`,
-    [DELIVERY_SEG, ORG_ID, DELIVERY_SCRIPT, REENG_SEG, REENGAGEMENT_SCRIPT],
-  );
+async function count(client: DbClient, sql: string, params: unknown[]): Promise<number> {
+  const res = (await client.query(sql, params)) as QueryResult<{ c: string }>;
+  return Number(res.rows[0]?.c ?? 0);
+}
 
-  console.log(`[seed-db] customer_call_queue_items (${QUEUE.length})…`);
-  for (const row of QUEUE) {
+async function ensureSourceKey(client: DbClient): Promise<void> {
+  await client.query(`
+    alter table customer_call_queue_items add column if not exists source_key text
+  `);
+  await client.query(`
+    update customer_call_queue_items
+    set source_key = 'legacy:' || id::text
+    where source_key is null
+  `);
+  await client.query(`
+    do $$ begin
+      alter table customer_call_queue_items alter column source_key set not null;
+    exception when others then null;
+    end $$
+  `);
+  await client.query(`
+    create unique index if not exists customer_call_queue_source_key_uidx
+      on customer_call_queue_items (organization_id, segment_id, source_key)
+  `);
+}
+
+async function insertDemoQueue(client: DbClient, rows: SeedQueue[]): Promise<void> {
+  for (const row of rows) {
     const segmentId = row.segment === "delivery" ? DELIVERY_SEG : REENG_SEG;
     const id = stableId(`call-q:${row.slug}`);
     const sourceKey =
@@ -279,4 +129,78 @@ export async function seedCustomerCalls(client: DbClient): Promise<void> {
       ],
     );
   }
+}
+
+async function clearSeedPending(client: DbClient): Promise<void> {
+  await client.query(
+    `delete from customer_call_queue_items
+     where organization_id = $1
+       and status = 'pending'
+       and (
+         source_key like 'seed:%'
+         or source_key like 'legacy:%'
+         or external_customer_id like 'cust-%'
+       )
+       and not exists (
+         select 1 from customer_interactions i
+         where i.queue_item_id = customer_call_queue_items.id
+       )`,
+    [ORG_ID],
+  );
+}
+
+/**
+ * Seed call segments always. Demo queue rows only when no commerce has been synced,
+ * so production /setup after Shopify sync does not resurrect Meera Iyer.
+ */
+export async function seedCustomerCalls(client: DbClient): Promise<void> {
+  console.log("[seed-db] customer_call_segments…");
+  await client.query(
+    `insert into customer_call_segments (
+      id, organization_id, name, description, segment_type, script, is_active, cooldown_days
+    ) values
+      ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
+      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90)
+    on conflict (organization_id, segment_type) do nothing`,
+    [DELIVERY_SEG, ORG_ID, DELIVERY_SCRIPT, REENG_SEG, REENGAGEMENT_SCRIPT],
+  );
+
+  await ensureSourceKey(client);
+
+  const customers = await count(
+    client,
+    `select count(*)::text as c from external_customers where organization_id = $1`,
+    [ORG_ID],
+  );
+  const shipments = await count(
+    client,
+    `select count(*)::text as c from shipments where organization_id = $1`,
+    [ORG_ID],
+  );
+
+  if (customers > 0 || shipments > 0) {
+    console.log(
+      "[seed-db] skip demo call queues — commerce data present; clearing seed pending…",
+    );
+    await clearSeedPending(client);
+    return;
+  }
+
+  console.log(`[seed-db] customer_call_queue_items demo (${DEMO_CALL_QUEUE.length})…`);
+  await insertDemoQueue(client, DEMO_CALL_QUEUE);
+}
+
+/** Test helper: force-insert a small demo queue regardless of commerce. */
+export async function seedDemoCallQueuesForTests(client: DbClient): Promise<void> {
+  await client.query(
+    `insert into customer_call_segments (
+      id, organization_id, name, description, segment_type, script, is_active, cooldown_days
+    ) values
+      ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
+      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90)
+    on conflict (organization_id, segment_type) do nothing`,
+    [DELIVERY_SEG, ORG_ID, DELIVERY_SCRIPT, REENG_SEG, REENGAGEMENT_SCRIPT],
+  );
+  await ensureSourceKey(client);
+  await insertDemoQueue(client, DEMO_CALL_QUEUE);
 }

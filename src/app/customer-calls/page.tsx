@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { FormSection } from "@/components/ui/FormSection";
@@ -51,11 +51,14 @@ function isCallStage(stage: StageId): stage is CallSegmentType {
 
 export default function CustomerCallsPage() {
   const [stage, setStage] = useState<StageId>("delivery-follow-up");
+  const [visited, setVisited] = useState<Set<StageId>>(
+    () => new Set<StageId>(["delivery-follow-up"]),
+  );
   const [counts, setCounts] = useState<CallsDashboardCounts | null>(null);
   const [segment, setSegment] = useState<CustomerCallSegment | null>(null);
   const [queue, setQueue] = useState<CustomerCallQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [loadingQueue, setLoadingQueue] = useState(false);
   const [queueGen, setQueueGen] = useState<CallQueueGenerationSummary | null>(null);
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -64,24 +67,27 @@ export default function CustomerCallsPage() {
   const [history, setHistory] = useState<CustomerInteraction[]>([]);
   const [historyOnly, setHistoryOnly] = useState<CustomerInteraction[] | null>(null);
 
-  const queuesReadyRef = useRef(false);
+  const loadSeq = useRef(0);
 
   const loadWorkspace = useCallback(
-    (opts?: { regenerate?: boolean; segmentType?: CallSegmentType }) => {
-      const segmentType =
-        opts?.segmentType ?? (isCallStage(stage) ? stage : "delivery-follow-up");
-      startTransition(async () => {
+    async (opts?: { regenerate?: boolean; segmentType?: CallSegmentType }) => {
+      const segmentType = opts?.segmentType ?? "delivery-follow-up";
+      const seq = ++loadSeq.current;
+      setLoadingQueue(true);
+      try {
         let genError: string | null = null;
-        const shouldGenerate = Boolean(opts?.regenerate) || !queuesReadyRef.current;
-        if (shouldGenerate) {
+        // Only rebuild queues when explicitly asked — not on every tab open.
+        if (opts?.regenerate) {
           const gen = await refreshCustomerCallQueuesAction();
-          queuesReadyRef.current = true;
+          if (seq !== loadSeq.current) return;
           if (!gen.ok) genError = gen.error;
           else setQueueGen(gen.data);
         }
         const dash = await getCustomerCallsDashboardAction();
+        if (seq !== loadSeq.current) return;
         if (dash.ok) setCounts(dash.data.counts);
         const ws = await getCustomerCallsWorkspaceAction(segmentType);
+        if (seq !== loadSeq.current) return;
         if (!ws.ok) {
           setError(ws.error);
           return;
@@ -90,15 +96,36 @@ export default function CustomerCallsPage() {
         setSegment(ws.data.segment);
         setQueue(ws.data.queue);
         setCounts(ws.data.counts);
-      });
+      } finally {
+        if (seq === loadSeq.current) setLoadingQueue(false);
+      }
     },
-    [stage],
+    [],
   );
 
+  const selectStage = useCallback(
+    (next: StageId) => {
+      setStage(next);
+      setVisited((prev) => {
+        if (prev.has(next)) return prev;
+        const copy = new Set(prev);
+        copy.add(next);
+        return copy;
+      });
+      if (isCallStage(next)) {
+        void loadWorkspace({ segmentType: next });
+      }
+    },
+    [loadWorkspace],
+  );
+
+  // Initial Delivery Follow-up queue (read-only — no regenerate).
   useEffect(() => {
-    if (!isCallStage(stage)) return;
-    loadWorkspace({ segmentType: stage });
-  }, [stage, loadWorkspace]);
+    const timer = window.setTimeout(() => {
+      void loadWorkspace({ segmentType: "delivery-follow-up" });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadWorkspace]);
 
   async function openCall(id: string) {
     const res = await startCustomerCallAction(id);
@@ -110,7 +137,7 @@ export default function CustomerCallsPage() {
     setActiveSegment(res.data.segment);
     setHistory(res.data.history);
     setWorkspaceOpen(true);
-    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
+    if (isCallStage(stage)) void loadWorkspace({ segmentType: stage });
   }
 
   function toInput(form: CallFormState) {
@@ -141,7 +168,7 @@ export default function CustomerCallsPage() {
     }
     setWorkspaceOpen(false);
     setActiveItem(null);
-    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
+    if (isCallStage(stage)) void loadWorkspace({ segmentType: stage });
   }
 
   async function handleSaveAndNext(form: CallFormState) {
@@ -159,7 +186,130 @@ export default function CustomerCallsPage() {
       setWorkspaceOpen(false);
       setActiveItem(null);
     }
-    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
+    if (isCallStage(stage)) void loadWorkspace({ segmentType: stage });
+  }
+
+  function renderQueueStage(callStage: CallSegmentType) {
+    const active = stage === callStage;
+    if (!visited.has(callStage)) return null;
+    return (
+      <div
+        className={`space-y-6 ${active ? "" : "hidden"}`}
+        data-testid={`stage-${callStage}`}
+        aria-hidden={!active}
+      >
+        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {callStage === "delivery-follow-up" ? (
+            <SummaryCard
+              label="Delivery Calls Pending"
+              value={String(counts?.deliveryPending ?? "—")}
+              icon={Phone}
+            />
+          ) : (
+            <SummaryCard
+              label="Re-engagement Calls Pending"
+              value={String(counts?.reengagementPending ?? "—")}
+              icon={Phone}
+            />
+          )}
+          <SummaryCard
+            label="Calls Completed Today"
+            value={String(counts?.completedToday ?? "—")}
+          />
+          <SummaryCard
+            label={callStage === "delivery-follow-up" ? "Issues Raised" : "Follow-ups Due"}
+            value={String(
+              callStage === "delivery-follow-up"
+                ? (counts?.issuesRaised ?? "—")
+                : (counts?.followUpsDue ?? "—"),
+            )}
+          />
+        </div>
+
+        <FormSection
+          title={
+            active
+              ? (segment?.name ?? "Queue")
+              : callStage === "delivery-follow-up"
+                ? "Delivery Follow-up"
+                : "Re-engagement"
+          }
+          description={
+            active && segment
+              ? `${segment.description} Built from synced Shopify + Delhivery data.`
+              : "Built from synced Shopify + Delhivery data."
+          }
+        >
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <button
+              type="button"
+              data-testid={active ? "refresh-call-queues" : undefined}
+              onClick={() =>
+                void loadWorkspace({ regenerate: true, segmentType: callStage })
+              }
+              disabled={loadingQueue}
+              className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${loadingQueue && active ? "animate-spin" : ""}`}
+                aria-hidden
+              />
+              {loadingQueue && active ? "Refreshing queues…" : "Refresh call queues"}
+            </button>
+            {queueGen && active ? (
+              <p
+                className="text-xs text-charcoal/55"
+                data-testid="call-queue-generation-summary"
+              >
+                Live queues: {queueGen.deliveryCandidates} delivery
+                {queueGen.deliveryMissingPhone
+                  ? ` (${queueGen.deliveryMissingPhone} missing phone)`
+                  : ""}
+                {" · "}
+                {queueGen.reengagementCandidates} re-engagement
+                {queueGen.seedPendingCleared
+                  ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
+                  : ""}
+                {!queueGen.commercePresent
+                  ? " · no synced commerce yet (Sync All first)"
+                  : ""}
+              </p>
+            ) : null}
+            {loadingQueue && active ? (
+              <StatusChip label="Loading queue…" tone="neutral" />
+            ) : null}
+          </div>
+          {error && active ? <p className="text-sm text-aarla-red mb-3">{error}</p> : null}
+          {active ? (
+            <CallsQueueTable
+              rows={queue}
+              onStart={openCall}
+              onCallLater={async (id) => {
+                const date = new Date();
+                date.setDate(date.getDate() + 2);
+                const res = await callLaterCustomerCallAction(
+                  id,
+                  date.toISOString().slice(0, 10),
+                  "Quick Call Later from queue",
+                );
+                if (!res.ok) setError(res.error);
+                else void loadWorkspace({ segmentType: callStage });
+              }}
+              onSkip={async (id) => {
+                const res = await skipCustomerCallAction(id);
+                if (!res.ok) setError(res.error);
+                else void loadWorkspace({ segmentType: callStage });
+              }}
+              onHistory={async (customerId) => {
+                const res = await getCustomerCallHistoryAction(customerId);
+                if (!res.ok) setError(res.error);
+                else setHistoryOnly(res.data);
+              }}
+            />
+          ) : null}
+        </FormSection>
+      </div>
+    );
   }
 
   return (
@@ -184,7 +334,7 @@ export default function CustomerCallsPage() {
                     role="tab"
                     aria-selected={active}
                     data-testid={`tab-${s.id}`}
-                    onClick={() => setStage(s.id)}
+                    onClick={() => selectStage(s.id)}
                     className={`text-sm rounded-full px-4 py-2 border transition ${
                       active
                         ? "bg-aarla-red text-white border-aarla-red"
@@ -195,128 +345,45 @@ export default function CustomerCallsPage() {
                   </button>
                 );
               })}
-              {pending && isCallStage(stage) ? (
-                <StatusChip label="Refreshing…" tone="neutral" />
-              ) : null}
             </div>
             <p className="text-xs text-charcoal/50">
               {stage === "shopify"
                 ? "Stage 1 — Sync Shopify customers and orders."
                 : stage === "shipments"
-                  ? "Stage 2 — Track Delhivery AWBs and review shipment details."
+                  ? "Stage 2 — Track every Delhivery AWB in the database (not just the last Shopify page)."
                   : stage === "delivery-follow-up"
-                    ? "Stage 3 — Call customers with recent deliveries."
+                    ? "Stage 3 — Call customers with recent deliveries. Click Refresh call queues after syncing."
                     : "Stage 4 — Re-engage buyers with no purchase in 90+ days."}
             </p>
           </div>
 
-          {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
+          {error && !isCallStage(stage) ? (
+            <p className="text-sm text-aarla-red">{error}</p>
+          ) : null}
 
-          {stage === "shopify" ? (
-            <div className="space-y-6" data-testid="stage-shopify">
+          {visited.has("shopify") ? (
+            <div
+              className={`space-y-6 ${stage === "shopify" ? "" : "hidden"}`}
+              data-testid="stage-shopify"
+              aria-hidden={stage !== "shopify"}
+            >
               <CommerceSyncBar />
               <ShopifySyncPanel />
             </div>
           ) : null}
 
-          {stage === "shipments" ? (
-            <div className="space-y-6" data-testid="stage-shipments">
+          {visited.has("shipments") ? (
+            <div
+              className={`space-y-6 ${stage === "shipments" ? "" : "hidden"}`}
+              data-testid="stage-shipments"
+              aria-hidden={stage !== "shipments"}
+            >
               <DelhiverySyncPanel />
             </div>
           ) : null}
 
-          {isCallStage(stage) ? (
-            <div className="space-y-6" data-testid={`stage-${stage}`}>
-              <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {stage === "delivery-follow-up" ? (
-                  <SummaryCard
-                    label="Delivery Calls Pending"
-                    value={String(counts?.deliveryPending ?? "—")}
-                    icon={Phone}
-                  />
-                ) : (
-                  <SummaryCard
-                    label="Re-engagement Calls Pending"
-                    value={String(counts?.reengagementPending ?? "—")}
-                    icon={Phone}
-                  />
-                )}
-                <SummaryCard
-                  label="Calls Completed Today"
-                  value={String(counts?.completedToday ?? "—")}
-                />
-                <SummaryCard
-                  label={stage === "delivery-follow-up" ? "Issues Raised" : "Follow-ups Due"}
-                  value={String(
-                    stage === "delivery-follow-up"
-                      ? (counts?.issuesRaised ?? "—")
-                      : (counts?.followUpsDue ?? "—"),
-                  )}
-                />
-              </div>
-
-              <FormSection
-                title={segment?.name ?? "Queue"}
-                description={
-                  segment
-                    ? `${segment.description} Built from synced Shopify + Delhivery data.`
-                    : "Load a segment to see pending calls."
-                }
-              >
-                <div className="flex flex-wrap items-center gap-3 mb-4">
-                  <button
-                    type="button"
-                    data-testid="refresh-call-queues"
-                    onClick={() =>
-                      loadWorkspace({ regenerate: true, segmentType: stage })
-                    }
-                    disabled={pending}
-                    className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
-                  >
-                    <RefreshCw
-                      className={`h-4 w-4 ${pending ? "animate-spin" : ""}`}
-                      aria-hidden
-                    />
-                    {pending ? "Refreshing queues…" : "Refresh call queues"}
-                  </button>
-                  {queueGen ? (
-                    <p
-                      className="text-xs text-charcoal/55"
-                      data-testid="call-queue-generation-summary"
-                    >
-                      Live: {queueGen.deliveryCandidates} delivery ·{" "}
-                      {queueGen.reengagementCandidates} re-engagement
-                    </p>
-                  ) : null}
-                </div>
-                <CallsQueueTable
-                  rows={queue}
-                  onStart={openCall}
-                  onCallLater={async (id) => {
-                    const date = new Date();
-                    date.setDate(date.getDate() + 2);
-                    const res = await callLaterCustomerCallAction(
-                      id,
-                      date.toISOString().slice(0, 10),
-                      "Quick Call Later from queue",
-                    );
-                    if (!res.ok) setError(res.error);
-                    else loadWorkspace({ segmentType: stage });
-                  }}
-                  onSkip={async (id) => {
-                    const res = await skipCustomerCallAction(id);
-                    if (!res.ok) setError(res.error);
-                    else loadWorkspace({ segmentType: stage });
-                  }}
-                  onHistory={async (customerId) => {
-                    const res = await getCustomerCallHistoryAction(customerId);
-                    if (!res.ok) setError(res.error);
-                    else setHistoryOnly(res.data);
-                  }}
-                />
-              </FormSection>
-            </div>
-          ) : null}
+          {renderQueueStage("delivery-follow-up")}
+          {renderQueueStage("re-engagement")}
         </CommerceSyncProvider>
       </main>
 
@@ -325,7 +392,7 @@ export default function CustomerCallsPage() {
         onClose={() => {
           setWorkspaceOpen(false);
           setActiveItem(null);
-          if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
+          if (isCallStage(stage)) void loadWorkspace({ segmentType: stage });
         }}
         item={activeItem}
         segment={activeSegment}

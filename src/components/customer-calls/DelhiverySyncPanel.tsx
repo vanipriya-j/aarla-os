@@ -95,18 +95,19 @@ export function DelhiverySyncPanel() {
     }
 
     setError(null);
-    setStatus("Click received — starting Delhivery sync…");
+    setStatus("Click received — tracking every AWB in the database…");
     let offset: number | null = 0;
     let total = emptyDelhiverySyncSummary();
     let guard = 0;
-    const maxChunks = 80;
+    // 200 × 25 AWBs ≈ 5k — enough for full historical backfill.
+    const maxChunks = 200;
 
     try {
       while (guard < maxChunks) {
         guard += 1;
         setStatus(
           offset
-            ? `Syncing chunk ${guard} (offset ${offset})…`
+            ? `Syncing chunk ${guard} (AWB offset ${offset})…`
             : `Syncing chunk ${guard}…`,
         );
         let res;
@@ -130,6 +131,12 @@ export function DelhiverySyncPanel() {
         }
         total = mergeDelhiverySyncSummaries(total, res.data);
         setSummary({ ...total });
+        const done = total.awbsProcessed ?? 0;
+        const of = total.uniqueAwbsTracked || "?";
+        setStatus(
+          `Tracked ${done} / ${of} unique AWBs` +
+            (res.data.hasMore ? " · continuing…" : " · done"),
+        );
 
         if (res.data.errors.length && !res.data.hasMore) {
           setError(res.data.errors.slice(0, 3).join(" · "));
@@ -140,10 +147,12 @@ export function DelhiverySyncPanel() {
         if (offset == null) break;
       }
 
+      const processed = total.awbsProcessed ?? 0;
+      const unique = total.uniqueAwbsTracked;
       setStatus(
         total.complete
-          ? "Delhivery sync complete."
-          : "Delhivery sync paused — click Sync again to continue.",
+          ? `Delhivery sync complete — ${processed} / ${unique} unique AWBs tracked.`
+          : `Delhivery sync paused at ${processed} / ${unique} AWBs — click Sync again to continue.`,
       );
       const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
@@ -165,7 +174,7 @@ export function DelhiverySyncPanel() {
     <div className="space-y-4" data-testid="delhivery-sync-panel">
       <FormSection
         title="Delhivery shipment sync"
-        description="Tracks AWBs in small chunks so Vercel does not time out. Does not start on page load. Does not create call queue items."
+        description="Tracks every fulfilment AWB already saved from Shopify — not just the last page of 25 orders. Runs in chunks so Vercel does not time out. Does not create call queue items."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
