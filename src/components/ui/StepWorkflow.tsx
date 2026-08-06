@@ -11,9 +11,16 @@ interface StepWorkflowProps {
   steps: Step[];
   current: number;
   onStepClick?: (index: number) => void;
+  /** Prefix for data-testid on each step button, e.g. "tab" → tab-{id} */
+  testIdPrefix?: string;
 }
 
-export function StepWorkflow({ steps, current, onStepClick }: StepWorkflowProps) {
+export function StepWorkflow({
+  steps,
+  current,
+  onStepClick,
+  testIdPrefix,
+}: StepWorkflowProps) {
   return (
     <ol className="flex flex-wrap gap-2 md:gap-0 md:items-center">
       {steps.map((step, index) => {
@@ -23,6 +30,7 @@ export function StepWorkflow({ steps, current, onStepClick }: StepWorkflowProps)
           <li key={step.id} className="flex items-center">
             <button
               type="button"
+              data-testid={testIdPrefix ? `${testIdPrefix}-${step.id}` : undefined}
               onClick={() => onStepClick?.(index)}
               className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition ${
                 active

@@ -9,6 +9,15 @@ Founder outreach queues for Vyshali. Shopify + Delhivery sync into `external_*` 
 
 Do Not Contact preferences exclude customers. Completed / in-progress / call-later / skipped rows are preserved. When synced commerce exists, demo/seed pending rows are cleared so Meera Iyer cannot mask live data.
 
+## UI stages
+
+`/customer-calls` uses one stage tab at a time:
+
+1. **Shopify** — Sync All / Shopify sync + customer diagnostics table  
+2. **Shipments** — Delhivery sync + shipment details table  
+3. **Delivery Follow-up** — live call queue for recent deliveries  
+4. **Re-engagement** — live call queue for 90-day lapse  
+
 ## Architecture
 
 ```
