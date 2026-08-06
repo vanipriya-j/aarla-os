@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CustomerCallsEngine } from "@/lib/engine/customer-calls-engine";
 import { createCustomerCallsRepository } from "@/lib/infra/repositories/postgres-customer-calls";
-import { closePool } from "@/lib/infra/db/pool";
+import { closePool, withTransaction } from "@/lib/infra/db/pool";
+import { seedDemoCallQueuesForTests } from "@/lib/infra/db/seed-customer-calls";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 
@@ -9,6 +10,9 @@ describe.runIf(hasDb)("Customer Calls engine", () => {
   const engine = () => new CustomerCallsEngine(createCustomerCallsRepository());
 
   beforeAll(async () => {
+    await withTransaction(async (client) => {
+      await seedDemoCallQueuesForTests(client);
+    });
     const segments = await engine().listSegments();
     if (segments.length < 2) {
       throw new Error("Customer Calls seed missing — run db:migrate && db:seed");
