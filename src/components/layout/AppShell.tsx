@@ -6,7 +6,10 @@ import { Sidebar } from "./Sidebar";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const bare = pathname === "/setup" || pathname.startsWith("/api/");
+  const bare =
+    pathname === "/setup" ||
+    pathname === "/login" ||
+    pathname.startsWith("/api/");
 
   if (bare) {
     return <>{children}</>;

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { LogoutButton } from "@/components/auth/LogoutButton";
 import { navForRole } from "@/lib/auth/nav";
 import { homePathForRole } from "@/lib/auth/roles";
 
@@ -17,7 +18,7 @@ interface HeaderProps {
 export function Header({ title, subtitle, actions }: HeaderProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const { role } = useAuth();
+  const { role, authEnabled } = useAuth();
   const nav = navForRole(role);
   const homeHref = homePathForRole(role);
 
@@ -143,6 +144,11 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
                     </Link>
                   ))}
                 </>
+              ) : null}
+              {authEnabled ? (
+                <div className="mt-4 px-3 pt-3 border-t border-border">
+                  <LogoutButton />
+                </div>
               ) : null}
             </nav>
           </div>
