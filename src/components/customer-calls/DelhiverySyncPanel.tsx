@@ -73,8 +73,10 @@ export function DelhiverySyncPanel() {
       setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
+        setRows([]);
         return;
       }
+      setError(null);
       setRows(res.data.rows);
       setDiagPage(res.data.page);
       setDiagTotal(res.data.total);
@@ -241,11 +243,13 @@ export function DelhiverySyncPanel() {
         </div>
         {!diagnosticsLoaded ? (
           <p className="text-sm text-charcoal/60" data-testid="delhivery-diagnostics-idle">
-            Loading saved shipment rows…
+            {diagPending ? "Loading saved shipment rows…" : "Open this stage to load shipment rows."}
           </p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="delhivery-diagnostics-empty">
-            No shipment records yet. Sync after Shopify fulfilments with AWBs exist.
+            {error
+              ? error
+              : "No shipment records yet. Sync after Shopify fulfilments with AWBs exist."}
           </p>
         ) : (
           <>
