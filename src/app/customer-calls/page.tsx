@@ -69,20 +69,9 @@ export default function CustomerCallsPage() {
 
   const loadSeq = useRef(0);
 
-  const selectStage = useCallback((next: StageId) => {
-    setStage(next);
-    setVisited((prev) => {
-      if (prev.has(next)) return prev;
-      const copy = new Set(prev);
-      copy.add(next);
-      return copy;
-    });
-  }, []);
-
   const loadWorkspace = useCallback(
     async (opts?: { regenerate?: boolean; segmentType?: CallSegmentType }) => {
-      const segmentType =
-        opts?.segmentType ?? (isCallStage(stage) ? stage : "delivery-follow-up");
+      const segmentType = opts?.segmentType ?? "delivery-follow-up";
       const seq = ++loadSeq.current;
       setLoadingQueue(true);
       try {
@@ -111,13 +100,32 @@ export default function CustomerCallsPage() {
         if (seq === loadSeq.current) setLoadingQueue(false);
       }
     },
-    [stage],
+    [],
   );
 
+  const selectStage = useCallback(
+    (next: StageId) => {
+      setStage(next);
+      setVisited((prev) => {
+        if (prev.has(next)) return prev;
+        const copy = new Set(prev);
+        copy.add(next);
+        return copy;
+      });
+      if (isCallStage(next)) {
+        void loadWorkspace({ segmentType: next });
+      }
+    },
+    [loadWorkspace],
+  );
+
+  // Initial Delivery Follow-up queue (read-only — no regenerate).
   useEffect(() => {
-    if (!isCallStage(stage)) return;
-    void loadWorkspace({ segmentType: stage });
-  }, [stage, loadWorkspace]);
+    const timer = window.setTimeout(() => {
+      void loadWorkspace({ segmentType: "delivery-follow-up" });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadWorkspace]);
 
   async function openCall(id: string) {
     const res = await startCustomerCallAction(id);
