@@ -277,9 +277,13 @@ export function createShipmentRepository(): ShipmentRepository {
       const offset = (safePage - 1) * pageSize;
 
       const rows = await q(
-        `select s.*, o.order_number
+        `select s.*,
+                o.order_number,
+                o.order_date,
+                c.name as customer_name
          from shipments s
          left join external_orders o on o.id = s.external_order_id
+         left join external_customers c on c.id = o.external_customer_id
          where s.organization_id = $1
          order by s.last_synced_at desc, s.awb
          limit $2 offset $3`,
@@ -293,6 +297,11 @@ export function createShipmentRepository(): ShipmentRepository {
             id: s.id,
             awb: s.awb,
             orderNumber: r.order_number == null ? null : String(r.order_number),
+            customerName:
+              r.customer_name == null || String(r.customer_name).trim() === ""
+                ? null
+                : String(r.customer_name),
+            orderedAt: isoOrNull(r.order_date),
             carrier: s.carrier,
             normalizedStatus: s.normalizedStatus,
             providerStatus: s.providerStatus,
