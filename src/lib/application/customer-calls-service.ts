@@ -1,6 +1,7 @@
 import { CustomerCallsEngine } from "@/lib/engine/customer-calls-engine";
 import { createCustomerCallsRepository } from "@/lib/infra/repositories/postgres-customer-calls";
 import type { CallSegmentType, SaveCallOutcomeInput } from "@/lib/domain/customer-calls-types";
+import { generateCustomerCallQueues } from "@/lib/application/call-queue-generation-service";
 
 function engine() {
   return new CustomerCallsEngine(createCustomerCallsRepository());
@@ -12,6 +13,11 @@ export async function getCustomerCallsDashboard() {
 
 export async function getCustomerCallsWorkspace(segmentType: CallSegmentType) {
   return engine().getWorkspace(segmentType);
+}
+
+/** Rebuild queues from synced Shopify + Delhivery data (local Postgres only). */
+export async function refreshCustomerCallQueues() {
+  return generateCustomerCallQueues();
 }
 
 export async function startCustomerCall(queueItemId: string) {

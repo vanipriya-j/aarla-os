@@ -60,3 +60,7 @@ export async function skipCustomerCallAction(queueItemId: string, notes?: string
 export async function getCustomerCallHistoryAction(externalCustomerId: string) {
   return wrap(() => svc.getCustomerCallHistory(externalCustomerId));
 }
+
+export async function refreshCustomerCallQueuesAction() {
+  return wrap(() => svc.refreshCustomerCallQueues());
+}

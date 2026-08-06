@@ -1,23 +1,28 @@
 # Customer Calls
 
-Founder outreach queues for Vyshali. Shopify commerce sync lands synchronized customers/orders/fulfilments into `external_*` tables; queue generation from live Shopify data is still deferred. No Delhivery yet.
+Founder outreach queues for Vyshali. Shopify + Delhivery sync into `external_*` and `shipments`; **Refresh call queues** (also runs after Sync All and on page open) builds live queue rows from that local data.
 
 ## Queues
 
-1. **Delivery Follow-up** — post-delivery experience check  
-2. **Re-engagement — No Purchase in 90 Days** — warm seasonal outreach  
+1. **Delivery Follow-up** — Delhivery `normalized_status = delivered` within the last 45 days, with a phone number  
+2. **Re-engagement — No Purchase in 90 Days** — `latest_valid_order_at` older than the segment cooldown (default 90 days), with a phone number  
+
+Do Not Contact preferences exclude customers. Completed / in-progress / call-later / skipped rows are preserved; stale **pending** seed rows are retired only when live candidates exist for that segment.
 
 ## Architecture
 
 ```
 UI /customer-calls
+  → refreshCustomerCallQueues (local Postgres eligibility)
   → customer-calls-actions
     → CustomerCallsEngine
       → customer_* Postgres tables
 ```
 
-Do Not Contact preferences exclude customers from active queues.
+Commerce sync does **not** invent queue rows by itself; generation reads already-synced Shopify + Delhivery tables.
 
 ## After deploy
 
-Run `/setup` Initialize (or `db:migrate` + `db:seed`) so segments and queue rows exist.
+1. Run `/setup` Initialize (or `db:migrate` + `db:seed`) so segments exist.  
+2. **Sync All (Shopify → Delhivery)** on `/customer-calls`.  
+3. Queues rebuild automatically after sync (or click **Refresh call queues**).

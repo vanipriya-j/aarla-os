@@ -19,6 +19,7 @@ import {
   mergeDelhiverySyncSummaries,
 } from "@/lib/domain/shipment-types";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
+import { refreshCustomerCallQueuesAction } from "@/app/actions/customer-calls-actions";
 import { Hourglass, Layers, Loader2, RefreshCw, Unlock } from "lucide-react";
 
 type CommerceCounts = {
@@ -190,13 +191,24 @@ export function CommerceSyncBar() {
         if (offset == null) break;
       }
 
-      setStatus(
-        `Done — Shopify ${shopifyTotal.ordersRead} orders` +
-          `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}` +
-          `${shopifyTotal.complete ? " complete" : " more remain"}, ` +
-          `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs` +
-          `${delhiveryTotal.complete ? " (complete)" : " (more remain)"}.`,
-      );
+      setStatus("Commerce sync done — rebuilding call queues…");
+      const queues = await refreshCustomerCallQueuesAction();
+      if (!queues.ok) {
+        setError(queues.error);
+        setStatus(
+          `Done — Shopify ${shopifyTotal.ordersRead} orders` +
+            `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+            `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs. Queue rebuild failed.`,
+        );
+      } else {
+        setStatus(
+          `Done — Shopify ${shopifyTotal.ordersRead} orders` +
+            `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+            `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs, ` +
+            `queues: ${queues.data.deliveryCandidates} delivery · ` +
+            `${queues.data.reengagementCandidates} re-engagement.`,
+        );
+      }
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
       setStatus("Stopped — clear the lock if needed, then try again.");
