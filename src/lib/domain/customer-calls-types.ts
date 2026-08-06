@@ -193,6 +193,8 @@ export type CallQueueGenerationSummary = {
   commercePresent: boolean;
   /** Demo/seed pending rows removed because live commerce exists. */
   seedPendingCleared: number;
+  /** Phones filled via targeted Shopify backfill during refresh. */
+  phonesEnriched: number;
 };
 
 export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
@@ -208,6 +210,7 @@ export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
     reengagementRetired: 0,
     commercePresent: false,
     seedPendingCleared: 0,
+    phonesEnriched: 0,
   };
 }
 

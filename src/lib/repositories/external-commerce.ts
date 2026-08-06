@@ -31,6 +31,7 @@ export type UpsertOrderInput = {
   exclusionReason: OrderExclusionReason | null;
   totalAmount: number;
   currency: string;
+  contactPhone?: string | null;
   lineItems: Array<{
     externalLineItemId: string;
     externalProductId: string | null;
@@ -67,6 +68,19 @@ export interface ExternalCommerceRepository {
   ): Promise<void>;
   upsertOrder(input: UpsertOrderInput): Promise<UpsertResult>;
   upsertFulfilment(input: UpsertFulfilmentInput): Promise<UpsertResult>;
+  /** Ensure contact_phone column exists (safe if migration not recorded). */
+  ensureOrderContactPhoneSchema(): Promise<void>;
+  /** Delivered orders still missing both customer + order phone. */
+  listDeliveredOrdersMissingPhone(limit?: number): Promise<
+    Array<{ orderNumber: string; customerExternalId: string }>
+  >;
+  /** Patch phones without re-writing line items. */
+  applyContactPhone(input: {
+    provider: CommerceProvider;
+    orderExternalId: string;
+    customerExternalId: string | null;
+    phone: string;
+  }): Promise<{ orderUpdated: boolean; customerUpdated: boolean }>;
   listCustomers(): Promise<ExternalCustomer[]>;
   listOrdersForCustomer(customerId: string): Promise<ExternalOrder[]>;
   listItemsForOrder(orderId: string): Promise<ExternalOrderItem[]>;

@@ -42,6 +42,8 @@ export interface ShopifyOrderRecord {
   isTest: boolean;
   totalAmount: number;
   currency: string;
+  /** Best phone from customer/shipping/billing at sync time. */
+  contactPhone: string | null;
   lineItems: ShopifyLineItemRecord[];
   fulfilments: ShopifyFulfilmentRecord[];
 }

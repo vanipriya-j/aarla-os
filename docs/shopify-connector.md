@@ -13,7 +13,7 @@ Server-side GraphQL Admin sync that stores normalized commerce references in Aar
 ```
 UI Sync Shopify Data / Sync All
   → POST /api/commerce/sync/shopify  (JSON, lock token)
-    → syncShopifyCustomerCallData({ cursor })  # chunked (~25 orders)
+    → syncShopifyCustomerCallData({ cursor })  # chunked (~100 orders / page)
       → ShopifyConnector (live | fixture)
       → ExternalCommerceRepository → Postgres
 ```
@@ -23,6 +23,9 @@ Next.js “An unexpected response was received from the server.”
 
 **Default sync is incremental:** only Shopify orders newer than the last successful
 watermark are fetched. Use **Full Shopify re-sync** to walk the whole catalog again.
+
+**Refresh call queues** runs a targeted phone backfill for delivered orders still
+missing phones (fetches those order names only — not the whole catalog).
 
 React components never call Shopify Admin APIs.
 

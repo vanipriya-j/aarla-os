@@ -45,7 +45,7 @@ export function readLiveShopifyConfigFromEnv(
 
 const ORDERS_QUERY = `
 query SyncOrders($cursor: String, $query: String) {
-  orders(first: 25, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
+  orders(first: 100, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -238,6 +238,7 @@ function mapOrder(node: RawOrderNode): {
       isTest: Boolean(node.test),
       totalAmount: Number(node.totalPriceSet?.shopMoney?.amount ?? 0),
       currency: node.totalPriceSet?.shopMoney?.currencyCode ?? "INR",
+      contactPhone: resolveShopifyOrderPhone(node),
       lineItems,
       fulfilments,
     },

@@ -10,17 +10,23 @@ import {
 } from "@/lib/domain/customer-calls-types";
 import { createCustomerCallsRepository } from "@/lib/infra/repositories/postgres-customer-calls";
 import type { CustomerCallsRepository } from "@/lib/repositories/customer-calls";
+import { enrichMissingDeliveryPhones } from "@/lib/application/phone-enrichment-service";
+import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
 
 export type GenerateCallQueuesDeps = {
   repo?: CustomerCallsRepository;
   now?: Date;
   deliveryLookbackDays?: number;
+  /** Optional Shopify connector for targeted phone backfill (tests). */
+  shopifyConnector?: ShopifyConnector;
+  /** Skip Shopify phone backfill (offline tests). */
+  skipPhoneEnrichment?: boolean;
 };
 
 /**
  * Rebuild call queues from synced Shopify + Delhivery rows in Postgres.
- * Does not call external APIs. Preserves in-progress / completed / skipped /
- * call-later rows.
+ * Before generating, runs a targeted Shopify phone backfill for delivered
+ * orders still missing phones — no full catalog re-upload required.
  *
  * Demo/seed pending rows are cleared per segment when that segment has live
  * data (shipments for delivery; lapse candidates for re-engagement).
@@ -33,6 +39,17 @@ export async function generateCustomerCallQueues(
   const summary = emptyCallQueueGenerationSummary();
 
   await repo.ensureQueueSchema();
+
+  if (!deps.skipPhoneEnrichment) {
+    try {
+      const enrich = await enrichMissingDeliveryPhones({
+        connector: deps.shopifyConnector,
+      });
+      summary.phonesEnriched = enrich.phonesApplied;
+    } catch {
+      // Non-fatal — still rebuild queues from whatever phones we have.
+    }
+  }
 
   const deliverySeg = await repo.getSegmentByType("delivery-follow-up");
   const reengSeg = await repo.getSegmentByType("re-engagement");

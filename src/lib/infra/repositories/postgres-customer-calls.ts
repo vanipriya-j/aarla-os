@@ -377,7 +377,10 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
         `select
            c.external_id as external_customer_id,
            coalesce(nullif(btrim(c.name), ''), 'Customer') as customer_name,
-           nullif(btrim(c.phone), '') as phone,
+           coalesce(
+             nullif(btrim(c.phone), ''),
+             nullif(btrim(o.contact_phone), '')
+           ) as phone,
            c.email,
            coalesce(nullif(btrim(o.order_number), ''), o.external_id) as order_number,
            o.order_date,

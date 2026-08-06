@@ -114,6 +114,7 @@ describe.runIf(hasDb)("live call queue generation", () => {
       repo: calls(),
       now: new Date("2026-08-06T12:00:00.000Z"),
       deliveryLookbackDays: 45,
+      skipPhoneEnrichment: true,
     });
 
     expect(summary.deliveryCandidates).toBeGreaterThanOrEqual(1);
@@ -170,6 +171,7 @@ describe.runIf(hasDb)("live call queue generation", () => {
     const summary = await generateCustomerCallQueues({
       repo: calls(),
       now: new Date("2026-08-06T12:00:00.000Z"),
+      skipPhoneEnrichment: true,
     });
     expect(summary.reengagementCandidates).toBeGreaterThanOrEqual(1);
 
@@ -206,6 +208,7 @@ describe.runIf(hasDb)("live call queue generation", () => {
       repo: calls(),
       now: new Date("2026-08-06T12:00:00.000Z"),
       deliveryLookbackDays: 120,
+      skipPhoneEnrichment: true,
     });
     expect(summary.seedPendingCleared).toBeGreaterThanOrEqual(1);
     expect(summary.deliveryCandidates).toBeGreaterThanOrEqual(1);
