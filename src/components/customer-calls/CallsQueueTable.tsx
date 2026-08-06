@@ -42,7 +42,14 @@ export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory 
         {
           key: "phone",
           header: "Phone",
-          render: (r) => <span className="tabular-nums">{r.phone}</span>,
+          render: (r) =>
+            r.phone === "Phone missing" ? (
+              <span className="text-xs rounded-md bg-aarla-red/10 text-aarla-red px-2 py-1">
+                Phone missing
+              </span>
+            ) : (
+              <span className="tabular-nums">{r.phone}</span>
+            ),
         },
         {
           key: "ordered",

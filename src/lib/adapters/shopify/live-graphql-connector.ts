@@ -57,13 +57,17 @@ query SyncOrders($cursor: String, $query: String) {
         displayFinancialStatus
         displayFulfillmentStatus
         totalPriceSet { shopMoney { amount currencyCode } }
+        shippingAddress { phone }
+        billingAddress { phone }
         customer {
           id
           displayName
           firstName
           lastName
+          phone
           defaultPhoneNumber { phoneNumber }
           defaultEmailAddress { emailAddress }
+          defaultAddress { phone }
           emailMarketingConsent { marketingState }
         }
         lineItems(first: 50) {
@@ -115,13 +119,17 @@ type RawOrderNode = {
   displayFinancialStatus: string | null;
   displayFulfillmentStatus: string | null;
   totalPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
+  shippingAddress?: { phone?: string | null } | null;
+  billingAddress?: { phone?: string | null } | null;
   customer: {
     id: string;
     displayName?: string | null;
     firstName?: string | null;
     lastName?: string | null;
+    phone?: string | null;
     defaultPhoneNumber?: { phoneNumber?: string | null } | null;
     defaultEmailAddress?: { emailAddress?: string | null } | null;
+    defaultAddress?: { phone?: string | null } | null;
     emailMarketingConsent?: { marketingState?: string | null } | null;
   } | null;
   lineItems: {
@@ -154,6 +162,30 @@ function customerName(c: NonNullable<RawOrderNode["customer"]>): string {
   return parts.length ? parts.join(" ") : "Shopify customer";
 }
 
+/** Prefer customer profile phone, then default address, then order shipping/billing. */
+export function resolveShopifyOrderPhone(node: {
+  shippingAddress?: { phone?: string | null } | null;
+  billingAddress?: { phone?: string | null } | null;
+  customer?: {
+    phone?: string | null;
+    defaultPhoneNumber?: { phoneNumber?: string | null } | null;
+    defaultAddress?: { phone?: string | null } | null;
+  } | null;
+}): string | null {
+  const candidates = [
+    node.customer?.defaultPhoneNumber?.phoneNumber,
+    node.customer?.phone,
+    node.customer?.defaultAddress?.phone,
+    node.shippingAddress?.phone,
+    node.billingAddress?.phone,
+  ];
+  for (const raw of candidates) {
+    const phone = raw?.trim();
+    if (phone) return phone;
+  }
+  return null;
+}
+
 function mapOrder(node: RawOrderNode): {
   order: ShopifyOrderRecord;
   customer: ShopifyCustomerRecord | null;
@@ -164,7 +196,7 @@ function mapOrder(node: RawOrderNode): {
       ? {
           externalId: customerExt,
           name: customerName(node.customer),
-          phone: node.customer.defaultPhoneNumber?.phoneNumber ?? null,
+          phone: resolveShopifyOrderPhone(node),
           email: node.customer.defaultEmailAddress?.emailAddress ?? null,
           marketingConsentStatus:
             node.customer.emailMarketingConsent?.marketingState ?? null,

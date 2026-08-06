@@ -128,23 +128,28 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
     },
 
     async upsertCustomer(input: UpsertCustomerInput) {
-      const existing = await q<{ id: string }>(
-        `select id from external_customers
+      const existing = await q<{ id: string; phone: string | null; name: string }>(
+        `select id, phone, name from external_customers
          where organization_id = $1 and provider = $2 and external_id = $3`,
         [ORG_ID, input.provider, input.externalId],
       );
       if (existing[0]) {
+        const nextPhone = input.phone?.trim() ? input.phone.trim() : existing[0].phone;
+        const stubName = /^Shopify customer\b/i.test(input.name.trim());
+        const nextName =
+          stubName && existing[0].name?.trim() ? existing[0].name : input.name;
         await q(
           `update external_customers
-           set name = $4, phone = $5, email = $6, marketing_consent_status = $7,
+           set name = $4, phone = $5, email = coalesce($6, email),
+               marketing_consent_status = coalesce($7, marketing_consent_status),
                last_synced_at = now()
            where organization_id = $1 and provider = $2 and external_id = $3`,
           [
             ORG_ID,
             input.provider,
             input.externalId,
-            input.name,
-            input.phone,
+            nextName,
+            nextPhone,
             input.email,
             input.marketingConsentStatus,
           ],

@@ -57,7 +57,7 @@ export function readShopifyAuthConfigFromEnv(
     "";
   if (!storeDomainRaw) return null;
 
-  const apiVersion = env.SHOPIFY_API_VERSION?.trim() || "2025-01";
+  const apiVersion = env.SHOPIFY_API_VERSION?.trim() || "2025-04";
   const adminApiAccessToken = env.SHOPIFY_ADMIN_API_ACCESS_TOKEN?.trim() || undefined;
   const clientId = env.SHOPIFY_CLIENT_ID?.trim() || undefined;
   const clientSecret = env.SHOPIFY_CLIENT_SECRET?.trim() || undefined;

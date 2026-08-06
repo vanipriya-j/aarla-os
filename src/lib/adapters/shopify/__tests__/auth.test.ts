@@ -18,6 +18,15 @@ describe("Shopify auth (Dev Dashboard client credentials)", () => {
     );
   });
 
+  it("defaults API version to 2025-04 when unset", () => {
+    const cfg = readShopifyAuthConfigFromEnv({
+      SHOPIFY_STORE_DOMAIN: "aarla.myshopify.com",
+      SHOPIFY_CLIENT_ID: "cid",
+      SHOPIFY_CLIENT_SECRET: "csecret",
+    } as NodeJS.ProcessEnv);
+    expect(cfg?.apiVersion).toBe("2025-04");
+  });
+
   it("reads client credentials from env", () => {
     const cfg = readShopifyAuthConfigFromEnv({
       SHOPIFY_STORE_DOMAIN: "aarla.myshopify.com",

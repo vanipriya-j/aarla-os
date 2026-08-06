@@ -189,129 +189,6 @@ export default function CustomerCallsPage() {
     if (isCallStage(stage)) void loadWorkspace({ segmentType: stage });
   }
 
-  function renderQueueStage(callStage: CallSegmentType) {
-    const active = stage === callStage;
-    if (!visited.has(callStage)) return null;
-    return (
-      <div
-        className={`space-y-6 ${active ? "" : "hidden"}`}
-        data-testid={`stage-${callStage}`}
-        aria-hidden={!active}
-      >
-        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {callStage === "delivery-follow-up" ? (
-            <SummaryCard
-              label="Delivery Calls Pending"
-              value={String(counts?.deliveryPending ?? "—")}
-              icon={Phone}
-            />
-          ) : (
-            <SummaryCard
-              label="Re-engagement Calls Pending"
-              value={String(counts?.reengagementPending ?? "—")}
-              icon={Phone}
-            />
-          )}
-          <SummaryCard
-            label="Calls Completed Today"
-            value={String(counts?.completedToday ?? "—")}
-          />
-          <SummaryCard
-            label={callStage === "delivery-follow-up" ? "Issues Raised" : "Follow-ups Due"}
-            value={String(
-              callStage === "delivery-follow-up"
-                ? (counts?.issuesRaised ?? "—")
-                : (counts?.followUpsDue ?? "—"),
-            )}
-          />
-        </div>
-
-        <FormSection
-          title={
-            active
-              ? (segment?.name ?? "Queue")
-              : callStage === "delivery-follow-up"
-                ? "Delivery Follow-up"
-                : "Re-engagement"
-          }
-          description={
-            active && segment
-              ? `${segment.description} Built from synced Shopify + Delhivery data.`
-              : "Built from synced Shopify + Delhivery data."
-          }
-        >
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <button
-              type="button"
-              data-testid={active ? "refresh-call-queues" : undefined}
-              onClick={() =>
-                void loadWorkspace({ regenerate: true, segmentType: callStage })
-              }
-              disabled={loadingQueue}
-              className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${loadingQueue && active ? "animate-spin" : ""}`}
-                aria-hidden
-              />
-              {loadingQueue && active ? "Refreshing queues…" : "Refresh call queues"}
-            </button>
-            {queueGen && active ? (
-              <p
-                className="text-xs text-charcoal/55"
-                data-testid="call-queue-generation-summary"
-              >
-                Live queues: {queueGen.deliveryCandidates} delivery
-                {queueGen.deliveryMissingPhone
-                  ? ` (${queueGen.deliveryMissingPhone} missing phone)`
-                  : ""}
-                {" · "}
-                {queueGen.reengagementCandidates} re-engagement
-                {queueGen.seedPendingCleared
-                  ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
-                  : ""}
-                {!queueGen.commercePresent
-                  ? " · no synced commerce yet (Sync All first)"
-                  : ""}
-              </p>
-            ) : null}
-            {loadingQueue && active ? (
-              <StatusChip label="Loading queue…" tone="neutral" />
-            ) : null}
-          </div>
-          {error && active ? <p className="text-sm text-aarla-red mb-3">{error}</p> : null}
-          {active ? (
-            <CallsQueueTable
-              rows={queue}
-              onStart={openCall}
-              onCallLater={async (id) => {
-                const date = new Date();
-                date.setDate(date.getDate() + 2);
-                const res = await callLaterCustomerCallAction(
-                  id,
-                  date.toISOString().slice(0, 10),
-                  "Quick Call Later from queue",
-                );
-                if (!res.ok) setError(res.error);
-                else void loadWorkspace({ segmentType: callStage });
-              }}
-              onSkip={async (id) => {
-                const res = await skipCustomerCallAction(id);
-                if (!res.ok) setError(res.error);
-                else void loadWorkspace({ segmentType: callStage });
-              }}
-              onHistory={async (customerId) => {
-                const res = await getCustomerCallHistoryAction(customerId);
-                if (!res.ok) setError(res.error);
-                else setHistoryOnly(res.data);
-              }}
-            />
-          ) : null}
-        </FormSection>
-      </div>
-    );
-  }
-
   return (
     <>
       <Header
@@ -360,9 +237,7 @@ export default function CustomerCallsPage() {
             </p>
           </div>
 
-          {error && !isCallStage(stage) ? (
-            <p className="text-sm text-aarla-red">{error}</p>
-          ) : null}
+          {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
 
           {/* Keep visited stages mounted so tables do not re-enter "Loading…" on every tab click. */}
           {visited.has("shopify") ? (
@@ -450,8 +325,19 @@ export default function CustomerCallsPage() {
                       className="text-xs text-charcoal/55"
                       data-testid="call-queue-generation-summary"
                     >
-                      Live: {queueGen.deliveryCandidates} delivery ·{" "}
+                      Live queues: {queueGen.deliveryCandidates} delivery
+                      {queueGen.deliveryMissingPhone
+                        ? ` (${queueGen.deliveryMissingPhone} missing phone)`
+                        : ""}
+                      {" · "}
                       {queueGen.reengagementCandidates} re-engagement
+                      {queueGen.seedPendingCleared
+                        ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
+                        : ""}
+                      {!queueGen.commercePresent
+                        ? " · no synced commerce yet (Sync All first)"
+                        : ""}
+                      {` · showing ${queue.length} in this queue`}
                     </p>
                   ) : null}
                 </div>
