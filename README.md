@@ -2,7 +2,7 @@
 
 **Aarla OS** is a founder operating system for [Aarla](https://aarla.in) — a cultural lifestyle brand. Version 0.2 adds the **product network & traceability** domain (People, Partners, Inventory, Registrations, Product Journey) on top of the v0.1 workflows from idea → manufacturing → launch → content → fulfilment → review.
 
-Business state persists in **PostgreSQL** (local Docker for development; **Supabase Cloud** for Vercel). There is no authentication and no live Shopify.
+Business state persists in **PostgreSQL** (local Docker for development; **Supabase Cloud** for Vercel). Optional **role-based Basic Auth** (`admin` full access, `crm` outreach only) — see `docs/auth.md`.
 
 ## How to run (local)
 

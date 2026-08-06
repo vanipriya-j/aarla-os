@@ -42,6 +42,11 @@ Tick **Preview** and **Production**. No quotes around values.
 |------|--------|
 | `DATABASE_URL` | pooler URI from step 2 |
 | `SETUP_SECRET` | invent a long random phrase (for `/setup` once) |
+| `AUTH_ADMIN_PASSWORD` | admin Basic Auth password (full access) |
+| `AUTH_CRM_PASSWORD` | crm Basic Auth password (Customer Calls only) |
+| `AUTH_ADMIN_USERNAME` / `AUTH_CRM_USERNAME` | optional (default `admin` / `crm`) |
+
+See `docs/auth.md` for role behaviour.
 
 ## 4. Redeploy
 
