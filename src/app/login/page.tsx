@@ -48,6 +48,13 @@ export default async function LoginPage({
           </p>
         </div>
         <LoginForm nextPath={next} />
+        <p className="mt-6 text-center text-xs text-charcoal/50">
+          First deploy? Run{" "}
+          <a href="/setup" className="text-deep-navy underline underline-offset-2">
+            /setup
+          </a>{" "}
+          with your setup secret before signing in.
+        </p>
       </div>
     </div>
   );

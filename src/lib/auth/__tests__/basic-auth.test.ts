@@ -56,13 +56,16 @@ describe("role-based credentials + cookie sessions", () => {
     expect(canAccessPath("crm", "/api/commerce/sync/shopify")).toBe(true);
     expect(canAccessPath("crm", "/diagnostics")).toBe(false);
     expect(canAccessPath("crm", "/")).toBe(false);
-    expect(canAccessPath("crm", "/setup")).toBe(false);
+    // /setup is public (secret-gated API) so bootstrap works before login
+    expect(canAccessPath("crm", "/setup")).toBe(true);
     expect(canAccessPath("admin", "/setup")).toBe(true);
     expect(homePathForRole("crm")).toBe("/customer-calls");
     expect(isPublicPath("/api/health")).toBe(true);
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/login")).toBe(true);
     expect(isPublicPath("/api/auth/logout")).toBe(true);
+    expect(isPublicPath("/setup")).toBe(true);
+    expect(isPublicPath("/api/setup")).toBe(true);
   });
 
   it("filters nav for crm to Customer Calls only", () => {

@@ -7,7 +7,7 @@ Aarla OS supports two shared logins via a sign-in form and HttpOnly cookies.
 | **admin** | Full founder OS (all pages + `/setup` + diagnostics) |
 | **crm** | Outreach only: `/customer-calls` and `/api/commerce/sync/*` |
 
-`/api/health` stays public for uptime checks. `/login` and `/api/auth/login` are public so users can sign in.
+`/api/health` stays public for uptime checks. `/login` and `/api/auth/login` are public so users can sign in. `/setup` and `/api/setup` stay public so you can migrate (including `auth_sessions`) before the first login — `/api/setup` still requires `SETUP_SECRET`.
 
 ## Enable (Vercel / production)
 
@@ -28,7 +28,7 @@ AUTH_SESSION_TTL_DAYS=14
 
 Usernames default to `admin` / `crm` if omitted. Auth turns on when **at least one** password is non-empty.
 
-Also run DB migrations (`/setup` or `npm run db:migrate`) so the `auth_sessions` table exists.
+**First deploy with auth on:** open `/setup` (no login required), run migrations with `SETUP_SECRET`, then sign in at `/login`. Without that migration, login cannot create sessions.
 
 Locally, leave passwords unset to keep the open-dev experience (treated as admin for navigation).
 
