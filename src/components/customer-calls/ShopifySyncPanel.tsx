@@ -69,8 +69,10 @@ export function ShopifySyncPanel() {
       setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
+        setDiagnostics([]);
         return;
       }
+      setError(null);
       setDiagnostics(res.data.rows);
       setDiagPage(res.data.page);
       setDiagTotal(res.data.total);
@@ -233,11 +235,11 @@ export function ShopifySyncPanel() {
         </div>
         {!diagnosticsLoaded ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-idle">
-            Loading saved Shopify rows…
+            {diagPending ? "Loading saved Shopify rows…" : "Open this stage to load Shopify rows."}
           </p>
         ) : diagnostics.length === 0 ? (
           <p className="text-sm text-charcoal/60" data-testid="shopify-diagnostics-empty">
-            No synchronized Shopify customers yet.
+            {error ? error : "No synchronized Shopify customers yet."}
           </p>
         ) : (
           <>
