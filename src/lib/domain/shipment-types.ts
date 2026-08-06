@@ -60,6 +60,8 @@ export interface ShipmentDiagnosticRow {
   id: string;
   awb: string;
   orderNumber: string | null;
+  customerName: string | null;
+  orderedAt: string | null;
   carrier: ShipmentCarrier;
   normalizedStatus: NormalizedShipmentStatus;
   providerStatus: string | null;

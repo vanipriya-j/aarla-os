@@ -207,7 +207,7 @@ export default function CustomerCallsPage() {
           title={segment?.name ?? "Queue"}
           description={
             segment
-              ? `${segment.description} Built from synced Shopify customers/orders and Delhivery deliveries.`
+              ? `${segment.description} Seeded demo queue until live generation from Shopify + Delhivery.`
               : "Load a segment to see pending calls."
           }
         >

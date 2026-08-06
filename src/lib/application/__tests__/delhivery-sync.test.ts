@@ -161,6 +161,8 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     const diag = await getDelhiveryShipmentDiagnostics({ repo: repo() });
     const row = diag.rows.find((d) => d.awb === "AWB1002DEL");
     expect(row?.orderNumber).toBeTruthy();
+    expect(row?.customerName).toBeTruthy();
+    expect(row?.orderedAt).toBeTruthy();
     expect(row?.normalizedStatus).toBe("in-transit");
   });
 
