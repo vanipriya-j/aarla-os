@@ -285,7 +285,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then Delhivery. Use Full re-sync only when you need the whole catalog again."
+      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then tracks every Delhivery AWB already in the database (not just the last Shopify page). Use Full re-sync only when you need the whole catalog again."
     >
       {counts ? (
         <p
