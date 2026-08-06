@@ -11,6 +11,19 @@ type DbClient = Pick<PoolClient, "query">;
 
 const INIT = "20260725140000_init_aarla_os.sql";
 
+/**
+ * Non-idempotent migrations: if the primary table already exists, record the
+ * migration as applied instead of re-running CREATE. Idempotent migrations
+ * (locks / watermarks / source_key) should run so IF NOT EXISTS can fill gaps.
+ */
+const PREEXISTING_TABLE_MARKERS: Record<string, string> = {
+  [INIT]: "organizations",
+  "20260801120000_aarla_universe.sql": "creative_nodes",
+  "20260802120000_customer_calls.sql": "customer_call_segments",
+  "20260803120000_external_commerce.sql": "external_customers",
+  "20260804120000_shipments.sql": "shipments",
+};
+
 export type MigrateResult = {
   applied: string[];
   skipped: string[];
@@ -69,18 +82,29 @@ async function markApplied(client: DbClient, filename: string) {
   );
 }
 
+function isAlreadyExistsError(err: unknown): boolean {
+  const code =
+    typeof err === "object" && err && "code" in err
+      ? String((err as { code: unknown }).code)
+      : "";
+  // 42P07 duplicate_table, 42710 duplicate_object, 42701 duplicate_column
+  if (code === "42P07" || code === "42710" || code === "42701") return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /already exists/i.test(message);
+}
+
 export async function runMigrations(client: DbClient): Promise<MigrateResult> {
   await ensureMigrationsTable(client);
   const applied = await appliedSet(client);
   const files = await loadMigrations();
 
-  if (
-    !applied.has(INIT) &&
-    files.some((f) => f.filename === INIT) &&
-    (await tableExists(client, "organizations"))
-  ) {
-    await markApplied(client, INIT);
-    applied.add(INIT);
+  for (const [filename, table] of Object.entries(PREEXISTING_TABLE_MARKERS)) {
+    if (!applied.has(filename) && files.some((f) => f.filename === filename)) {
+      if (await tableExists(client, table)) {
+        await markApplied(client, filename);
+        applied.add(filename);
+      }
+    }
   }
 
   const appliedNow: string[] = [];
@@ -102,6 +126,13 @@ export async function runMigrations(client: DbClient): Promise<MigrateResult> {
       appliedNow.push(filename);
     } catch (err) {
       await client.query("rollback");
+      if (isAlreadyExistsError(err)) {
+        // Runtime ensure* / partial apply left objects without a schema_migrations row.
+        await markApplied(client, filename);
+        applied.add(filename);
+        skipped.push(filename);
+        continue;
+      }
       throw err;
     }
   }
