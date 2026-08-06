@@ -250,17 +250,23 @@ export async function seedCustomerCalls(client: DbClient): Promise<void> {
   console.log(`[seed-db] customer_call_queue_items (${QUEUE.length})…`);
   for (const row of QUEUE) {
     const segmentId = row.segment === "delivery" ? DELIVERY_SEG : REENG_SEG;
+    const id = stableId(`call-q:${row.slug}`);
+    const sourceKey =
+      row.segment === "delivery"
+        ? `seed:delivery:${row.customerId}:${row.orderId ?? row.slug}`
+        : `seed:reeng:${row.customerId}`;
     await client.query(
       `insert into customer_call_queue_items (
-        id, organization_id, segment_id, external_customer_id, external_order_id,
+        id, organization_id, segment_id, source_key, external_customer_id, external_order_id,
         customer_name, phone, email, reason, last_order_date, delivered_at,
         products_summary, status, assigned_to
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',null)
-      on conflict do nothing`,
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',null)
+      on conflict (id) do nothing`,
       [
-        stableId(`call-q:${row.slug}`),
+        id,
         ORG_ID,
         segmentId,
+        sourceKey,
         row.customerId,
         row.orderId ?? null,
         row.name,

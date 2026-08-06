@@ -13,6 +13,13 @@ import type {
 import type { CustomerCallsRepository } from "@/lib/repositories/customer-calls";
 import { randomUUID } from "node:crypto";
 
+function isoOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 type Q = <T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
@@ -310,6 +317,204 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
         issuesRaised: Number(issues[0]?.n ?? 0),
         followUpsDue: Number(followUps[0]?.n ?? 0),
       };
+    },
+
+    async listDeliveryFollowUpCandidates(lookbackDays) {
+      const days = Math.max(1, Math.floor(lookbackDays));
+      const rows = await q<{
+        external_customer_id: string;
+        customer_name: string;
+        phone: string;
+        email: string | null;
+        order_number: string;
+        order_date: Date | string | null;
+        delivered_at: Date | string;
+        products_summary: string | null;
+      }>(
+        `select
+           c.external_id as external_customer_id,
+           coalesce(nullif(btrim(c.name), ''), 'Customer') as customer_name,
+           btrim(c.phone) as phone,
+           c.email,
+           coalesce(nullif(btrim(o.order_number), ''), o.external_id) as order_number,
+           o.order_date,
+           s.delivered_at,
+           (
+             select string_agg(
+               trim(both from i.title) || ' ×' || i.quantity::text,
+               ', '
+               order by i.title
+             )
+             from external_order_items i
+             where i.external_order_id = o.id
+           ) as products_summary
+         from shipments s
+         join external_orders o on o.id = s.external_order_id
+         join external_customers c on c.id = o.external_customer_id
+         where s.organization_id = $1
+           and s.carrier = 'delhivery'
+           and s.normalized_status = 'delivered'
+           and s.delivered_at is not null
+           and s.delivered_at >= (now() - make_interval(days => $2))
+           and o.is_valid = true
+           and c.phone is not null
+           and btrim(c.phone) <> ''
+           and not exists (
+             select 1 from customer_contact_preferences p
+             where p.organization_id = c.organization_id
+               and p.external_customer_id = c.external_id
+               and p.do_not_contact = true
+           )
+         order by s.delivered_at desc, o.order_number`,
+        [ORG_ID, days],
+      );
+
+      return rows.map((r) => ({
+        externalCustomerId: String(r.external_customer_id),
+        customerName: String(r.customer_name),
+        phone: String(r.phone),
+        email: r.email ? String(r.email) : null,
+        orderNumber: String(r.order_number),
+        orderDate: dateOnly(r.order_date),
+        deliveredAt: isoOrNull(r.delivered_at)!,
+        productsSummary: r.products_summary ? String(r.products_summary) : null,
+      }));
+    },
+
+    async listReengagementCandidates(lapseDays) {
+      const days = Math.max(1, Math.floor(lapseDays));
+      const rows = await q<{
+        external_customer_id: string;
+        customer_name: string;
+        phone: string;
+        email: string | null;
+        last_order_number: string | null;
+        last_order_date: Date | string | null;
+        products_summary: string | null;
+      }>(
+        `with last_valid as (
+           select distinct on (o.external_customer_id)
+             o.external_customer_id as customer_uuid,
+             o.id as order_uuid,
+             coalesce(nullif(btrim(o.order_number), ''), o.external_id) as order_number,
+             o.order_date
+           from external_orders o
+           where o.organization_id = $1
+             and o.is_valid = true
+             and o.external_customer_id is not null
+           order by o.external_customer_id, o.order_date desc nulls last
+         )
+         select
+           c.external_id as external_customer_id,
+           coalesce(nullif(btrim(c.name), ''), 'Customer') as customer_name,
+           btrim(c.phone) as phone,
+           c.email,
+           lv.order_number as last_order_number,
+           lv.order_date as last_order_date,
+           (
+             select string_agg(
+               trim(both from i.title) || ' ×' || i.quantity::text,
+               ', '
+               order by i.title
+             )
+             from external_order_items i
+             where i.external_order_id = lv.order_uuid
+           ) as products_summary
+         from external_customers c
+         join last_valid lv on lv.customer_uuid = c.id
+         where c.organization_id = $1
+           and c.phone is not null
+           and btrim(c.phone) <> ''
+           and c.latest_valid_order_at is not null
+           and c.latest_valid_order_at < (now() - make_interval(days => $2))
+           and not exists (
+             select 1 from customer_contact_preferences p
+             where p.organization_id = c.organization_id
+               and p.external_customer_id = c.external_id
+               and p.do_not_contact = true
+           )
+         order by c.latest_valid_order_at asc, c.name`,
+        [ORG_ID, days],
+      );
+
+      return rows.map((r) => ({
+        externalCustomerId: String(r.external_customer_id),
+        customerName: String(r.customer_name),
+        phone: String(r.phone),
+        email: r.email ? String(r.email) : null,
+        lastOrderNumber: r.last_order_number ? String(r.last_order_number) : null,
+        lastOrderDate: dateOnly(r.last_order_date),
+        productsSummary: r.products_summary ? String(r.products_summary) : null,
+      }));
+    },
+
+    async upsertQueueCandidate(input) {
+      const id = randomUUID();
+      const rows = await q(
+        `insert into customer_call_queue_items (
+           id, organization_id, segment_id, source_key, external_customer_id, external_order_id,
+           customer_name, phone, email, reason, last_order_date, delivered_at,
+           products_summary, status
+         ) values (
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending'
+         )
+         on conflict (organization_id, segment_id, source_key)
+         do update set
+           external_customer_id = excluded.external_customer_id,
+           external_order_id = excluded.external_order_id,
+           customer_name = excluded.customer_name,
+           phone = excluded.phone,
+           email = excluded.email,
+           reason = case
+             when customer_call_queue_items.status in ('pending', 'call-later')
+               then excluded.reason
+             else customer_call_queue_items.reason
+           end,
+           last_order_date = excluded.last_order_date,
+           delivered_at = excluded.delivered_at,
+           products_summary = excluded.products_summary,
+           updated_at = now()
+         returning *, (xmax = 0) as inserted`,
+        [
+          id,
+          ORG_ID,
+          input.segmentId,
+          input.sourceKey,
+          input.externalCustomerId,
+          input.externalOrderId,
+          input.customerName,
+          input.phone,
+          input.email,
+          input.reason,
+          input.lastOrderDate,
+          input.deliveredAt,
+          input.productsSummary,
+        ],
+      );
+      const row = rows[0];
+      if (!row) throw new Error("Failed to upsert queue candidate");
+      return {
+        created: Boolean(row.inserted),
+        item: mapQueue(row),
+      };
+    },
+
+    async retireStalePending(segmentId, keepSourceKeys) {
+      if (keepSourceKeys.length === 0) return 0;
+
+      const rows = await q<{ id: string }>(
+        `delete from customer_call_queue_items q
+         where q.organization_id = $1
+           and q.segment_id = $2
+           and q.status = 'pending'
+           and not exists (
+             select 1 from customer_interactions i where i.queue_item_id = q.id
+           )
+           and not (q.source_key = any($3::text[]))
+         returning q.id`,
+        [ORG_ID, segmentId, keepSourceKeys],
+      );
+      return rows.length;
     },
   };
 }

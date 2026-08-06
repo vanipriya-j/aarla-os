@@ -5,9 +5,31 @@ import type {
   CustomerContactPreference,
   CustomerInteraction,
   CallSegmentType,
+  QueueCandidateInput,
   QueueItemStatus,
   SaveCallOutcomeInput,
 } from "@/lib/domain/customer-calls-types";
+
+export type DeliveryQueueCandidateRow = {
+  externalCustomerId: string;
+  customerName: string;
+  phone: string;
+  email: string | null;
+  orderNumber: string;
+  orderDate: string | null;
+  deliveredAt: string;
+  productsSummary: string | null;
+};
+
+export type ReengagementQueueCandidateRow = {
+  externalCustomerId: string;
+  customerName: string;
+  phone: string;
+  email: string | null;
+  lastOrderNumber: string | null;
+  lastOrderDate: string | null;
+  productsSummary: string | null;
+};
 
 export interface CustomerCallsRepository {
   listSegments(): Promise<CustomerCallSegment[]>;
@@ -39,4 +61,16 @@ export interface CustomerCallsRepository {
   ): Promise<CustomerContactPreference>;
   isDoNotContact(externalCustomerId: string): Promise<boolean>;
   dashboardCounts(): Promise<CallsDashboardCounts>;
+  /** Delhivery-delivered orders eligible for delivery follow-up. */
+  listDeliveryFollowUpCandidates(lookbackDays: number): Promise<DeliveryQueueCandidateRow[]>;
+  /** Customers whose latest valid order is older than lapseDays. */
+  listReengagementCandidates(lapseDays: number): Promise<ReengagementQueueCandidateRow[]>;
+  upsertQueueCandidate(
+    input: QueueCandidateInput,
+  ): Promise<{ created: boolean; item: CustomerCallQueueItem }>;
+  /**
+   * Remove pending rows in a segment whose source_key is not in keepSourceKeys.
+   * Caller should only invoke when keepSourceKeys is non-empty.
+   */
+  retireStalePending(segmentId: string, keepSourceKeys: string[]): Promise<number>;
 }

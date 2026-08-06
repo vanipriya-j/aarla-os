@@ -174,7 +174,7 @@ export default function DiagnosticsPage() {
               </dl>
             </FormSection>
 
-            <FormSection title="Customer Calls" description="Seeded queues until queue generation lands.">
+            <FormSection title="Customer Calls" description="Live queues from Shopify + Delhivery after Refresh call queues / Sync All.">
               <dl className="grid grid-cols-3 gap-3 text-sm">
                 <div className="border border-border rounded-lg px-3 py-2">
                   <dt className="text-xs text-charcoal/55">Segments</dt>

@@ -12,7 +12,7 @@ Shopify external_fulfilments (AWB)
       → shipments + shipment_status_events
 ```
 
-Does **not** create Customer Call queue items.
+Does **not** create Customer Call queue items directly — run **Refresh call queues** (or Sync All) so delivery follow-ups are built from `shipments.normalized_status = delivered`.
 
 Commerce sync on `/customer-calls` is **manual and serial**:
 - Nothing starts on page load (no auto sync, no auto diagnostics).

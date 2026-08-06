@@ -146,3 +146,76 @@ export const DELIVERY_SCRIPT =
 
 export const REENGAGEMENT_SCRIPT =
   "Hello, this is Vyshali calling from Aarla. We wanted to let you know that our Varalakshmi and Navarathri collections are now available. We also offer customised gifting for families and corporates. Please do visit aarla.in when you have a moment.";
+
+/** Delivered within this many days → delivery follow-up candidate. */
+export const DELIVERY_FOLLOWUP_LOOKBACK_DAYS = 45;
+
+/** Default lapse window when segment.cooldownDays is unset. */
+export const REENGAGEMENT_LAPSE_DAYS_DEFAULT = 90;
+
+export type QueueCandidateInput = {
+  segmentId: string;
+  /** Stable idempotency key within a segment (e.g. delivery:1001:#10450). */
+  sourceKey: string;
+  externalCustomerId: string;
+  externalOrderId: string | null;
+  customerName: string;
+  phone: string;
+  email: string | null;
+  reason: string;
+  lastOrderDate: string | null;
+  deliveredAt: string | null;
+  productsSummary: string | null;
+};
+
+export function deliveryQueueSourceKey(
+  externalCustomerId: string,
+  orderNumber: string,
+): string {
+  return `delivery:${externalCustomerId}:${orderNumber}`;
+}
+
+export function reengagementQueueSourceKey(externalCustomerId: string): string {
+  return `reeng:${externalCustomerId}`;
+}
+
+export type CallQueueGenerationSummary = {
+  deliveryCandidates: number;
+  deliveryCreated: number;
+  deliveryUpdated: number;
+  deliveryRetired: number;
+  reengagementCandidates: number;
+  reengagementCreated: number;
+  reengagementUpdated: number;
+  reengagementRetired: number;
+};
+
+export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
+  return {
+    deliveryCandidates: 0,
+    deliveryCreated: 0,
+    deliveryUpdated: 0,
+    deliveryRetired: 0,
+    reengagementCandidates: 0,
+    reengagementCreated: 0,
+    reengagementUpdated: 0,
+    reengagementRetired: 0,
+  };
+}
+
+export function daysSince(iso: string, now = new Date()): number {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 0;
+  return Math.max(0, Math.floor((now.getTime() - then) / (24 * 60 * 60 * 1000)));
+}
+
+export function deliveryFollowUpReason(deliveredAt: string, now = new Date()): string {
+  const days = daysSince(deliveredAt, now);
+  if (days <= 0) return "Order delivered today — check experience";
+  if (days === 1) return "Order delivered yesterday — check experience";
+  return `Order delivered ${days} days ago — check experience`;
+}
+
+export function reengagementReason(lapseDays: number): string {
+  return `No purchase in ${lapseDays}+ days`;
+}

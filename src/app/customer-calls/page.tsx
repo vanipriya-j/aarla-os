@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { FormSection } from "@/components/ui/FormSection";
@@ -20,6 +20,7 @@ import {
   getCustomerCallHistoryAction,
   getCustomerCallsDashboardAction,
   getCustomerCallsWorkspaceAction,
+  refreshCustomerCallQueuesAction,
   saveCustomerCallAndNextAction,
   saveCustomerCallOutcomeAction,
   skipCustomerCallAction,
@@ -28,11 +29,12 @@ import {
 import type {
   CallSegmentType,
   CallsDashboardCounts,
+  CallQueueGenerationSummary,
   CustomerCallQueueItem,
   CustomerCallSegment,
   CustomerInteraction,
 } from "@/lib/domain/customer-calls-types";
-import { Phone } from "lucide-react";
+import { Phone, RefreshCw } from "lucide-react";
 
 export default function CustomerCallsPage() {
   const [tab, setTab] = useState<CallSegmentType>("delivery-follow-up");
@@ -41,6 +43,7 @@ export default function CustomerCallsPage() {
   const [queue, setQueue] = useState<CustomerCallQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [queueGen, setQueueGen] = useState<CallQueueGenerationSummary | null>(null);
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [activeItem, setActiveItem] = useState<CustomerCallQueueItem | null>(null);
@@ -48,25 +51,38 @@ export default function CustomerCallsPage() {
   const [history, setHistory] = useState<CustomerInteraction[]>([]);
   const [historyOnly, setHistoryOnly] = useState<CustomerInteraction[] | null>(null);
 
-  const refresh = useCallback(() => {
-    startTransition(async () => {
-      const dash = await getCustomerCallsDashboardAction();
-      if (dash.ok) setCounts(dash.data.counts);
-      const ws = await getCustomerCallsWorkspaceAction(tab);
-      if (!ws.ok) {
-        setError(ws.error);
-        return;
-      }
-      setError(null);
-      setSegment(ws.data.segment);
-      setQueue(ws.data.queue);
-      setCounts(ws.data.counts);
-    });
-  }, [tab]);
+  const queuesReadyRef = useRef(false);
+
+  const loadWorkspace = useCallback(
+    (opts?: { regenerate?: boolean }) => {
+      startTransition(async () => {
+        let genError: string | null = null;
+        const shouldGenerate = Boolean(opts?.regenerate) || !queuesReadyRef.current;
+        if (shouldGenerate) {
+          const gen = await refreshCustomerCallQueuesAction();
+          queuesReadyRef.current = true;
+          if (!gen.ok) genError = gen.error;
+          else setQueueGen(gen.data);
+        }
+        const dash = await getCustomerCallsDashboardAction();
+        if (dash.ok) setCounts(dash.data.counts);
+        const ws = await getCustomerCallsWorkspaceAction(tab);
+        if (!ws.ok) {
+          setError(ws.error);
+          return;
+        }
+        setError(genError);
+        setSegment(ws.data.segment);
+        setQueue(ws.data.queue);
+        setCounts(ws.data.counts);
+      });
+    },
+    [tab],
+  );
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    loadWorkspace();
+  }, [loadWorkspace]);
 
   async function openCall(id: string) {
     const res = await startCustomerCallAction(id);
@@ -78,7 +94,7 @@ export default function CustomerCallsPage() {
     setActiveSegment(res.data.segment);
     setHistory(res.data.history);
     setWorkspaceOpen(true);
-    refresh();
+    loadWorkspace();
   }
 
   function toInput(form: CallFormState) {
@@ -109,7 +125,7 @@ export default function CustomerCallsPage() {
     }
     setWorkspaceOpen(false);
     setActiveItem(null);
-    refresh();
+    loadWorkspace();
   }
 
   async function handleSaveAndNext(form: CallFormState) {
@@ -127,7 +143,7 @@ export default function CustomerCallsPage() {
       setWorkspaceOpen(false);
       setActiveItem(null);
     }
-    refresh();
+    loadWorkspace();
   }
 
   return (
@@ -195,6 +211,24 @@ export default function CustomerCallsPage() {
               : "Load a segment to see pending calls."
           }
         >
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <button
+              type="button"
+              data-testid="refresh-call-queues"
+              onClick={() => loadWorkspace({ regenerate: true })}
+              disabled={pending}
+              className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} aria-hidden />
+              {pending ? "Refreshing queues…" : "Refresh call queues"}
+            </button>
+            {queueGen ? (
+              <p className="text-xs text-charcoal/55" data-testid="call-queue-generation-summary">
+                Delivery: {queueGen.deliveryCandidates} eligible · Re-engagement:{" "}
+                {queueGen.reengagementCandidates} eligible
+              </p>
+            ) : null}
+          </div>
           <CallsQueueTable
             rows={queue}
             onStart={openCall}
@@ -207,12 +241,12 @@ export default function CustomerCallsPage() {
                 "Quick Call Later from queue",
               );
               if (!res.ok) setError(res.error);
-              else refresh();
+              else loadWorkspace();
             }}
             onSkip={async (id) => {
               const res = await skipCustomerCallAction(id);
               if (!res.ok) setError(res.error);
-              else refresh();
+              else loadWorkspace();
             }}
             onHistory={async (customerId) => {
               const res = await getCustomerCallHistoryAction(customerId);
@@ -228,7 +262,7 @@ export default function CustomerCallsPage() {
         onClose={() => {
           setWorkspaceOpen(false);
           setActiveItem(null);
-          refresh();
+          loadWorkspace();
         }}
         item={activeItem}
         segment={activeSegment}

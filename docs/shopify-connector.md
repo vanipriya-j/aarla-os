@@ -83,7 +83,7 @@ Shopify fulfilment tracking is **not** treated as proof of physical delivery.
 
 ## Out of scope
 
-- Delhivery tracking API
-- Final call-segment eligibility rules
-- Queue generation / refresh
+- Delhivery tracking API (see `docs/delhivery-connector.md`)
 - AI / RAG
+
+Call-queue eligibility is built from synced `external_*` + `shipments` via **Refresh call queues** (see `docs/customer-calls.md`).
