@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
@@ -43,7 +43,6 @@ export function CommerceSyncBar() {
   const [counts, setCounts] = useState<CommerceCounts | null>(null);
   const [serverLocked, setServerLocked] = useState(false);
   const [localAction, setLocalAction] = useState<LocalAction>("idle");
-  const [, startMetaTransition] = useTransition();
 
   const controlsBusy = busy || localAction !== "idle";
 
@@ -65,9 +64,23 @@ export function CommerceSyncBar() {
 
   // Lightweight counts only — not a sync.
   useEffect(() => {
-    startMetaTransition(() => {
-      void refreshMeta();
-    });
+    let cancelled = false;
+    void (async () => {
+      await refreshMeta();
+      if (cancelled) return;
+      setCounts((prev) =>
+        prev ?? {
+          externalCustomers: 0,
+          externalOrders: 0,
+          externalFulfilments: 0,
+          fulfilmentsWithAwb: 0,
+          shipments: 0,
+        },
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refreshMeta]);
 
   async function handleRefreshCounts() {
