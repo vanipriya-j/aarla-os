@@ -36,8 +36,21 @@ import type {
 } from "@/lib/domain/customer-calls-types";
 import { Phone, RefreshCw } from "lucide-react";
 
+const STAGES = [
+  { id: "shopify", label: "Shopify" },
+  { id: "shipments", label: "Shipments" },
+  { id: "delivery-follow-up", label: "Delivery Follow-up" },
+  { id: "re-engagement", label: "Re-engagement" },
+] as const;
+
+type StageId = (typeof STAGES)[number]["id"];
+
+function isCallStage(stage: StageId): stage is CallSegmentType {
+  return stage === "delivery-follow-up" || stage === "re-engagement";
+}
+
 export default function CustomerCallsPage() {
-  const [tab, setTab] = useState<CallSegmentType>("delivery-follow-up");
+  const [stage, setStage] = useState<StageId>("delivery-follow-up");
   const [counts, setCounts] = useState<CallsDashboardCounts | null>(null);
   const [segment, setSegment] = useState<CustomerCallSegment | null>(null);
   const [queue, setQueue] = useState<CustomerCallQueueItem[]>([]);
@@ -54,7 +67,9 @@ export default function CustomerCallsPage() {
   const queuesReadyRef = useRef(false);
 
   const loadWorkspace = useCallback(
-    (opts?: { regenerate?: boolean }) => {
+    (opts?: { regenerate?: boolean; segmentType?: CallSegmentType }) => {
+      const segmentType =
+        opts?.segmentType ?? (isCallStage(stage) ? stage : "delivery-follow-up");
       startTransition(async () => {
         let genError: string | null = null;
         const shouldGenerate = Boolean(opts?.regenerate) || !queuesReadyRef.current;
@@ -66,7 +81,7 @@ export default function CustomerCallsPage() {
         }
         const dash = await getCustomerCallsDashboardAction();
         if (dash.ok) setCounts(dash.data.counts);
-        const ws = await getCustomerCallsWorkspaceAction(tab);
+        const ws = await getCustomerCallsWorkspaceAction(segmentType);
         if (!ws.ok) {
           setError(ws.error);
           return;
@@ -77,12 +92,13 @@ export default function CustomerCallsPage() {
         setCounts(ws.data.counts);
       });
     },
-    [tab],
+    [stage],
   );
 
   useEffect(() => {
-    loadWorkspace();
-  }, [loadWorkspace]);
+    if (!isCallStage(stage)) return;
+    loadWorkspace({ segmentType: stage });
+  }, [stage, loadWorkspace]);
 
   async function openCall(id: string) {
     const res = await startCustomerCallAction(id);
@@ -94,7 +110,7 @@ export default function CustomerCallsPage() {
     setActiveSegment(res.data.segment);
     setHistory(res.data.history);
     setWorkspaceOpen(true);
-    loadWorkspace();
+    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
   }
 
   function toInput(form: CallFormState) {
@@ -125,7 +141,7 @@ export default function CustomerCallsPage() {
     }
     setWorkspaceOpen(false);
     setActiveItem(null);
-    loadWorkspace();
+    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
   }
 
   async function handleSaveAndNext(form: CallFormState) {
@@ -143,118 +159,165 @@ export default function CustomerCallsPage() {
       setWorkspaceOpen(false);
       setActiveItem(null);
     }
-    loadWorkspace();
+    if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
   }
 
   return (
     <>
       <Header
         title="Customer Calls"
-        subtitle="Delivery follow-ups and gentle re-engagement — one call at a time."
+        subtitle="Work one stage at a time — sync commerce, then call from the live queues."
       />
-      <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl" data-testid="customer-calls-page">
-        <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3">
-          <SummaryCard
-            label="Delivery Calls Pending"
-            value={String(counts?.deliveryPending ?? "—")}
-            icon={Phone}
-          />
-          <SummaryCard
-            label="Re-engagement Calls Pending"
-            value={String(counts?.reengagementPending ?? "—")}
-          />
-          <SummaryCard
-            label="Calls Completed Today"
-            value={String(counts?.completedToday ?? "—")}
-          />
-          <SummaryCard label="Issues Raised" value={String(counts?.issuesRaised ?? "—")} />
-          <SummaryCard label="Follow-ups Due" value={String(counts?.followUpsDue ?? "—")} />
-        </div>
-
-        {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
-
+      <main
+        className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl"
+        data-testid="customer-calls-page"
+      >
         <CommerceSyncProvider>
-          <CommerceSyncBar />
-          <ShopifySyncPanel />
-          <DelhiverySyncPanel />
-        </CommerceSyncProvider>
-
-        <div className="flex flex-wrap gap-2" data-testid="calls-tabs">
-          {(
-            [
-              ["delivery-follow-up", "Delivery Follow-up"],
-              ["re-engagement", "Re-engagement — 90 Days"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              data-testid={`tab-${value}`}
-              onClick={() => setTab(value)}
-              className={`text-sm rounded-full px-4 py-2 border transition ${
-                tab === value
-                  ? "bg-aarla-red text-white border-aarla-red"
-                  : "border-border text-deep-navy hover:border-aarla-red/40"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-          {pending ? <StatusChip label="Refreshing…" tone="neutral" /> : null}
-        </div>
-
-        <FormSection
-          title={segment?.name ?? "Queue"}
-          description={
-            segment
-              ? `${segment.description} Seeded demo queue until live generation from Shopify + Delhivery.`
-              : "Load a segment to see pending calls."
-          }
-        >
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <button
-              type="button"
-              data-testid="refresh-call-queues"
-              onClick={() => loadWorkspace({ regenerate: true })}
-              disabled={pending}
-              className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} aria-hidden />
-              {pending ? "Refreshing queues…" : "Refresh call queues"}
-            </button>
-            {queueGen ? (
-              <p className="text-xs text-charcoal/55" data-testid="call-queue-generation-summary">
-                Delivery: {queueGen.deliveryCandidates} eligible · Re-engagement:{" "}
-                {queueGen.reengagementCandidates} eligible
-              </p>
-            ) : null}
+          <div className="space-y-3" data-testid="customer-calls-stages">
+            <div className="flex flex-wrap gap-2" data-testid="calls-tabs" role="tablist">
+              {STAGES.map((s) => {
+                const active = stage === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    data-testid={`tab-${s.id}`}
+                    onClick={() => setStage(s.id)}
+                    className={`text-sm rounded-full px-4 py-2 border transition ${
+                      active
+                        ? "bg-aarla-red text-white border-aarla-red"
+                        : "border-border text-deep-navy hover:border-aarla-red/40 bg-white"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+              {pending && isCallStage(stage) ? (
+                <StatusChip label="Refreshing…" tone="neutral" />
+              ) : null}
+            </div>
+            <p className="text-xs text-charcoal/50">
+              {stage === "shopify"
+                ? "Stage 1 — Sync Shopify customers and orders."
+                : stage === "shipments"
+                  ? "Stage 2 — Track Delhivery AWBs and review shipment details."
+                  : stage === "delivery-follow-up"
+                    ? "Stage 3 — Call customers with recent deliveries."
+                    : "Stage 4 — Re-engage buyers with no purchase in 90+ days."}
+            </p>
           </div>
-          <CallsQueueTable
-            rows={queue}
-            onStart={openCall}
-            onCallLater={async (id) => {
-              const date = new Date();
-              date.setDate(date.getDate() + 2);
-              const res = await callLaterCustomerCallAction(
-                id,
-                date.toISOString().slice(0, 10),
-                "Quick Call Later from queue",
-              );
-              if (!res.ok) setError(res.error);
-              else loadWorkspace();
-            }}
-            onSkip={async (id) => {
-              const res = await skipCustomerCallAction(id);
-              if (!res.ok) setError(res.error);
-              else loadWorkspace();
-            }}
-            onHistory={async (customerId) => {
-              const res = await getCustomerCallHistoryAction(customerId);
-              if (!res.ok) setError(res.error);
-              else setHistoryOnly(res.data);
-            }}
-          />
-        </FormSection>
+
+          {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
+
+          {stage === "shopify" ? (
+            <div className="space-y-6" data-testid="stage-shopify">
+              <CommerceSyncBar />
+              <ShopifySyncPanel />
+            </div>
+          ) : null}
+
+          {stage === "shipments" ? (
+            <div className="space-y-6" data-testid="stage-shipments">
+              <DelhiverySyncPanel />
+            </div>
+          ) : null}
+
+          {isCallStage(stage) ? (
+            <div className="space-y-6" data-testid={`stage-${stage}`}>
+              <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {stage === "delivery-follow-up" ? (
+                  <SummaryCard
+                    label="Delivery Calls Pending"
+                    value={String(counts?.deliveryPending ?? "—")}
+                    icon={Phone}
+                  />
+                ) : (
+                  <SummaryCard
+                    label="Re-engagement Calls Pending"
+                    value={String(counts?.reengagementPending ?? "—")}
+                    icon={Phone}
+                  />
+                )}
+                <SummaryCard
+                  label="Calls Completed Today"
+                  value={String(counts?.completedToday ?? "—")}
+                />
+                <SummaryCard
+                  label={stage === "delivery-follow-up" ? "Issues Raised" : "Follow-ups Due"}
+                  value={String(
+                    stage === "delivery-follow-up"
+                      ? (counts?.issuesRaised ?? "—")
+                      : (counts?.followUpsDue ?? "—"),
+                  )}
+                />
+              </div>
+
+              <FormSection
+                title={segment?.name ?? "Queue"}
+                description={
+                  segment
+                    ? `${segment.description} Built from synced Shopify + Delhivery data.`
+                    : "Load a segment to see pending calls."
+                }
+              >
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <button
+                    type="button"
+                    data-testid="refresh-call-queues"
+                    onClick={() =>
+                      loadWorkspace({ regenerate: true, segmentType: stage })
+                    }
+                    disabled={pending}
+                    className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${pending ? "animate-spin" : ""}`}
+                      aria-hidden
+                    />
+                    {pending ? "Refreshing queues…" : "Refresh call queues"}
+                  </button>
+                  {queueGen ? (
+                    <p
+                      className="text-xs text-charcoal/55"
+                      data-testid="call-queue-generation-summary"
+                    >
+                      Live: {queueGen.deliveryCandidates} delivery ·{" "}
+                      {queueGen.reengagementCandidates} re-engagement
+                    </p>
+                  ) : null}
+                </div>
+                <CallsQueueTable
+                  rows={queue}
+                  onStart={openCall}
+                  onCallLater={async (id) => {
+                    const date = new Date();
+                    date.setDate(date.getDate() + 2);
+                    const res = await callLaterCustomerCallAction(
+                      id,
+                      date.toISOString().slice(0, 10),
+                      "Quick Call Later from queue",
+                    );
+                    if (!res.ok) setError(res.error);
+                    else loadWorkspace({ segmentType: stage });
+                  }}
+                  onSkip={async (id) => {
+                    const res = await skipCustomerCallAction(id);
+                    if (!res.ok) setError(res.error);
+                    else loadWorkspace({ segmentType: stage });
+                  }}
+                  onHistory={async (customerId) => {
+                    const res = await getCustomerCallHistoryAction(customerId);
+                    if (!res.ok) setError(res.error);
+                    else setHistoryOnly(res.data);
+                  }}
+                />
+              </FormSection>
+            </div>
+          ) : null}
+        </CommerceSyncProvider>
       </main>
 
       <CallWorkspaceModal
@@ -262,7 +325,7 @@ export default function CustomerCallsPage() {
         onClose={() => {
           setWorkspaceOpen(false);
           setActiveItem(null);
-          loadWorkspace();
+          if (isCallStage(stage)) loadWorkspace({ segmentType: stage });
         }}
         item={activeItem}
         segment={activeSegment}
