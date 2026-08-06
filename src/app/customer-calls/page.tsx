@@ -345,6 +345,9 @@ export default function CustomerCallsPage() {
                   </button>
                 );
               })}
+              {loadingQueue && isCallStage(stage) ? (
+                <StatusChip label="Refreshing…" tone="neutral" />
+              ) : null}
             </div>
             <p className="text-xs text-charcoal/50">
               {stage === "shopify"
@@ -361,6 +364,7 @@ export default function CustomerCallsPage() {
             <p className="text-sm text-aarla-red">{error}</p>
           ) : null}
 
+          {/* Keep visited stages mounted so tables do not re-enter "Loading…" on every tab click. */}
           {visited.has("shopify") ? (
             <div
               className={`space-y-6 ${stage === "shopify" ? "" : "hidden"}`}
@@ -382,8 +386,111 @@ export default function CustomerCallsPage() {
             </div>
           ) : null}
 
-          {renderQueueStage("delivery-follow-up")}
-          {renderQueueStage("re-engagement")}
+          {visited.has("delivery-follow-up") || visited.has("re-engagement") ? (
+            <div
+              className={`space-y-6 ${isCallStage(stage) ? "" : "hidden"}`}
+              data-testid={isCallStage(stage) ? `stage-${stage}` : "stage-calls"}
+              aria-hidden={!isCallStage(stage)}
+            >
+              <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {stage === "re-engagement" ? (
+                  <SummaryCard
+                    label="Re-engagement Calls Pending"
+                    value={String(counts?.reengagementPending ?? "—")}
+                    icon={Phone}
+                  />
+                ) : (
+                  <SummaryCard
+                    label="Delivery Calls Pending"
+                    value={String(counts?.deliveryPending ?? "—")}
+                    icon={Phone}
+                  />
+                )}
+                <SummaryCard
+                  label="Calls Completed Today"
+                  value={String(counts?.completedToday ?? "—")}
+                />
+                <SummaryCard
+                  label={stage === "re-engagement" ? "Follow-ups Due" : "Issues Raised"}
+                  value={String(
+                    stage === "re-engagement"
+                      ? (counts?.followUpsDue ?? "—")
+                      : (counts?.issuesRaised ?? "—"),
+                  )}
+                />
+              </div>
+
+              <FormSection
+                title={segment?.name ?? "Queue"}
+                description={
+                  segment
+                    ? `${segment.description} Built from synced Shopify + Delhivery data.`
+                    : "Load a segment to see pending calls."
+                }
+              >
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <button
+                    type="button"
+                    data-testid="refresh-call-queues"
+                    onClick={() => {
+                      if (!isCallStage(stage)) return;
+                      void loadWorkspace({ regenerate: true, segmentType: stage });
+                    }}
+                    disabled={loadingQueue || !isCallStage(stage)}
+                    className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${loadingQueue ? "animate-spin" : ""}`}
+                      aria-hidden
+                    />
+                    {loadingQueue ? "Refreshing queues…" : "Refresh call queues"}
+                  </button>
+                  {queueGen ? (
+                    <p
+                      className="text-xs text-charcoal/55"
+                      data-testid="call-queue-generation-summary"
+                    >
+                      Live: {queueGen.deliveryCandidates} delivery ·{" "}
+                      {queueGen.reengagementCandidates} re-engagement
+                    </p>
+                  ) : null}
+                </div>
+                {loadingQueue && queue.length === 0 ? (
+                  <p className="text-sm text-charcoal/60">Loading queue…</p>
+                ) : (
+                  <CallsQueueTable
+                    rows={queue}
+                    onStart={openCall}
+                    onCallLater={async (id) => {
+                      const date = new Date();
+                      date.setDate(date.getDate() + 2);
+                      const res = await callLaterCustomerCallAction(
+                        id,
+                        date.toISOString().slice(0, 10),
+                        "Quick Call Later from queue",
+                      );
+                      if (!res.ok) setError(res.error);
+                      else if (isCallStage(stage)) {
+                        void loadWorkspace({ segmentType: stage });
+                      }
+                    }}
+                    onSkip={async (id) => {
+                      const res = await skipCustomerCallAction(id);
+                      if (!res.ok) setError(res.error);
+                      else if (isCallStage(stage)) {
+                        void loadWorkspace({ segmentType: stage });
+                      }
+                    }}
+                    onHistory={async (customerId) => {
+                      const res = await getCustomerCallHistoryAction(customerId);
+                      if (!res.ok) setError(res.error);
+                      else setHistoryOnly(res.data);
+                    }}
+                  />
+                )}
+              </FormSection>
+            </div>
+          ) : null}
         </CommerceSyncProvider>
       </main>
 
