@@ -189,7 +189,11 @@ export default function CustomerCallsPage() {
 
         <FormSection
           title={segment?.name ?? "Queue"}
-          description={segment?.description ?? "Load a segment to see pending calls."}
+          description={
+            segment
+              ? `${segment.description} Seeded demo queue until live generation from Shopify + Delhivery.`
+              : "Load a segment to see pending calls."
+          }
         >
           <CallsQueueTable
             rows={queue}

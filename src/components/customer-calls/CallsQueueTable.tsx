@@ -13,6 +13,13 @@ type Props = {
   onHistory: (customerId: string) => void;
 };
 
+function formatDate(value?: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value.slice(0, 10);
+  return d.toLocaleDateString();
+}
+
 export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory }: Props) {
   return (
     <DataTable
@@ -21,45 +28,31 @@ export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory 
       emptyMessage="No pending calls in this queue."
       columns={[
         {
-          key: "customer",
-          header: "Customer",
-          render: (r) => (
-            <div>
-              <p className="font-medium text-deep-navy">{r.customerName}</p>
-              <p className="text-xs text-charcoal/50">{r.externalCustomerId}</p>
-            </div>
-          ),
-        },
-        { key: "phone", header: "Phone", render: (r) => r.phone },
-        {
-          key: "reason",
-          header: "Reason",
-          render: (r) => <span className="text-charcoal/75">{r.reason}</span>,
-        },
-        {
           key: "order",
-          header: "Relevant Order / Last Order",
+          header: "Order No",
           render: (r) => (
-            <span>
-              {r.externalOrderId || "—"}
-              {r.lastOrderDate ? (
-                <span className="block text-xs text-charcoal/50">{r.lastOrderDate}</span>
-              ) : null}
-            </span>
+            <span className="font-medium text-deep-navy">{r.externalOrderId || "—"}</span>
           ),
         },
         {
-          key: "products",
-          header: "Products",
-          render: (r) => (
-            <span className="text-xs text-charcoal/70 max-w-[200px] block">{r.productsSummary || "—"}</span>
-          ),
+          key: "customer",
+          header: "Customer Name",
+          render: (r) => <span className="text-deep-navy">{r.customerName}</span>,
         },
         {
-          key: "date",
-          header: "Date",
-          render: (r) =>
-            r.deliveredAt?.slice(0, 10) || r.lastOrderDate || r.createdAt.slice(0, 10),
+          key: "phone",
+          header: "Phone",
+          render: (r) => <span className="tabular-nums">{r.phone}</span>,
+        },
+        {
+          key: "ordered",
+          header: "Ordered",
+          render: (r) => formatDate(r.lastOrderDate),
+        },
+        {
+          key: "delivered",
+          header: "Delivered",
+          render: (r) => formatDate(r.deliveredAt),
         },
         {
           key: "status",
@@ -70,23 +63,25 @@ export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory 
           key: "action",
           header: "Action",
           render: (r) => (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-col items-start gap-1">
               <Button size="sm" onClick={() => onStart(r.id)} data-testid={`start-call-${r.id}`}>
                 Start Call
               </Button>
-              <Button size="sm" variant="outline" onClick={() => onCallLater(r.id)}>
-                Call Later
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => onSkip(r.id)}>
-                Skip
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onHistory(r.externalCustomerId)}
-              >
-                View History
-              </Button>
+              <div className="flex flex-wrap gap-1">
+                <Button size="sm" variant="ghost" onClick={() => onCallLater(r.id)}>
+                  Call Later
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => onSkip(r.id)}>
+                  Skip
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onHistory(r.externalCustomerId)}
+                >
+                  View History
+                </Button>
+              </div>
             </div>
           ),
         },

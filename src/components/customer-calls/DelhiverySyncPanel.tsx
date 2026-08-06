@@ -225,8 +225,8 @@ export function DelhiverySyncPanel() {
       </FormSection>
 
       <FormSection
-        title="Shipment diagnostics"
-        description="Normalized Delhivery status only — 50 rows per page. Empty until Delhivery sync completes."
+        title="Shipment details"
+        description="Order, customer, location, and dates — 50 rows per page. Empty until Delhivery sync completes."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -236,7 +236,7 @@ export function DelhiverySyncPanel() {
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
-            {diagPending ? "Loading…" : "Refresh diagnostics"}
+            {diagPending ? "Loading…" : "Refresh"}
           </button>
         </div>
         {!diagnosticsLoaded ? (
@@ -253,16 +253,11 @@ export function DelhiverySyncPanel() {
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-charcoal/55 border-b border-border">
                   <tr>
-                    <th className="py-2 pr-3 font-medium">AWB</th>
-                    <th className="py-2 pr-3 font-medium">Order</th>
-                    <th className="py-2 pr-3 font-medium">Carrier</th>
-                    <th className="py-2 pr-3 font-medium">Normalized</th>
-                    <th className="py-2 pr-3 font-medium">Provider</th>
-                    <th className="py-2 pr-3 font-medium">Delivered</th>
-                    <th className="py-2 pr-3 font-medium">Latest scan</th>
-                    <th className="py-2 pr-3 font-medium">Location</th>
-                    <th className="py-2 pr-3 font-medium">Last sync</th>
-                    <th className="py-2 font-medium">Sync error</th>
+                    <th className="py-2 pr-4 font-medium">Order No</th>
+                    <th className="py-2 pr-4 font-medium">Customer Name</th>
+                    <th className="py-2 pr-4 font-medium">Location</th>
+                    <th className="py-2 pr-4 font-medium">Delivered</th>
+                    <th className="py-2 font-medium">Ordered</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -273,26 +268,28 @@ export function DelhiverySyncPanel() {
                       data-testid={`shipment-row-${row.awb}`}
                       data-status={row.normalizedStatus}
                     >
-                      <td className="py-2.5 pr-3 text-deep-navy font-medium">{row.awb}</td>
-                      <td className="py-2.5 pr-3">{row.orderNumber ?? "—"}</td>
-                      <td className="py-2.5 pr-3">{row.carrier}</td>
-                      <td className="py-2.5 pr-3">{row.normalizedStatus}</td>
-                      <td className="py-2.5 pr-3">{row.providerStatus ?? "—"}</td>
-                      <td className="py-2.5 pr-3">
+                      <td className="py-2.5 pr-4 text-deep-navy font-medium">
+                        {row.orderNumber ?? "—"}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span>{row.customerName ?? "—"}</span>
+                        {row.syncError ? (
+                          <span className="block text-xs text-aarla-red/90 mt-0.5">
+                            {row.syncError}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2.5 pr-4">{row.latestScanLocation ?? "—"}</td>
+                      <td className="py-2.5 pr-4">
                         {row.deliveredAt
-                          ? new Date(row.deliveredAt).toLocaleString()
+                          ? new Date(row.deliveredAt).toLocaleDateString()
                           : "—"}
                       </td>
-                      <td className="py-2.5 pr-3">
-                        {row.latestScanAt
-                          ? new Date(row.latestScanAt).toLocaleString()
+                      <td className="py-2.5">
+                        {row.orderedAt
+                          ? new Date(row.orderedAt).toLocaleDateString()
                           : "—"}
                       </td>
-                      <td className="py-2.5 pr-3">{row.latestScanLocation ?? "—"}</td>
-                      <td className="py-2.5 pr-3">
-                        {new Date(row.lastSyncedAt).toLocaleString()}
-                      </td>
-                      <td className="py-2.5 text-aarla-red/90">{row.syncError ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
