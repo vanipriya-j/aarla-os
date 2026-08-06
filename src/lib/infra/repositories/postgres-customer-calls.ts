@@ -509,13 +509,19 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
            phone = excluded.phone,
            email = excluded.email,
            reason = case
-             when customer_call_queue_items.status in ('pending', 'call-later')
+             when customer_call_queue_items.status in ('pending', 'call-later', 'skipped')
                then excluded.reason
              else customer_call_queue_items.reason
            end,
            last_order_date = excluded.last_order_date,
            delivered_at = excluded.delivered_at,
            products_summary = excluded.products_summary,
+           -- Refresh re-opens skipped rows that are still eligible; keep
+           -- completed / in-progress / call-later as the founder left them.
+           status = case
+             when customer_call_queue_items.status = 'skipped' then 'pending'
+             else customer_call_queue_items.status
+           end,
            updated_at = now()
          returning *, (xmax = 0) as inserted`,
         [

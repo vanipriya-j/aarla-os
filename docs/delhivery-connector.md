@@ -7,7 +7,7 @@ Server-side Pull tracking API that normalizes Delhivery scan status into Aarla O
 ```
 Shopify external_fulfilments (AWB)
   → POST /api/commerce/sync/delhivery
-    → syncDelhiveryShipments({ offset })   # chunked (~10 AWBs / call)
+    → syncDelhiveryShipments({ offset })   # chunked (~25 AWBs / call)
       → DelhiveryConnector.trackShipments()
       → shipments + shipment_status_events
 ```
@@ -18,13 +18,14 @@ Commerce sync on `/customer-calls` is **manual and serial**:
 - Nothing starts on page load (no auto sync, no auto diagnostics).
 - Shopify and Delhivery share one lock — if a sync is in progress, another will not start.
 - Prefer **Sync All (Shopify → Delhivery)** for a full serial run.
+- Delhivery tracks **every** fulfilment AWB already in Postgres (blank Shopify `tracking.company` still counts) — not only the last Shopify GraphQL page of 25 orders.
 
 ## Environment (server-only)
 
 ```
 DELHIVERY_API_TOKEN=
 DELHIVERY_API_BASE_URL=https://track.delhivery.com   # optional
-DELHIVERY_SYNC_MAX_AWBS=10                           # optional chunk size
+DELHIVERY_SYNC_MAX_AWBS=25                           # optional chunk size (max 40)
 DELHIVERY_USE_FIXTURE=1                              # local/e2e only
 ```
 

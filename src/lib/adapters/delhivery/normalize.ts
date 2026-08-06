@@ -58,13 +58,25 @@ export function normalizeDelhiveryStatus(
   return "unknown";
 }
 
+/** Explicit non-Delhivery labels we must never send to the Delhivery tracker. */
+const NON_DELHIVERY_CARRIER =
+  /\b(bluedart|blue\s*dart|dtdc|fedex|ups|dhl|ecom\s*express|ecomexpress|xpressbees|india\s*post|speed\s*post|shadowfax|ekart|amazon\s*shipping|shiprocket)\b/i;
+
+/**
+ * Aarla ships primarily via Delhivery. Shopify often leaves `tracking.company`
+ * blank while still storing the AWB — treat blank/generic labels as Delhivery
+ * so sync is not capped to the few recent orders that have "Delhivery" filled in.
+ */
 export function isDelhiveryCarrier(
   trackingCompany: string | null | undefined,
   trackingUrl: string | null | undefined,
 ): boolean {
-  if (trackingCompany && /delhivery/i.test(trackingCompany)) return true;
   if (trackingUrl && /delhivery\.com/i.test(trackingUrl)) return true;
-  return false;
+  const company = (trackingCompany ?? "").trim();
+  if (company && /delhivery/i.test(company)) return true;
+  if (company && NON_DELHIVERY_CARRIER.test(company)) return false;
+  // Blank, generic, or unrecognized company → include AWB (Aarla Delhivery default).
+  return true;
 }
 
 export function normalizeAwb(awb: string | null | undefined): string | null {

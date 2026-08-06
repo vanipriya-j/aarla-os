@@ -230,9 +230,9 @@ export default function CustomerCallsPage() {
               {stage === "shopify"
                 ? "Stage 1 — Sync Shopify customers and orders."
                 : stage === "shipments"
-                  ? "Stage 2 — Track Delhivery AWBs and review shipment details."
+                  ? "Stage 2 — Track every Delhivery AWB in the database (not just the last Shopify page)."
                   : stage === "delivery-follow-up"
-                    ? "Stage 3 — Call customers with recent deliveries."
+                    ? "Stage 3 — Call customers with recent deliveries. Click Refresh call queues after syncing."
                     : "Stage 4 — Re-engage buyers with no purchase in 90+ days."}
             </p>
           </div>
@@ -325,8 +325,19 @@ export default function CustomerCallsPage() {
                       className="text-xs text-charcoal/55"
                       data-testid="call-queue-generation-summary"
                     >
-                      Live: {queueGen.deliveryCandidates} delivery ·{" "}
+                      Live queues: {queueGen.deliveryCandidates} delivery
+                      {queueGen.deliveryMissingPhone
+                        ? ` (${queueGen.deliveryMissingPhone} missing phone)`
+                        : ""}
+                      {" · "}
                       {queueGen.reengagementCandidates} re-engagement
+                      {queueGen.seedPendingCleared
+                        ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
+                        : ""}
+                      {!queueGen.commercePresent
+                        ? " · no synced commerce yet (Sync All first)"
+                        : ""}
+                      {` · showing ${queue.length} in this queue`}
                     </p>
                   ) : null}
                 </div>

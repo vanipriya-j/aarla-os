@@ -42,7 +42,7 @@ React components never call Shopify Admin APIs.
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
 SHOPIFY_CLIENT_ID=…
 SHOPIFY_CLIENT_SECRET=…
-SHOPIFY_API_VERSION=2025-01
+SHOPIFY_API_VERSION=2025-04
 ```
 
 Aarla OS exchanges Client ID/Secret for a short-lived Admin API token (~24h) and refreshes it automatically.

@@ -25,7 +25,7 @@ export type SyncDelhiveryDeps = {
   repo?: ShipmentRepository;
   /** Resume offset into the deduped AWB list */
   offset?: number;
-  /** Max AWBs to track per invocation (default 10) */
+  /** Max AWBs to track per invocation (default 25) */
   maxAwbs?: number;
 };
 
@@ -46,9 +46,11 @@ function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
 
 function defaultMaxAwbs(): number {
   const raw = process.env.DELHIVERY_SYNC_MAX_AWBS?.trim();
-  const n = raw ? Number(raw) : 10;
-  if (!Number.isFinite(n) || n < 1) return 10;
-  return Math.min(Math.floor(n), 30);
+  // Default 25 AWBs/chunk — matches Shopify page size and finishes full
+  // backfills with fewer Vercel round-trips (was 10).
+  const n = raw ? Number(raw) : 25;
+  if (!Number.isFinite(n) || n < 1) return 25;
+  return Math.min(Math.floor(n), 40);
 }
 
 type AwbLink = {
