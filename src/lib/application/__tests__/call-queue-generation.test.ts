@@ -178,29 +178,44 @@ describe.runIf(hasDb)("live call queue generation", () => {
     expect(queue.some((q) => q.externalCustomerId === "9001")).toBe(true);
   });
 
-  it("does not retire seeded pending when there are no live candidates", async () => {
+  it("clears demo delivery pending once shipments exist", async () => {
     await clearCommerceAndShipments();
     await clearLiveQueueRows();
-    const before = await query<{ n: string }>(
-      `select count(*)::text as n from customer_call_queue_items
-       where organization_id = $1 and status = 'pending'
-         and source_key like 'seed:%'`,
+    await syncShopifyCustomerCallData({
+      connector: new FixtureShopifyConnector(),
+      repo: createExternalCommerceRepository(),
+    });
+    await syncDelhiveryShipments({
+      connector: new FixtureDelhiveryConnector(),
+      repo: createShipmentRepository(),
+    });
+    await query(
+      `insert into customer_call_queue_items (
+         id, organization_id, segment_id, source_key, external_customer_id,
+         customer_name, phone, reason, status
+       )
+       select gen_random_uuid(), $1, s.id, 'seed:delivery:cust-clear-me:ORD-X',
+              'cust-clear-me', 'Seed Clear Me', '+91 98400 00000', 'demo', 'pending'
+       from customer_call_segments s
+       where s.organization_id = $1 and s.segment_type = 'delivery-follow-up'
+       on conflict do nothing`,
       [ORG_ID],
     );
-    const seedPending = Number(before[0]?.n ?? 0);
-    // If seed was never applied in this DB, skip assertion.
-    if (seedPending === 0) return;
 
-    const summary = await generateCustomerCallQueues({ repo: calls() });
-    expect(summary.deliveryCandidates).toBe(0);
-    expect(summary.deliveryRetired).toBe(0);
+    const summary = await generateCustomerCallQueues({
+      repo: calls(),
+      now: new Date("2026-08-06T12:00:00.000Z"),
+      deliveryLookbackDays: 120,
+    });
+    expect(summary.seedPendingCleared).toBeGreaterThanOrEqual(1);
+    expect(summary.deliveryCandidates).toBeGreaterThanOrEqual(1);
 
-    const after = await query<{ n: string }>(
+    const leftover = await query<{ n: string }>(
       `select count(*)::text as n from customer_call_queue_items
        where organization_id = $1 and status = 'pending'
-         and source_key like 'seed:%'`,
+         and source_key = 'seed:delivery:cust-clear-me:ORD-X'`,
       [ORG_ID],
     );
-    expect(Number(after[0]?.n ?? 0)).toBe(seedPending);
+    expect(Number(leftover[0]?.n ?? 0)).toBe(0);
   });
 });

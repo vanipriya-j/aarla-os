@@ -148,7 +148,7 @@ export const REENGAGEMENT_SCRIPT =
   "Hello, this is Vyshali calling from Aarla. We wanted to let you know that our Varalakshmi and Navarathri collections are now available. We also offer customised gifting for families and corporates. Please do visit aarla.in when you have a moment.";
 
 /** Delivered within this many days → delivery follow-up candidate. */
-export const DELIVERY_FOLLOWUP_LOOKBACK_DAYS = 45;
+export const DELIVERY_FOLLOWUP_LOOKBACK_DAYS = 120;
 
 /** Default lapse window when segment.cooldownDays is unset. */
 export const REENGAGEMENT_LAPSE_DAYS_DEFAULT = 90;
@@ -184,10 +184,15 @@ export type CallQueueGenerationSummary = {
   deliveryCreated: number;
   deliveryUpdated: number;
   deliveryRetired: number;
+  deliveryMissingPhone: number;
   reengagementCandidates: number;
   reengagementCreated: number;
   reengagementUpdated: number;
   reengagementRetired: number;
+  /** True when synced Shopify/Delhivery rows were present. */
+  commercePresent: boolean;
+  /** Demo/seed pending rows removed because live commerce exists. */
+  seedPendingCleared: number;
 };
 
 export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
@@ -196,10 +201,13 @@ export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
     deliveryCreated: 0,
     deliveryUpdated: 0,
     deliveryRetired: 0,
+    deliveryMissingPhone: 0,
     reengagementCandidates: 0,
     reengagementCreated: 0,
     reengagementUpdated: 0,
     reengagementRetired: 0,
+    commercePresent: false,
+    seedPendingCleared: 0,
   };
 }
 

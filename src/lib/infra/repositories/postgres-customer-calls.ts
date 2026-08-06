@@ -319,12 +319,55 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
       };
     },
 
+    async ensureQueueSchema() {
+      await q(`
+        alter table customer_call_queue_items
+          add column if not exists source_key text
+      `);
+      await q(`
+        update customer_call_queue_items
+        set source_key = case
+          when source_key is null or btrim(source_key) = '' then 'legacy:' || id::text
+          else source_key
+        end
+        where source_key is null or btrim(source_key) = ''
+      `);
+      await q(`
+        alter table customer_call_queue_items
+          alter column source_key set not null
+      `);
+      await q(`
+        create unique index if not exists customer_call_queue_source_key_uidx
+          on customer_call_queue_items (organization_id, segment_id, source_key)
+      `);
+    },
+
+    async hasSyncedCommerce() {
+      const rows = await q<{ n: string }>(
+        `select (
+           (select count(*) from external_customers where organization_id = $1) +
+           (select count(*) from external_orders where organization_id = $1) +
+           (select count(*) from shipments where organization_id = $1)
+         )::text as n`,
+        [ORG_ID],
+      );
+      return Number(rows[0]?.n ?? 0) > 0;
+    },
+
+    async countShipments() {
+      const rows = await q<{ n: string }>(
+        `select count(*)::text as n from shipments where organization_id = $1`,
+        [ORG_ID],
+      );
+      return Number(rows[0]?.n ?? 0);
+    },
+
     async listDeliveryFollowUpCandidates(lookbackDays) {
       const days = Math.max(1, Math.floor(lookbackDays));
       const rows = await q<{
         external_customer_id: string;
         customer_name: string;
-        phone: string;
+        phone: string | null;
         email: string | null;
         order_number: string;
         order_date: Date | string | null;
@@ -334,7 +377,7 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
         `select
            c.external_id as external_customer_id,
            coalesce(nullif(btrim(c.name), ''), 'Customer') as customer_name,
-           btrim(c.phone) as phone,
+           nullif(btrim(c.phone), '') as phone,
            c.email,
            coalesce(nullif(btrim(o.order_number), ''), o.external_id) as order_number,
            o.order_date,
@@ -349,7 +392,9 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
              where i.external_order_id = o.id
            ) as products_summary
          from shipments s
-         join external_orders o on o.id = s.external_order_id
+         left join external_fulfilments f on f.id = s.external_fulfilment_id
+         join external_orders o
+           on o.id = coalesce(s.external_order_id, f.external_order_id)
          join external_customers c on c.id = o.external_customer_id
          where s.organization_id = $1
            and s.carrier = 'delhivery'
@@ -357,8 +402,6 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
            and s.delivered_at is not null
            and s.delivered_at >= (now() - make_interval(days => $2))
            and o.is_valid = true
-           and c.phone is not null
-           and btrim(c.phone) <> ''
            and not exists (
              select 1 from customer_contact_preferences p
              where p.organization_id = c.organization_id
@@ -372,7 +415,7 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
       return rows.map((r) => ({
         externalCustomerId: String(r.external_customer_id),
         customerName: String(r.customer_name),
-        phone: String(r.phone),
+        phone: r.phone ? String(r.phone) : "Phone missing",
         email: r.email ? String(r.email) : null,
         orderNumber: String(r.order_number),
         orderDate: dateOnly(r.order_date),
@@ -513,6 +556,26 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
            and not (q.source_key = any($3::text[]))
          returning q.id`,
         [ORG_ID, segmentId, keepSourceKeys],
+      );
+      return rows.length;
+    },
+
+    async clearDemoPending(segmentId) {
+      const rows = await q<{ id: string }>(
+        `delete from customer_call_queue_items q
+         where q.organization_id = $1
+           and q.segment_id = $2
+           and q.status = 'pending'
+           and (
+             q.source_key like 'seed:%'
+             or q.source_key like 'legacy:%'
+             or q.external_customer_id like 'cust-%'
+           )
+           and not exists (
+             select 1 from customer_interactions i where i.queue_item_id = q.id
+           )
+         returning q.id`,
+        [ORG_ID, segmentId],
       );
       return rows.length;
     },

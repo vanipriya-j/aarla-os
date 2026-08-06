@@ -224,8 +224,18 @@ export default function CustomerCallsPage() {
             </button>
             {queueGen ? (
               <p className="text-xs text-charcoal/55" data-testid="call-queue-generation-summary">
-                Delivery: {queueGen.deliveryCandidates} eligible · Re-engagement:{" "}
-                {queueGen.reengagementCandidates} eligible
+                Live queues: {queueGen.deliveryCandidates} delivery
+                {queueGen.deliveryMissingPhone
+                  ? ` (${queueGen.deliveryMissingPhone} missing phone)`
+                  : ""}
+                {" · "}
+                {queueGen.reengagementCandidates} re-engagement
+                {queueGen.seedPendingCleared
+                  ? ` · cleared ${queueGen.seedPendingCleared} demo rows`
+                  : ""}
+                {!queueGen.commercePresent
+                  ? " · no synced commerce yet (Sync All first)"
+                  : ""}
               </p>
             ) : null}
           </div>

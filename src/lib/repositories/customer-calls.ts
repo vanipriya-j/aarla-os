@@ -61,6 +61,11 @@ export interface CustomerCallsRepository {
   ): Promise<CustomerContactPreference>;
   isDoNotContact(externalCustomerId: string): Promise<boolean>;
   dashboardCounts(): Promise<CallsDashboardCounts>;
+  /** Ensure source_key + unique index exist (safe if migration not yet recorded). */
+  ensureQueueSchema(): Promise<void>;
+  /** True when Shopify customers/orders or Delhivery shipments exist. */
+  hasSyncedCommerce(): Promise<boolean>;
+  countShipments(): Promise<number>;
   /** Delhivery-delivered orders eligible for delivery follow-up. */
   listDeliveryFollowUpCandidates(lookbackDays: number): Promise<DeliveryQueueCandidateRow[]>;
   /** Customers whose latest valid order is older than lapseDays. */
@@ -73,4 +78,6 @@ export interface CustomerCallsRepository {
    * Caller should only invoke when keepSourceKeys is non-empty.
    */
   retireStalePending(segmentId: string, keepSourceKeys: string[]): Promise<number>;
+  /** Delete pending demo/seed/legacy rows (no interactions) for a segment. */
+  clearDemoPending(segmentId: string): Promise<number>;
 }
