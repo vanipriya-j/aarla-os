@@ -25,6 +25,9 @@ export default defineConfig({
     env: {
       ...process.env,
       DELHIVERY_USE_FIXTURE: "1",
+      // Keep e2e open unless the suite sets its own auth fixtures.
+      AUTH_ADMIN_PASSWORD: "",
+      AUTH_CRM_PASSWORD: "",
     },
   },
 });

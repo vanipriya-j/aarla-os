@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { networkNav, primaryTiles } from "@/lib/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { navForRole } from "@/lib/auth/nav";
+import { homePathForRole } from "@/lib/auth/roles";
 
 interface HeaderProps {
   title: string;
@@ -15,6 +17,9 @@ interface HeaderProps {
 export function Header({ title, subtitle, actions }: HeaderProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const { role } = useAuth();
+  const nav = navForRole(role);
+  const homeHref = homePathForRole(role);
 
   return (
     <>
@@ -63,49 +68,82 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
               </button>
             </div>
             <nav className="space-y-1">
-              <Link
-                href="/"
-                onClick={() => setOpen(false)}
-                className={`block rounded-xl px-3 py-2.5 text-sm ${
-                  pathname === "/" ? "bg-aarla-red text-white" : "text-deep-navy hover:bg-pale-cream"
-                }`}
-              >
-                Home
-              </Link>
-              <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-                Workflows
-              </p>
-              {primaryTiles.map((item) => (
+              {nav.showHome ? (
                 <Link
-                  key={item.href}
-                  href={item.href}
+                  href={homeHref}
                   onClick={() => setOpen(false)}
                   className={`block rounded-xl px-3 py-2.5 text-sm ${
-                    pathname === item.href || pathname.startsWith(`${item.href}/`)
+                    pathname === "/"
                       ? "bg-aarla-red text-white"
                       : "text-deep-navy hover:bg-pale-cream"
                   }`}
                 >
-                  {item.label}
+                  Home
                 </Link>
-              ))}
-              <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-                Network
-              </p>
-              {networkNav.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  className={`block rounded-xl px-3 py-2.5 text-sm ${
-                    pathname === item.href || pathname.startsWith(`${item.href}/`)
-                      ? "bg-aarla-red text-white"
-                      : "text-deep-navy hover:bg-pale-cream"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              ) : null}
+              {nav.workflows.length > 0 ? (
+                <>
+                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+                    Workflows
+                  </p>
+                  {nav.workflows.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className={`block rounded-xl px-3 py-2.5 text-sm ${
+                        pathname === item.href || pathname.startsWith(`${item.href}/`)
+                          ? "bg-aarla-red text-white"
+                          : "text-deep-navy hover:bg-pale-cream"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </>
+              ) : null}
+              {nav.network.length > 0 ? (
+                <>
+                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+                    Network
+                  </p>
+                  {nav.network.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className={`block rounded-xl px-3 py-2.5 text-sm ${
+                        pathname === item.href || pathname.startsWith(`${item.href}/`)
+                          ? "bg-aarla-red text-white"
+                          : "text-deep-navy hover:bg-pale-cream"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </>
+              ) : null}
+              {nav.outreach.length > 0 ? (
+                <>
+                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+                    Outreach
+                  </p>
+                  {nav.outreach.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className={`block rounded-xl px-3 py-2.5 text-sm ${
+                        pathname === item.href || pathname.startsWith(`${item.href}/`)
+                          ? "bg-aarla-red text-white"
+                          : "text-deep-navy hover:bg-pale-cream"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </>
+              ) : null}
             </nav>
           </div>
         </div>

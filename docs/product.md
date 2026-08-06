@@ -28,11 +28,9 @@ A single founder operating Aarla day to day.
 
 ## Non-goals (v0.1)
 
-- Authentication
-- Database / backend
+- Per-user SSO / multi-tenant accounts (Basic Auth roles only — see `docs/auth.md`)
 - Paid services
-- Live APIs
-- Shopify / Delhivery / email / WhatsApp integrations
+- Email / WhatsApp integrations
 
 ## Data posture
 

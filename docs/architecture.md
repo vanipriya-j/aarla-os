@@ -5,7 +5,7 @@
 - Next.js App Router · TypeScript · Tailwind CSS v4 · lucide-react
 - **PostgreSQL** — local Docker / Supabase Local in dev; **Supabase Cloud** on Vercel
 - Migrations live in `supabase/migrations/` (same SQL for local and cloud)
-- No auth, no live Shopify
+- Optional HTTP Basic Auth (`admin` / `crm`) — `docs/auth.md`
 
 ## Runtime architecture
 
