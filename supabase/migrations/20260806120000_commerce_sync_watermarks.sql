@@ -1,6 +1,7 @@
 -- Watermarks for incremental commerce sync (Shopify orders, etc.)
+-- Idempotent: runtime sync may create this table before /setup records the migration.
 
-create table commerce_sync_watermarks (
+create table if not exists commerce_sync_watermarks (
   channel text primary key check (channel in ('shopify_orders')),
   organization_id uuid not null references organizations(id) on delete cascade,
   -- Committed high-water: only orders after this are fetched on incremental sync
@@ -11,5 +12,5 @@ create table commerce_sync_watermarks (
   updated_at timestamptz not null default now()
 );
 
-create index commerce_sync_watermarks_org_idx
+create index if not exists commerce_sync_watermarks_org_idx
   on commerce_sync_watermarks(organization_id);
