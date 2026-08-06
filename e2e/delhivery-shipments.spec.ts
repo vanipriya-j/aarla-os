@@ -4,6 +4,7 @@ test.describe("Delhivery shipment diagnostics", () => {
   test("sync summary and persisted statuses survive refresh", async ({ page }) => {
     await page.goto("/customer-calls");
     await expect(page.getByTestId("customer-calls-page")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("tab-shipments").click();
     await expect(page.getByTestId("delhivery-sync-panel")).toBeVisible();
 
     await page.getByTestId("sync-delhivery-shipments").click();
@@ -21,6 +22,8 @@ test.describe("Delhivery shipment diagnostics", () => {
     );
 
     await page.reload();
+    await expect(page.getByTestId("customer-calls-page")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("tab-shipments").click();
     await expect(page.getByTestId("delhivery-sync-panel")).toBeVisible({ timeout: 30_000 });
     // Diagnostics reload from DB on open — sync buttons are not auto-clicked.
     await expect(page.getByTestId("shipment-row-AWB1001DEL")).toHaveAttribute(
