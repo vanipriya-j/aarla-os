@@ -14,6 +14,7 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import type {
   ExternalCommerceRepository,
+  UpsertAbandonedCheckoutInput,
   UpsertCustomerInput,
   UpsertFulfilmentInput,
   UpsertOrderInput,
@@ -591,6 +592,172 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
         [ORG_ID, externalCustomerId],
       );
       return Boolean(rows[0]?.do_not_contact);
+    },
+
+    async ensureAbandonedCheckoutSchema() {
+      await q(`
+        create table if not exists external_abandoned_checkouts (
+          id uuid primary key default gen_random_uuid(),
+          organization_id uuid not null references organizations(id) on delete cascade,
+          provider text not null check (provider in ('shopify')),
+          external_id text not null,
+          external_customer_id text,
+          customer_name text not null default '',
+          phone text,
+          email text,
+          checkout_url text,
+          subtotal numeric(12, 2) not null default 0,
+          currency text not null default 'INR',
+          last_activity_at timestamptz not null,
+          completed_at timestamptz,
+          converted_order_external_id text,
+          shopify_created_at timestamptz not null,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          last_synced_at timestamptz not null default now(),
+          unique (organization_id, provider, external_id)
+        )
+      `);
+      await q(`
+        create index if not exists external_abandoned_checkouts_org_idx
+          on external_abandoned_checkouts(organization_id)
+      `);
+      await q(`
+        create index if not exists external_abandoned_checkouts_activity_idx
+          on external_abandoned_checkouts(organization_id, last_activity_at desc)
+      `);
+      await q(`
+        create index if not exists external_abandoned_checkouts_customer_idx
+          on external_abandoned_checkouts(organization_id, external_customer_id)
+          where external_customer_id is not null
+      `);
+      await q(`
+        create table if not exists external_abandoned_checkout_items (
+          id uuid primary key default gen_random_uuid(),
+          checkout_id uuid not null references external_abandoned_checkouts(id) on delete cascade,
+          external_line_item_id text not null,
+          external_product_id text,
+          external_variant_id text,
+          title text not null default '',
+          variant_title text,
+          quantity integer not null default 1 check (quantity >= 0),
+          unit_price numeric(12, 2) not null default 0,
+          unique (checkout_id, external_line_item_id)
+        )
+      `);
+      await q(`
+        create index if not exists external_abandoned_checkout_items_checkout_idx
+          on external_abandoned_checkout_items(checkout_id)
+      `);
+      await q(`
+        alter table commerce_sync_watermarks drop constraint if exists commerce_sync_watermarks_channel_check
+      `);
+      await q(`
+        alter table commerce_sync_watermarks
+          add constraint commerce_sync_watermarks_channel_check
+          check (channel in ('shopify_orders', 'shopify_abandoned_checkouts'))
+      `);
+    },
+
+    async upsertAbandonedCheckout(input: UpsertAbandonedCheckoutInput) {
+      const existing = await q<{ id: string }>(
+        `select id from external_abandoned_checkouts
+         where organization_id = $1 and provider = $2 and external_id = $3`,
+        [ORG_ID, input.provider, input.externalId],
+      );
+
+      let checkoutId: string;
+      let created: boolean;
+      if (existing[0]) {
+        checkoutId = existing[0].id;
+        created = false;
+        await q(
+          `update external_abandoned_checkouts set
+             external_customer_id = $3,
+             customer_name = $4,
+             phone = coalesce(nullif(btrim($5), ''), phone),
+             email = coalesce($6, email),
+             checkout_url = coalesce($7, checkout_url),
+             subtotal = $8,
+             currency = $9,
+             last_activity_at = $10,
+             completed_at = $11,
+             shopify_created_at = $12,
+             last_synced_at = now()
+           where id = $1 and organization_id = $2`,
+          [
+            checkoutId,
+            ORG_ID,
+            input.externalCustomerId,
+            input.customerName,
+            input.phone,
+            input.email,
+            input.checkoutUrl,
+            input.subtotal,
+            input.currency,
+            input.lastActivityAt,
+            input.completedAt,
+            input.createdAt,
+          ],
+        );
+      } else {
+        created = true;
+        const rows = await q<{ id: string }>(
+          `insert into external_abandoned_checkouts (
+             organization_id, provider, external_id, external_customer_id, customer_name,
+             phone, email, checkout_url, subtotal, currency, last_activity_at, completed_at,
+             shopify_created_at, last_synced_at
+           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+           returning id`,
+          [
+            ORG_ID,
+            input.provider,
+            input.externalId,
+            input.externalCustomerId,
+            input.customerName,
+            input.phone,
+            input.email,
+            input.checkoutUrl,
+            input.subtotal,
+            input.currency,
+            input.lastActivityAt,
+            input.completedAt,
+            input.createdAt,
+          ],
+        );
+        checkoutId = rows[0]!.id;
+      }
+
+      await q(`delete from external_abandoned_checkout_items where checkout_id = $1`, [
+        checkoutId,
+      ]);
+      for (const item of input.lineItems) {
+        await q(
+          `insert into external_abandoned_checkout_items (
+             checkout_id, external_line_item_id, external_product_id,
+             external_variant_id, title, variant_title, quantity, unit_price
+           ) values ($1,$2,$3,$4,$5,$6,$7,$8)
+           on conflict (checkout_id, external_line_item_id) do update set
+             external_product_id = excluded.external_product_id,
+             external_variant_id = excluded.external_variant_id,
+             title = excluded.title,
+             variant_title = excluded.variant_title,
+             quantity = excluded.quantity,
+             unit_price = excluded.unit_price`,
+          [
+            checkoutId,
+            item.externalLineItemId,
+            item.externalProductId,
+            item.externalVariantId,
+            item.title,
+            item.variantTitle,
+            item.quantity,
+            item.unitPrice,
+          ],
+        );
+      }
+
+      return { id: checkoutId, created };
     },
   };
 }

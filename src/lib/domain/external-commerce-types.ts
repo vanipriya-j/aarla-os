@@ -96,6 +96,88 @@ export interface ShopifySyncSummary {
   incrementalFrom?: string | null;
 }
 
+export interface AbandonedCommerceOpportunity {
+  id: string;
+  organizationId: string;
+  provider: CommerceProvider;
+  externalId: string;
+  externalCustomerId: string | null;
+  customerName: string;
+  phone: string | null;
+  email: string | null;
+  checkoutUrl: string | null;
+  subtotal: number;
+  currency: string;
+  lastActivityAt: string;
+  completedAt: string | null;
+  convertedOrderExternalId: string | null;
+  shopifyCreatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSyncedAt: string;
+}
+
+export interface AbandonedCommerceOpportunityItem {
+  id: string;
+  checkoutId: string;
+  externalLineItemId: string;
+  externalProductId: string | null;
+  externalVariantId: string | null;
+  title: string;
+  variantTitle: string | null;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface ShopifyAbandonedSyncSummary {
+  checkoutsRead: number;
+  checkoutsAdded: number;
+  checkoutsUpdated: number;
+  recordsSkipped: number;
+  errors: string[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  pagesFetched?: number;
+  complete?: boolean;
+  mode?: "incremental" | "full";
+  incrementalFrom?: string | null;
+}
+
+export function emptyShopifyAbandonedSyncSummary(): ShopifyAbandonedSyncSummary {
+  return {
+    checkoutsRead: 0,
+    checkoutsAdded: 0,
+    checkoutsUpdated: 0,
+    recordsSkipped: 0,
+    errors: [],
+    hasMore: false,
+    nextCursor: null,
+    pagesFetched: 0,
+    complete: true,
+    mode: "incremental",
+    incrementalFrom: null,
+  };
+}
+
+export function mergeShopifyAbandonedSyncSummaries(
+  a: ShopifyAbandonedSyncSummary,
+  b: ShopifyAbandonedSyncSummary,
+): ShopifyAbandonedSyncSummary {
+  return {
+    checkoutsRead: a.checkoutsRead + b.checkoutsRead,
+    checkoutsAdded: a.checkoutsAdded + b.checkoutsAdded,
+    checkoutsUpdated: a.checkoutsUpdated + b.checkoutsUpdated,
+    recordsSkipped: a.recordsSkipped + b.recordsSkipped,
+    errors: [...a.errors, ...b.errors].slice(0, 20),
+    hasMore: Boolean(b.hasMore),
+    nextCursor: b.nextCursor ?? null,
+    pagesFetched: (a.pagesFetched ?? 0) + (b.pagesFetched ?? 0),
+    complete: Boolean(b.complete),
+    mode: b.mode ?? a.mode ?? "incremental",
+    incrementalFrom: b.incrementalFrom ?? a.incrementalFrom ?? null,
+  };
+}
+
 export interface CommerceCustomerDiagnostic {
   externalId: string;
   displayName: string;

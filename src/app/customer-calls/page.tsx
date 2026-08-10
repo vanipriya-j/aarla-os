@@ -41,12 +41,23 @@ const STAGES = [
   { id: "shipments", label: "Shipments" },
   { id: "delivery-follow-up", label: "Delivery Follow-up" },
   { id: "re-engagement", label: "Re-engagement" },
+  { id: "abandoned-cart", label: "Abandoned Carts" },
 ] as const;
 
 type StageId = (typeof STAGES)[number]["id"];
 
 function isCallStage(stage: StageId): stage is CallSegmentType {
-  return stage === "delivery-follow-up" || stage === "re-engagement";
+  return (
+    stage === "delivery-follow-up" ||
+    stage === "re-engagement" ||
+    stage === "abandoned-cart"
+  );
+}
+
+function toQueueTableVariant(
+  segmentType: CallSegmentType,
+): "delivery" | "re-engagement" | "abandoned-cart" {
+  return segmentType === "delivery-follow-up" ? "delivery" : segmentType;
 }
 
 export default function CustomerCallsPage() {
@@ -157,6 +168,7 @@ export default function CustomerCallsPage() {
           : form.outcome === "Personal Gifting Requirement"
             ? "personal-gifting"
             : null,
+      linkedOrderExternalId: form.linkedOrderExternalId || null,
     };
   }
 
@@ -233,7 +245,9 @@ export default function CustomerCallsPage() {
                   ? "Stage 2 — Track every Delhivery AWB in the database (not just the last Shopify page)."
                   : stage === "delivery-follow-up"
                     ? "Stage 3 — Call customers with recent deliveries. Refresh also fills missing phones for those orders only."
-                    : "Stage 4 — Re-engage buyers with no purchase in 90+ days."}
+                    : stage === "re-engagement"
+                      ? "Stage 4 — Re-engage buyers with no purchase in 90+ days."
+                      : "Stage 5 — Recover Shopify checkouts started but never completed."}
             </p>
           </div>
 
@@ -261,7 +275,9 @@ export default function CustomerCallsPage() {
             </div>
           ) : null}
 
-          {visited.has("delivery-follow-up") || visited.has("re-engagement") ? (
+          {visited.has("delivery-follow-up") ||
+          visited.has("re-engagement") ||
+          visited.has("abandoned-cart") ? (
             <div
               className={`space-y-6 ${isCallStage(stage) ? "" : "hidden"}`}
               data-testid={isCallStage(stage) ? `stage-${stage}` : "stage-calls"}
@@ -272,6 +288,12 @@ export default function CustomerCallsPage() {
                   <SummaryCard
                     label="Re-engagement Calls Pending"
                     value={String(counts?.reengagementPending ?? "—")}
+                    icon={Phone}
+                  />
+                ) : stage === "abandoned-cart" ? (
+                  <SummaryCard
+                    label="Abandoned Cart Calls Pending"
+                    value={String(counts?.abandonedCartPending ?? "—")}
                     icon={Phone}
                   />
                 ) : (
@@ -331,6 +353,8 @@ export default function CustomerCallsPage() {
                         : ""}
                       {" · "}
                       {queueGen.reengagementCandidates} re-engagement
+                      {" · "}
+                      {queueGen.abandonedCartCandidates} abandoned cart
                       {queueGen.phonesEnriched
                         ? ` · filled ${queueGen.phonesEnriched} phones`
                         : ""}
@@ -349,6 +373,7 @@ export default function CustomerCallsPage() {
                 ) : (
                   <CallsQueueTable
                     rows={queue}
+                    variant={isCallStage(stage) ? toQueueTableVariant(stage) : undefined}
                     onStart={openCall}
                     onCallLater={async (id) => {
                       const date = new Date();

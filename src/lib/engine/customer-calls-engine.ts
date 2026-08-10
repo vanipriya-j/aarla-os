@@ -105,6 +105,14 @@ export class CustomerCallsEngine {
       return { interaction, item: skipped! };
     }
 
+    if (input.outcome === "Already Purchased" && item.sourceKey?.startsWith("abandoned:")) {
+      const checkoutExternalId = item.sourceKey.slice("abandoned:".length);
+      await this.repo.markAbandonedCheckoutConverted(
+        checkoutExternalId,
+        input.linkedOrderExternalId ?? null,
+      );
+    }
+
     const status = outcomeToQueueStatus(input.outcome);
     const updated = await this.repo.updateQueueStatus(item.id, status, STAFF);
     return { interaction, item: updated };

@@ -1,4 +1,7 @@
-import type { ShopifySyncSummary } from "@/lib/domain/external-commerce-types";
+import type {
+  ShopifyAbandonedSyncSummary,
+  ShopifySyncSummary,
+} from "@/lib/domain/external-commerce-types";
 import type {
   DelhiverySyncSummary,
 } from "@/lib/domain/shipment-types";
@@ -85,6 +88,18 @@ export async function syncShopifyChunkViaApi(
   mode: "incremental" | "full" = "incremental",
 ): Promise<ActionResult<ShopifySyncSummary>> {
   return postJson<ShopifySyncSummary>("/api/commerce/sync/shopify", {
+    cursor,
+    lockToken,
+    mode,
+  });
+}
+
+export async function syncShopifyAbandonedChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+  mode: "incremental" | "full" = "incremental",
+): Promise<ActionResult<ShopifyAbandonedSyncSummary>> {
+  return postJson<ShopifyAbandonedSyncSummary>("/api/commerce/sync/shopify-abandoned", {
     cursor,
     lockToken,
     mode,

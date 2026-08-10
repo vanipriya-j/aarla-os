@@ -71,10 +71,47 @@ export type ShopifyCustomerCallPage = ShopifyCustomerCallPayload & {
   pagesFetched: number;
 };
 
+export interface ShopifyAbandonedCheckoutLineItem {
+  externalLineItemId: string;
+  externalProductId: string | null;
+  externalVariantId: string | null;
+  title: string;
+  variantTitle: string | null;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface ShopifyAbandonedCheckoutRecord {
+  externalId: string;
+  externalCustomerId: string | null;
+  customerName: string;
+  phone: string | null;
+  email: string | null;
+  checkoutUrl: string | null;
+  subtotal: number;
+  currency: string;
+  createdAt: string;
+  /** Checkout updatedAt */
+  lastActivityAt: string;
+  completedAt: string | null;
+  lineItems: ShopifyAbandonedCheckoutLineItem[];
+}
+
+export type ShopifyAbandonedCheckoutPage = {
+  checkouts: ShopifyAbandonedCheckoutRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  pagesFetched: number;
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
   /** Full fetch (fixtures / small stores). Live connector may still page internally. */
   fetchCustomerCallPayload(options?: ShopifyFetchOptions): Promise<ShopifyCustomerCallPayload>;
   /** Chunked fetch for serverless timeouts. */
   fetchCustomerCallPage?(options?: ShopifyFetchOptions): Promise<ShopifyCustomerCallPage>;
+  /** Chunked fetch of abandoned checkouts — optional; skipped when unimplemented. */
+  fetchAbandonedCheckoutsPage?(
+    options?: ShopifyFetchOptions,
+  ): Promise<ShopifyAbandonedCheckoutPage>;
 }

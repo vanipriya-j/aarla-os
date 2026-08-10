@@ -16,6 +16,10 @@ UI Sync Shopify Data / Sync All
     → syncShopifyCustomerCallData({ cursor })  # chunked (~100 orders / page)
       → ShopifyConnector (live | fixture)
       → ExternalCommerceRepository → Postgres
+  → POST /api/commerce/sync/shopify-abandoned  (JSON, same lock token, channel "shopify")
+    → syncShopifyAbandonedCheckouts({ cursor })  # chunked (~50 checkouts / page)
+      → ShopifyConnector.fetchAbandonedCheckoutsPage (live | fixture)
+      → ExternalCommerceRepository → Postgres (external_abandoned_checkouts + items)
 ```
 
 Uses a Route Handler (not a Server Action) so Vercel timeouts return JSON instead of
@@ -23,6 +27,9 @@ Next.js “An unexpected response was received from the server.”
 
 **Default sync is incremental:** only Shopify orders newer than the last successful
 watermark are fetched. Use **Full Shopify re-sync** to walk the whole catalog again.
+Abandoned checkouts follow the same incremental/full watermark pattern (own
+`shopify_abandoned_checkouts` watermark channel), and run in **Sync All** right after
+Shopify orders and before Delhivery, using the same sync lock token.
 
 **Refresh call queues** runs a targeted phone backfill for delivered orders still
 missing phones (fetches those order names only — not the whole catalog).
@@ -34,7 +41,7 @@ React components never call Shopify Admin APIs.
 ## Scopes
 
 - `read_customers`
-- `read_orders`
+- `read_orders` — also required for abandoned checkouts (`abandonedCheckouts` GraphQL field)
 - Prefer `read_all_orders` (without it, history is limited to ~60 days)
 
 ## Environment (server-only)

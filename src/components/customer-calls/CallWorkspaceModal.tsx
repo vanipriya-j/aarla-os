@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, inputClass } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
 import {
+  ABANDONED_CART_OUTCOMES,
   DELIVERY_OUTCOMES,
   ISSUE_TYPES,
   REENGAGEMENT_OUTCOMES,
@@ -21,6 +22,7 @@ export type CallFormState = {
   followUpAt: string;
   issueType: string;
   approximateQuantity: string;
+  linkedOrderExternalId: string;
 };
 
 type Props = {
@@ -49,17 +51,22 @@ export function CallWorkspaceModal({
   const [followUpAt, setFollowUpAt] = useState("");
   const [issueType, setIssueType] = useState("");
   const [approximateQuantity, setApproximateQuantity] = useState("");
+  const [linkedOrderExternalId, setLinkedOrderExternalId] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const segmentType: CallSegmentType | null = segment?.segmentType ?? null;
   const outcomes = useMemo(() => {
     if (segmentType === "delivery-follow-up") return DELIVERY_OUTCOMES;
     if (segmentType === "re-engagement") return REENGAGEMENT_OUTCOMES;
+    if (segmentType === "abandoned-cart") return ABANDONED_CART_OUTCOMES;
     return [];
   }, [segmentType]);
 
   const showIssue = outcome === "Issue Reported";
   const showRequirement =
     outcome === "Corporate Requirement" || outcome === "Personal Gifting Requirement";
+  const showCheckoutLink = outcome === "Send Checkout Link";
+  const showLinkedOrder = outcome === "Already Purchased";
   const showFollowUp =
     outcome === "Call Later" || showIssue || showRequirement || outcome === "Interested";
 
@@ -69,10 +76,31 @@ export function CallWorkspaceModal({
     setFollowUpAt("");
     setIssueType("");
     setApproximateQuantity("");
+    setLinkedOrderExternalId("");
+    setLinkCopied(false);
   }
 
   function form(): CallFormState {
-    return { outcome, notes, followUpAt, issueType, approximateQuantity };
+    return {
+      outcome,
+      notes,
+      followUpAt,
+      issueType,
+      approximateQuantity,
+      linkedOrderExternalId,
+    };
+  }
+
+  async function copyCheckoutLink(url: string) {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setLinkCopied(true);
+        window.setTimeout(() => setLinkCopied(false), 2000);
+      }
+    } catch {
+      // Clipboard access denied — the URL is still visible for manual copy.
+    }
   }
 
   if (!item || !segment) {
@@ -141,12 +169,26 @@ export function CallWorkspaceModal({
             <p className="text-deep-navy">{item.externalOrderId || "—"}</p>
           </div>
           <div>
-            <p className="text-xs text-charcoal/45 uppercase tracking-wide">Last order / delivered</p>
+            <p className="text-xs text-charcoal/45 uppercase tracking-wide">
+              {segmentType === "abandoned-cart" ? "Last activity" : "Last order / delivered"}
+            </p>
             <p className="text-deep-navy">
               {item.lastOrderDate || "—"}
               {item.deliveredAt ? ` · delivered ${item.deliveredAt.slice(0, 10)}` : ""}
             </p>
           </div>
+          {segmentType === "abandoned-cart" ? (
+            <div>
+              <p className="text-xs text-charcoal/45 uppercase tracking-wide">Cart value</p>
+              <p className="text-deep-navy font-medium">
+                {item.cartSubtotal != null
+                  ? `${item.cartCurrency ?? ""} ${item.cartSubtotal.toLocaleString("en-IN", {
+                      maximumFractionDigits: 2,
+                    })}`.trim()
+                  : "—"}
+              </p>
+            </div>
+          ) : null}
           <div className="sm:col-span-2">
             <p className="text-xs text-charcoal/45 uppercase tracking-wide">Products</p>
             <p className="text-charcoal/80">{item.productsSummary || "—"}</p>
@@ -175,6 +217,43 @@ export function CallWorkspaceModal({
             ))}
           </select>
         </Field>
+
+        {showCheckoutLink && item.checkoutUrl ? (
+          <div
+            className="rounded-xl border border-aarla-red/25 bg-aarla-red/5 px-4 py-3 space-y-2"
+            data-testid="checkout-link-panel"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-aarla-red/80">
+              Checkout link — read this out or share it
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="text-sm text-deep-navy break-all" data-testid="checkout-link-url">
+                {item.checkoutUrl}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => copyCheckoutLink(item.checkoutUrl!)}
+                data-testid="checkout-link-copy"
+              >
+                {linkCopied ? "Copied!" : "Copy link"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {showLinkedOrder ? (
+          <Field label="Shopify order number / id (optional)">
+            <input
+              className={inputClass}
+              type="text"
+              value={linkedOrderExternalId}
+              onChange={(e) => setLinkedOrderExternalId(e.target.value)}
+              placeholder="e.g. #10452"
+              data-testid="call-linked-order"
+            />
+          </Field>
+        ) : null}
 
         {showIssue ? (
           <Field label="Issue type">

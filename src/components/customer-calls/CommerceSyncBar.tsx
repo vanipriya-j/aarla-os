@@ -8,10 +8,13 @@ import {
   clearCommerceSyncLockViaApi,
   getCommerceSyncLockViaApi,
   syncDelhiveryChunkViaApi,
+  syncShopifyAbandonedChunkViaApi,
   syncShopifyChunkViaApi,
 } from "@/lib/client/commerce-sync-api";
 import {
+  emptyShopifyAbandonedSyncSummary,
   emptyShopifySyncSummary,
+  mergeShopifyAbandonedSyncSummaries,
   mergeShopifySyncSummaries,
 } from "@/lib/domain/external-commerce-types";
 import {
@@ -169,7 +172,46 @@ export function CommerceSyncBar() {
         if (!cursor) break;
       }
 
-      setStatus("Shopify finished — tracking all Delhivery AWBs in the database…");
+      setStatus("Shopify orders done — checking for abandoned checkouts…");
+      let abandonedCursor: string | null = null;
+      let abandonedTotal = emptyShopifyAbandonedSyncSummary();
+      guard = 0;
+      const abandonedMaxChunks = 120;
+
+      while (guard < abandonedMaxChunks) {
+        guard += 1;
+        setStatus(
+          abandonedCursor
+            ? `Working… abandoned-checkout chunk ${guard} (continuing)`
+            : `Working… abandoned-checkout chunk ${guard}`,
+        );
+        let res;
+        try {
+          res = await syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "incremental");
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          return;
+        }
+        if (!res.ok) {
+          setError(res.error);
+          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          return;
+        }
+        abandonedTotal = mergeShopifyAbandonedSyncSummaries(abandonedTotal, res.data);
+        setStatus(
+          `Abandoned-checkout chunk ${guard} saved · ${abandonedTotal.checkoutsRead} checkouts read` +
+            (res.data.hasMore ? " · more remaining…" : " · abandoned checkouts done"),
+        );
+        if (res.data.errors.length && !res.data.hasMore) {
+          setError(res.data.errors.slice(0, 3).join(" · "));
+        }
+        if (!res.data.hasMore) break;
+        abandonedCursor = res.data.nextCursor ?? null;
+        if (!abandonedCursor) break;
+      }
+
+      setStatus("Abandoned checkouts done — tracking all Delhivery AWBs in the database…");
       let offset: number | null = 0;
       let delhiveryTotal = emptyDelhiverySyncSummary();
       guard = 0;
@@ -215,12 +257,14 @@ export function CommerceSyncBar() {
         setStatus(
           `Done — Shopify ${shopifyTotal.ordersRead} orders` +
             `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+            `${abandonedTotal.checkoutsRead} abandoned checkouts, ` +
             `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs. Queue rebuild failed.`,
         );
       } else {
         setStatus(
           `Done — Shopify ${shopifyTotal.ordersRead} orders` +
             `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+            `${abandonedTotal.checkoutsRead} abandoned checkouts, ` +
             `Delhivery ${delhiveryTotal.awbsProcessed ?? 0} AWBs, ` +
             `queues: ${queues.data.deliveryCandidates} delivery · ` +
             `${queues.data.reengagementCandidates} re-engagement.`,
@@ -283,8 +327,51 @@ export function CommerceSyncBar() {
       }
 
       setStatus(
+        `Full re-sync — Shopify orders finished (${shopifyTotal.ordersRead} orders read` +
+          `${shopifyTotal.complete ? ", complete" : ", more remain"}) · ` +
+          "checking for abandoned checkouts…",
+      );
+
+      let abandonedCursor: string | null = null;
+      let abandonedTotal = emptyShopifyAbandonedSyncSummary();
+      guard = 0;
+      const abandonedMaxChunks = 200;
+
+      while (guard < abandonedMaxChunks) {
+        guard += 1;
+        setStatus(
+          abandonedCursor
+            ? `Full re-sync… abandoned-checkout chunk ${guard} (continuing)`
+            : `Full re-sync… abandoned-checkout chunk ${guard}`,
+        );
+        let res;
+        try {
+          res = await syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "full");
+        } catch (err) {
+          setError(formatCommerceSyncFailure(err));
+          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          return;
+        }
+        if (!res.ok) {
+          setError(res.error);
+          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          return;
+        }
+        abandonedTotal = mergeShopifyAbandonedSyncSummaries(abandonedTotal, res.data);
+        setStatus(
+          `Full re-sync abandoned-checkout chunk ${guard} · ${abandonedTotal.checkoutsRead} checkouts read` +
+            (res.data.hasMore ? " · more remaining…" : " · abandoned checkouts done"),
+        );
+        if (!res.data.hasMore) break;
+        abandonedCursor = res.data.nextCursor ?? null;
+        if (!abandonedCursor) break;
+      }
+
+      setStatus(
         `Full Shopify re-sync finished — ${shopifyTotal.ordersRead} orders read` +
-          `${shopifyTotal.complete ? " (complete)" : " (more remain)"}.`,
+          `${shopifyTotal.complete ? " (complete)" : " (more remain)"}, ` +
+          `${abandonedTotal.checkoutsRead} abandoned checkouts read` +
+          `${abandonedTotal.complete ? " (complete)" : " (more remain)"}.`,
       );
     } catch (err) {
       setError(formatCommerceSyncFailure(err));

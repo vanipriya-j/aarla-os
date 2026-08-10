@@ -1,11 +1,16 @@
 import type { PoolClient, QueryResult } from "pg";
 import { ORG_ID, stableId } from "./ids";
-import { DELIVERY_SCRIPT, REENGAGEMENT_SCRIPT } from "@/lib/domain/customer-calls-types";
+import {
+  ABANDONED_CART_SCRIPT,
+  DELIVERY_SCRIPT,
+  REENGAGEMENT_SCRIPT,
+} from "@/lib/domain/customer-calls-types";
 
 type DbClient = Pick<PoolClient, "query">;
 
 const DELIVERY_SEG = stableId("call-seg:delivery-follow-up");
 const REENG_SEG = stableId("call-seg:re-engagement");
+const ABANDONED_SEG = stableId("call-seg:abandoned-cart");
 
 type SeedQueue = {
   slug: string;
@@ -74,6 +79,16 @@ export const DEMO_CALL_QUEUE: SeedQueue[] = [
 async function count(client: DbClient, sql: string, params: unknown[]): Promise<number> {
   const res = (await client.query(sql, params)) as QueryResult<{ c: string }>;
   return Number(res.rows[0]?.c ?? 0);
+}
+
+async function ensureSegmentTypeConstraint(client: DbClient): Promise<void> {
+  await client.query(`
+    alter table customer_call_segments drop constraint if exists customer_call_segments_segment_type_check
+  `);
+  await client.query(`
+    alter table customer_call_segments add constraint customer_call_segments_segment_type_check
+      check (segment_type in ('delivery-follow-up', 're-engagement', 'abandoned-cart'))
+  `);
 }
 
 async function ensureSourceKey(client: DbClient): Promise<void> {
@@ -155,14 +170,24 @@ async function clearSeedPending(client: DbClient): Promise<void> {
  */
 export async function seedCustomerCalls(client: DbClient): Promise<void> {
   console.log("[seed-db] customer_call_segments…");
+  await ensureSegmentTypeConstraint(client);
   await client.query(
     `insert into customer_call_segments (
       id, organization_id, name, description, segment_type, script, is_active, cooldown_days
     ) values
       ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
-      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90)
+      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90),
+      ($6,$2,'Abandoned Carts','Outreach for Shopify checkouts started but never completed','abandoned-cart',$7,true,7)
     on conflict (organization_id, segment_type) do nothing`,
-    [DELIVERY_SEG, ORG_ID, DELIVERY_SCRIPT, REENG_SEG, REENGAGEMENT_SCRIPT],
+    [
+      DELIVERY_SEG,
+      ORG_ID,
+      DELIVERY_SCRIPT,
+      REENG_SEG,
+      REENGAGEMENT_SCRIPT,
+      ABANDONED_SEG,
+      ABANDONED_CART_SCRIPT,
+    ],
   );
 
   await ensureSourceKey(client);
@@ -192,14 +217,24 @@ export async function seedCustomerCalls(client: DbClient): Promise<void> {
 
 /** Test helper: force-insert a small demo queue regardless of commerce. */
 export async function seedDemoCallQueuesForTests(client: DbClient): Promise<void> {
+  await ensureSegmentTypeConstraint(client);
   await client.query(
     `insert into customer_call_segments (
       id, organization_id, name, description, segment_type, script, is_active, cooldown_days
     ) values
       ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
-      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90)
+      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90),
+      ($6,$2,'Abandoned Carts','Outreach for Shopify checkouts started but never completed','abandoned-cart',$7,true,7)
     on conflict (organization_id, segment_type) do nothing`,
-    [DELIVERY_SEG, ORG_ID, DELIVERY_SCRIPT, REENG_SEG, REENGAGEMENT_SCRIPT],
+    [
+      DELIVERY_SEG,
+      ORG_ID,
+      DELIVERY_SCRIPT,
+      REENG_SEG,
+      REENGAGEMENT_SCRIPT,
+      ABANDONED_SEG,
+      ABANDONED_CART_SCRIPT,
+    ],
   );
   await ensureSourceKey(client);
   await insertDemoQueue(client, DEMO_CALL_QUEUE);

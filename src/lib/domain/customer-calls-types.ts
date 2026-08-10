@@ -1,4 +1,8 @@
-export const CALL_SEGMENT_TYPES = ["delivery-follow-up", "re-engagement"] as const;
+export const CALL_SEGMENT_TYPES = [
+  "delivery-follow-up",
+  "re-engagement",
+  "abandoned-cart",
+] as const;
 export type CallSegmentType = (typeof CALL_SEGMENT_TYPES)[number];
 
 export const QUEUE_STATUSES = [
@@ -31,6 +35,17 @@ export const REENGAGEMENT_OUTCOMES = [
   "Do Not Contact",
 ] as const;
 
+export const ABANDONED_CART_OUTCOMES = [
+  "Interested",
+  "Send Checkout Link",
+  "Send Website",
+  "Call Later",
+  "Not Interested",
+  "Could Not Reach",
+  "Already Purchased",
+  "Do Not Contact",
+] as const;
+
 export const ISSUE_TYPES = [
   "damaged product",
   "wrong product",
@@ -43,7 +58,11 @@ export const ISSUE_TYPES = [
 
 export type DeliveryOutcome = (typeof DELIVERY_OUTCOMES)[number];
 export type ReengagementOutcome = (typeof REENGAGEMENT_OUTCOMES)[number];
-export type CallOutcome = DeliveryOutcome | ReengagementOutcome;
+export type AbandonedCartOutcome = (typeof ABANDONED_CART_OUTCOMES)[number];
+export type CallOutcome =
+  | DeliveryOutcome
+  | ReengagementOutcome
+  | AbandonedCartOutcome;
 export type IssueType = (typeof ISSUE_TYPES)[number];
 
 export interface CustomerCallSegment {
@@ -63,6 +82,9 @@ export interface CustomerCallQueueItem {
   id: string;
   organizationId: string;
   segmentId: string;
+  /** Idempotency key within the segment (e.g. abandoned:1234). Used by the engine to
+   *  detect abandoned-cart queue items when saving outcomes. */
+  sourceKey?: string;
   externalCustomerId: string;
   externalOrderId?: string | null;
   customerName: string;
@@ -72,6 +94,9 @@ export interface CustomerCallQueueItem {
   lastOrderDate?: string | null;
   deliveredAt?: string | null;
   productsSummary?: string | null;
+  checkoutUrl?: string | null;
+  cartSubtotal?: number | null;
+  cartCurrency?: string | null;
   status: QueueItemStatus;
   assignedTo?: string | null;
   createdAt: string;
@@ -109,6 +134,7 @@ export interface CustomerContactPreference {
 export interface CallsDashboardCounts {
   deliveryPending: number;
   reengagementPending: number;
+  abandonedCartPending: number;
   completedToday: number;
   issuesRaised: number;
   followUpsDue: number;
@@ -124,6 +150,8 @@ export interface SaveCallOutcomeInput {
   issueNotes?: string | null;
   requirementType?: string | null;
   approximateQuantity?: number | null;
+  /** When Already Purchased — optional Shopify order external id. */
+  linkedOrderExternalId?: string | null;
   createdBy?: string;
 }
 
@@ -147,11 +175,20 @@ export const DELIVERY_SCRIPT =
 export const REENGAGEMENT_SCRIPT =
   "Hello, this is Vyshali calling from Aarla. We wanted to let you know that our Varalakshmi and Navarathri collections are now available. We also offer customised gifting for families and corporates. Please do visit aarla.in when you have a moment.";
 
+export const ABANDONED_CART_SCRIPT =
+  "Hello, this is Vyshali calling from Aarla. I noticed you had selected a few products on our website but may not have completed the order. I just wanted to check if you needed any help or had any questions.";
+
 /** Delivered within this many days → delivery follow-up candidate. */
 export const DELIVERY_FOLLOWUP_LOOKBACK_DAYS = 120;
 
 /** Default lapse window when segment.cooldownDays is unset. */
 export const REENGAGEMENT_LAPSE_DAYS_DEFAULT = 90;
+
+/**
+ * Default abandoned-cart lookback + recent-purchase due-diligence window
+ * when segment.cooldownDays is unset.
+ */
+export const ABANDONED_CART_LOOKBACK_DAYS_DEFAULT = 7;
 
 export type QueueCandidateInput = {
   segmentId: string;
@@ -166,6 +203,9 @@ export type QueueCandidateInput = {
   lastOrderDate: string | null;
   deliveredAt: string | null;
   productsSummary: string | null;
+  checkoutUrl?: string | null;
+  cartSubtotal?: number | null;
+  cartCurrency?: string | null;
 };
 
 export function deliveryQueueSourceKey(
@@ -179,6 +219,10 @@ export function reengagementQueueSourceKey(externalCustomerId: string): string {
   return `reeng:${externalCustomerId}`;
 }
 
+export function abandonedCartQueueSourceKey(checkoutExternalId: string): string {
+  return `abandoned:${checkoutExternalId}`;
+}
+
 export type CallQueueGenerationSummary = {
   deliveryCandidates: number;
   deliveryCreated: number;
@@ -189,6 +233,10 @@ export type CallQueueGenerationSummary = {
   reengagementCreated: number;
   reengagementUpdated: number;
   reengagementRetired: number;
+  abandonedCartCandidates: number;
+  abandonedCartCreated: number;
+  abandonedCartUpdated: number;
+  abandonedCartRetired: number;
   /** True when synced Shopify/Delhivery rows were present. */
   commercePresent: boolean;
   /** Demo/seed pending rows removed because live commerce exists. */
@@ -208,6 +256,10 @@ export function emptyCallQueueGenerationSummary(): CallQueueGenerationSummary {
     reengagementCreated: 0,
     reengagementUpdated: 0,
     reengagementRetired: 0,
+    abandonedCartCandidates: 0,
+    abandonedCartCreated: 0,
+    abandonedCartUpdated: 0,
+    abandonedCartRetired: 0,
     commercePresent: false,
     seedPendingCleared: 0,
     phonesEnriched: 0,
@@ -229,4 +281,14 @@ export function deliveryFollowUpReason(deliveredAt: string, now = new Date()): s
 
 export function reengagementReason(lapseDays: number): string {
   return `No purchase in ${lapseDays}+ days`;
+}
+
+export function abandonedCartReason(
+  lastActivityAt: string,
+  now = new Date(),
+): string {
+  const days = daysSince(lastActivityAt, now);
+  if (days <= 0) return "Abandoned checkout today";
+  if (days === 1) return "Abandoned checkout yesterday";
+  return `Abandoned checkout ${days} days ago`;
 }
