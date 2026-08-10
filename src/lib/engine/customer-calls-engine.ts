@@ -83,11 +83,16 @@ export class CustomerCallsEngine {
           ? "personal-gifting"
           : input.requirementType ?? null;
 
+    const linkedOrder =
+      input.outcome === "Already Purchased"
+        ? input.linkedOrderExternalId?.trim() || item.externalOrderId
+        : item.externalOrderId;
+
     const interaction = await this.repo.createInteraction({
       ...input,
       segmentId: item.segmentId,
       externalCustomerId: item.externalCustomerId,
-      externalOrderId: item.externalOrderId,
+      externalOrderId: linkedOrder,
       purpose: segment.name,
       issueRaised,
       requirementType,
@@ -109,7 +114,7 @@ export class CustomerCallsEngine {
       const checkoutExternalId = item.sourceKey.slice("abandoned:".length);
       await this.repo.markAbandonedCheckoutConverted(
         checkoutExternalId,
-        input.linkedOrderExternalId ?? null,
+        input.linkedOrderExternalId?.trim() || null,
       );
     }
 
