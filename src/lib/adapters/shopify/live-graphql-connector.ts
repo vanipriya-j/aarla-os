@@ -10,6 +10,9 @@
  */
 
 import type {
+  ShopifyAbandonedCheckoutLineItem,
+  ShopifyAbandonedCheckoutPage,
+  ShopifyAbandonedCheckoutRecord,
   ShopifyConnector,
   ShopifyCustomerCallPage,
   ShopifyCustomerCallPayload,
@@ -98,6 +101,48 @@ query SyncOrders($cursor: String, $query: String) {
 }
 `;
 
+const ABANDONED_CHECKOUTS_QUERY = `
+query SyncAbandonedCheckouts($cursor: String, $query: String) {
+  abandonedCheckouts(first: 50, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        abandonedCheckoutUrl
+        createdAt
+        updatedAt
+        completedAt
+        subtotalPriceSet { shopMoney { amount currencyCode } }
+        customer {
+          id
+          displayName
+          firstName
+          lastName
+          phone
+          defaultPhoneNumber { phoneNumber }
+          email
+        }
+        billingAddress { phone }
+        shippingAddress { phone }
+        lineItems(first: 50) {
+          edges {
+            node {
+              id
+              title
+              variantTitle
+              quantity
+              originalUnitPriceSet { shopMoney { amount } }
+              product { id }
+              variant { id }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
 type GraphqlResponse<T> = {
   data?: T;
   errors?: Array<{ message: string }>;
@@ -155,6 +200,108 @@ type RawOrderNode = {
     }>;
   }>;
 };
+
+type AbandonedCheckoutsQueryData = {
+  abandonedCheckouts: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{ node: RawAbandonedCheckoutNode }>;
+  };
+};
+
+type RawAbandonedCheckoutNode = {
+  id: string;
+  abandonedCheckoutUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  subtotalPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
+  customer: {
+    id: string;
+    displayName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    phone?: string | null;
+    defaultPhoneNumber?: { phoneNumber?: string | null } | null;
+    email?: string | null;
+  } | null;
+  billingAddress?: { phone?: string | null } | null;
+  shippingAddress?: { phone?: string | null } | null;
+  lineItems: {
+    edges: Array<{
+      node: {
+        id: string;
+        title: string;
+        variantTitle?: string | null;
+        quantity: number;
+        originalUnitPriceSet?: { shopMoney?: { amount?: string } };
+        product?: { id?: string } | null;
+        variant?: { id?: string } | null;
+      };
+    }>;
+  };
+};
+
+/** Prefer customer default phone, then customer profile phone, then shipping/billing address. */
+export function resolveShopifyAbandonedCheckoutPhone(node: {
+  customer?: {
+    phone?: string | null;
+    defaultPhoneNumber?: { phoneNumber?: string | null } | null;
+  } | null;
+  shippingAddress?: { phone?: string | null } | null;
+  billingAddress?: { phone?: string | null } | null;
+}): string | null {
+  const candidates = [
+    node.customer?.defaultPhoneNumber?.phoneNumber,
+    node.customer?.phone,
+    node.shippingAddress?.phone,
+    node.billingAddress?.phone,
+  ];
+  for (const raw of candidates) {
+    const phone = raw?.trim();
+    if (phone) return phone;
+  }
+  return null;
+}
+
+function abandonedCheckoutCustomerName(
+  c: RawAbandonedCheckoutNode["customer"],
+): string {
+  if (!c) return "Shopify customer";
+  if (c.displayName?.trim()) return c.displayName.trim();
+  const parts = [c.firstName, c.lastName].filter(Boolean);
+  return parts.length ? parts.join(" ") : "Shopify customer";
+}
+
+function mapAbandonedCheckout(
+  node: RawAbandonedCheckoutNode,
+): ShopifyAbandonedCheckoutRecord {
+  const lineItems: ShopifyAbandonedCheckoutLineItem[] = node.lineItems.edges.map(
+    ({ node: li }) => ({
+      externalLineItemId: shopifyGidToExternalId(li.id) ?? li.id,
+      externalProductId: shopifyGidToExternalId(li.product?.id ?? null),
+      externalVariantId: shopifyGidToExternalId(li.variant?.id ?? null),
+      title: li.title,
+      variantTitle: li.variantTitle ?? null,
+      quantity: li.quantity,
+      unitPrice: Number(li.originalUnitPriceSet?.shopMoney?.amount ?? 0),
+    }),
+  );
+
+  return {
+    externalId: shopifyGidToExternalId(node.id) ?? node.id,
+    externalCustomerId: shopifyGidToExternalId(node.customer?.id ?? null),
+    customerName: abandonedCheckoutCustomerName(node.customer),
+    phone: resolveShopifyAbandonedCheckoutPhone(node),
+    email: node.customer?.email ?? null,
+    checkoutUrl: node.abandonedCheckoutUrl ?? null,
+    subtotal: Number(node.subtotalPriceSet?.shopMoney?.amount ?? 0),
+    currency: node.subtotalPriceSet?.shopMoney?.currencyCode ?? "INR",
+    createdAt: node.createdAt,
+    lastActivityAt: node.updatedAt,
+    completedAt: node.completedAt ?? null,
+    lineItems,
+  };
+}
 
 function customerName(c: NonNullable<RawOrderNode["customer"]>): string {
   if (c.displayName?.trim()) return c.displayName.trim();
@@ -327,6 +474,41 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     return {
       customers: [...customers.values()],
       orders,
+      hasMore: hasNext,
+      nextCursor: hasNext ? cursor : null,
+      pagesFetched: pages,
+    };
+  }
+
+  async fetchAbandonedCheckoutsPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyAbandonedCheckoutPage> {
+    assertServerOnly();
+    const checkouts: ShopifyAbandonedCheckoutRecord[] = [];
+    let cursor: string | null = options.cursor ?? null;
+    let hasNext = true;
+    let pages = 0;
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 1, 10));
+
+    while (hasNext && pages < maxPages) {
+      pages += 1;
+      const variables: { cursor: string | null; query: string | null } = {
+        cursor,
+        query: options.query?.trim() ? options.query.trim() : null,
+      };
+      const data: AbandonedCheckoutsQueryData = await this.graphql<AbandonedCheckoutsQueryData>(
+        ABANDONED_CHECKOUTS_QUERY,
+        variables,
+      );
+      for (const edge of data.abandonedCheckouts.edges) {
+        checkouts.push(mapAbandonedCheckout(edge.node));
+      }
+      hasNext = data.abandonedCheckouts.pageInfo.hasNextPage;
+      cursor = data.abandonedCheckouts.pageInfo.endCursor;
+    }
+
+    return {
+      checkouts,
       hasMore: hasNext,
       nextCursor: hasNext ? cursor : null,
       pagesFetched: pages,

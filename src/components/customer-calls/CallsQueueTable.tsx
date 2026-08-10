@@ -5,8 +5,12 @@ import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import type { CustomerCallQueueItem } from "@/lib/domain/customer-calls-types";
 
+type Variant = "delivery" | "re-engagement" | "abandoned-cart";
+
 type Props = {
   rows: CustomerCallQueueItem[];
+  /** Adjusts which columns are shown for segment-specific fields. Defaults to delivery. */
+  variant?: Variant;
   onStart: (id: string) => void;
   onCallLater: (id: string) => void;
   onSkip: (id: string) => void;
@@ -20,20 +24,41 @@ function formatDate(value?: string | null): string {
   return d.toLocaleDateString();
 }
 
-export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory }: Props) {
+function formatCartValue(subtotal?: number | null, currency?: string | null): string {
+  if (subtotal == null) return "—";
+  const amount = subtotal.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return currency ? `${currency} ${amount}` : amount;
+}
+
+export function CallsQueueTable({
+  rows,
+  variant = "delivery",
+  onStart,
+  onCallLater,
+  onSkip,
+  onHistory,
+}: Props) {
+  const isAbandoned = variant === "abandoned-cart";
+
   return (
     <DataTable
       rows={rows}
       rowKey={(r) => r.id}
       emptyMessage="No pending calls in this queue."
       columns={[
-        {
-          key: "order",
-          header: "Order No",
-          render: (r) => (
-            <span className="font-medium text-deep-navy">{r.externalOrderId || "—"}</span>
-          ),
-        },
+        ...(isAbandoned
+          ? []
+          : [
+              {
+                key: "order",
+                header: "Order No",
+                render: (r: CustomerCallQueueItem) => (
+                  <span className="font-medium text-deep-navy">
+                    {r.externalOrderId || "—"}
+                  </span>
+                ),
+              },
+            ]),
         {
           key: "customer",
           header: "Customer Name",
@@ -51,16 +76,42 @@ export function CallsQueueTable({ rows, onStart, onCallLater, onSkip, onHistory 
               <span className="tabular-nums">{r.phone}</span>
             ),
         },
-        {
-          key: "ordered",
-          header: "Ordered",
-          render: (r) => formatDate(r.lastOrderDate),
-        },
-        {
-          key: "delivered",
-          header: "Delivered",
-          render: (r) => formatDate(r.deliveredAt),
-        },
+        ...(isAbandoned
+          ? [
+              {
+                key: "cartValue",
+                header: "Cart Value",
+                render: (r: CustomerCallQueueItem) => (
+                  <span className="tabular-nums">
+                    {formatCartValue(r.cartSubtotal, r.cartCurrency)}
+                  </span>
+                ),
+              },
+              {
+                key: "products",
+                header: "Products",
+                render: (r: CustomerCallQueueItem) => (
+                  <span className="text-charcoal/75">{r.productsSummary || "—"}</span>
+                ),
+              },
+              {
+                key: "lastActivity",
+                header: "Last Activity",
+                render: (r: CustomerCallQueueItem) => formatDate(r.lastOrderDate),
+              },
+            ]
+          : [
+              {
+                key: "ordered",
+                header: "Ordered",
+                render: (r: CustomerCallQueueItem) => formatDate(r.lastOrderDate),
+              },
+              {
+                key: "delivered",
+                header: "Delivered",
+                render: (r: CustomerCallQueueItem) => formatDate(r.deliveredAt),
+              },
+            ]),
         {
           key: "status",
           header: "Status",

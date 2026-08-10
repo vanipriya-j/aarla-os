@@ -1,4 +1,6 @@
 import type {
+  ShopifyAbandonedCheckoutPage,
+  ShopifyAbandonedCheckoutRecord,
   ShopifyConnector,
   ShopifyCustomerCallPage,
   ShopifyCustomerCallPayload,
@@ -242,6 +244,81 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
   },
 ];
 
+const FIXTURE_ABANDONED_CHECKOUTS: ShopifyAbandonedCheckoutRecord[] = [
+  {
+    externalId: "9001",
+    externalCustomerId: "1004",
+    customerName: "Divya Krishnan",
+    phone: "+91 98765 01004",
+    email: "divya.fixture@aarla.test",
+    checkoutUrl: "https://aarla-fixture.myshopify.com/checkouts/abcd9001",
+    subtotal: 2150,
+    currency: "INR",
+    createdAt: "2026-08-05T09:15:00.000Z",
+    lastActivityAt: "2026-08-05T09:20:00.000Z",
+    completedAt: null,
+    lineItems: [
+      {
+        externalLineItemId: "li-9001-1",
+        externalProductId: "prod-lamp",
+        externalVariantId: "var-brass-lamp",
+        title: "Kuthu Vilakku Brass Lamp",
+        variantTitle: "Brass",
+        quantity: 1,
+        unitPrice: 2150,
+      },
+    ],
+  },
+  {
+    externalId: "9002",
+    externalCustomerId: "1005",
+    customerName: "Guest checkout",
+    phone: null,
+    email: "guest.fixture@aarla.test",
+    checkoutUrl: "https://aarla-fixture.myshopify.com/checkouts/abcd9002",
+    subtotal: 500,
+    currency: "INR",
+    createdAt: "2026-08-04T11:00:00.000Z",
+    lastActivityAt: "2026-08-04T11:05:00.000Z",
+    completedAt: null,
+    lineItems: [
+      {
+        externalLineItemId: "li-9002-1",
+        externalProductId: "prod-card",
+        externalVariantId: null,
+        title: "Story Card Pack",
+        variantTitle: null,
+        quantity: 1,
+        unitPrice: 500,
+      },
+    ],
+  },
+  {
+    externalId: "9003",
+    externalCustomerId: "1001",
+    customerName: "Ananya Sharma",
+    phone: "+91 98765 01001",
+    email: "ananya.fixture@aarla.test",
+    checkoutUrl: "https://aarla-fixture.myshopify.com/checkouts/abcd9003",
+    subtotal: 1290,
+    currency: "INR",
+    createdAt: "2026-07-25T08:00:00.000Z",
+    lastActivityAt: "2026-07-25T08:10:00.000Z",
+    completedAt: "2026-07-25T08:12:00.000Z",
+    lineItems: [
+      {
+        externalLineItemId: "li-9003-1",
+        externalProductId: "prod-tumbler",
+        externalVariantId: "var-brass",
+        title: "Lakshmi Brass Davara Tumbler",
+        variantTitle: "Brass",
+        quantity: 1,
+        unitPrice: 1290,
+      },
+    ],
+  },
+];
+
 export type FixtureShopifyOptions = {
   /** When set, fetch throws after returning nothing — simulates upstream failure. */
   failHard?: boolean;
@@ -249,6 +326,7 @@ export type FixtureShopifyOptions = {
   partialError?: string | null;
   customers?: ShopifyCustomerRecord[];
   orders?: ShopifyOrderRecord[];
+  abandonedCheckouts?: ShopifyAbandonedCheckoutRecord[];
 };
 
 /**
@@ -321,6 +399,30 @@ export class FixtureShopifyConnector implements ShopifyConnector {
       pagesFetched: 1,
     };
   }
+
+  async fetchAbandonedCheckoutsPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyAbandonedCheckoutPage> {
+    if (this.options.failHard) {
+      throw new Error(this.options.partialError || "Shopify Admin API unavailable");
+    }
+    let checkouts = this.options.abandonedCheckouts ?? FIXTURE_ABANDONED_CHECKOUTS;
+
+    const match = options.query?.match(/created_at:>=?'([^']+)'/);
+    if (match?.[1]) {
+      const afterMs = new Date(match[1]).getTime();
+      if (Number.isFinite(afterMs)) {
+        checkouts = checkouts.filter((c) => new Date(c.createdAt).getTime() >= afterMs);
+      }
+    }
+
+    return {
+      checkouts,
+      hasMore: false,
+      nextCursor: null,
+      pagesFetched: 1,
+    };
+  }
 }
 
 export function createDefaultFixturePayload(): ShopifyCustomerCallPayload {
@@ -328,4 +430,8 @@ export function createDefaultFixturePayload(): ShopifyCustomerCallPayload {
     customers: structuredClone(FIXTURE_CUSTOMERS),
     orders: structuredClone(FIXTURE_ORDERS),
   };
+}
+
+export function createDefaultFixtureAbandonedCheckouts(): ShopifyAbandonedCheckoutRecord[] {
+  return structuredClone(FIXTURE_ABANDONED_CHECKOUTS);
 }

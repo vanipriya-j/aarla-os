@@ -23,10 +23,10 @@ describe.runIf(hasDb)("Customer Calls engine", () => {
     await closePool();
   });
 
-  it("loads both seeded segments", async () => {
+  it("loads all seeded segments", async () => {
     const segments = await engine().listSegments();
     const types = segments.map((s) => s.segmentType).sort();
-    expect(types).toEqual(["delivery-follow-up", "re-engagement"]);
+    expect(types).toEqual(["abandoned-cart", "delivery-follow-up", "re-engagement"]);
     expect(segments.every((s) => s.script.length > 20)).toBe(true);
   });
 

@@ -55,6 +55,30 @@ export type UpsertFulfilmentInput = {
 
 export type UpsertResult = { id: string; created: boolean };
 
+export type UpsertAbandonedCheckoutInput = {
+  provider: CommerceProvider;
+  externalId: string;
+  externalCustomerId: string | null;
+  customerName: string;
+  phone: string | null;
+  email: string | null;
+  checkoutUrl: string | null;
+  subtotal: number;
+  currency: string;
+  createdAt: string;
+  lastActivityAt: string;
+  completedAt: string | null;
+  lineItems: Array<{
+    externalLineItemId: string;
+    externalProductId: string | null;
+    externalVariantId: string | null;
+    title: string;
+    variantTitle: string | null;
+    quantity: number;
+    unitPrice: number;
+  }>;
+};
+
 export interface ExternalCommerceRepository {
   findCustomerByExternalId(
     provider: CommerceProvider,
@@ -100,4 +124,8 @@ export interface ExternalCommerceRepository {
   /** Integrity helpers for sync tests — do not expose PII dumps. */
   countInteractionsForExternalCustomer(externalCustomerId: string): Promise<number>;
   isDoNotContact(externalCustomerId: string): Promise<boolean>;
+  /** Ensure abandoned-checkout tables exist (safe if migration not recorded). */
+  ensureAbandonedCheckoutSchema(): Promise<void>;
+  /** Upsert an abandoned checkout + replace its line items. */
+  upsertAbandonedCheckout(input: UpsertAbandonedCheckoutInput): Promise<UpsertResult>;
 }

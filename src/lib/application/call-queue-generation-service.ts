@@ -1,6 +1,9 @@
 import {
+  ABANDONED_CART_LOOKBACK_DAYS_DEFAULT,
   DELIVERY_FOLLOWUP_LOOKBACK_DAYS,
   REENGAGEMENT_LAPSE_DAYS_DEFAULT,
+  abandonedCartQueueSourceKey,
+  abandonedCartReason,
   deliveryFollowUpReason,
   deliveryQueueSourceKey,
   emptyCallQueueGenerationSummary,
@@ -53,8 +56,11 @@ export async function generateCustomerCallQueues(
 
   const deliverySeg = await repo.getSegmentByType("delivery-follow-up");
   const reengSeg = await repo.getSegmentByType("re-engagement");
-  if (!deliverySeg || !reengSeg) {
-    throw new Error("Call segments missing — run /setup (migrate + seed) first.");
+  const abandonedSeg = await repo.getSegmentByType("abandoned-cart");
+  if (!deliverySeg || !reengSeg || !abandonedSeg) {
+    throw new Error(
+      "Call segments missing (delivery-follow-up, re-engagement, abandoned-cart) — run /setup (migrate + seed) first.",
+    );
   }
 
   summary.commercePresent = await repo.hasSyncedCommerce();
@@ -128,6 +134,40 @@ export async function generateCustomerCallQueues(
       else summary.reengagementUpdated += 1;
     }
     summary.reengagementRetired = await repo.retireStalePending(reengSeg.id, keepKeys);
+  }
+
+  const abandonedLookback =
+    abandonedSeg.cooldownDays ?? ABANDONED_CART_LOOKBACK_DAYS_DEFAULT;
+  const abandonedCandidates = await repo.listAbandonedCartCandidates(abandonedLookback);
+  summary.abandonedCartCandidates = abandonedCandidates.length;
+
+  if (abandonedCandidates.length > 0) {
+    summary.seedPendingCleared += await repo.clearDemoPending(abandonedSeg.id);
+    const keepKeys: string[] = [];
+    for (const row of abandonedCandidates) {
+      const sourceKey = abandonedCartQueueSourceKey(row.externalCheckoutId);
+      keepKeys.push(sourceKey);
+      const result = await repo.upsertQueueCandidate({
+        segmentId: abandonedSeg.id,
+        sourceKey,
+        externalCustomerId: row.externalCustomerId,
+        externalOrderId: null,
+        customerName: row.customerName,
+        phone: row.phone,
+        email: row.email,
+        reason: abandonedCartReason(row.lastActivityAt, now),
+        // Display-only: reuse lastOrderDate to surface "Last activity" in the abandoned-cart table.
+        lastOrderDate: row.lastActivityAt,
+        deliveredAt: null,
+        productsSummary: row.productsSummary,
+        checkoutUrl: row.checkoutUrl,
+        cartSubtotal: row.subtotal,
+        cartCurrency: row.currency,
+      });
+      if (result.created) summary.abandonedCartCreated += 1;
+      else summary.abandonedCartUpdated += 1;
+    }
+    summary.abandonedCartRetired = await repo.retireStalePending(abandonedSeg.id, keepKeys);
   }
 
   return summary;

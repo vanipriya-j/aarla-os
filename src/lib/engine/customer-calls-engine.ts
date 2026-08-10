@@ -83,11 +83,16 @@ export class CustomerCallsEngine {
           ? "personal-gifting"
           : input.requirementType ?? null;
 
+    const linkedOrder =
+      input.outcome === "Already Purchased"
+        ? input.linkedOrderExternalId?.trim() || item.externalOrderId
+        : item.externalOrderId;
+
     const interaction = await this.repo.createInteraction({
       ...input,
       segmentId: item.segmentId,
       externalCustomerId: item.externalCustomerId,
-      externalOrderId: item.externalOrderId,
+      externalOrderId: linkedOrder,
       purpose: segment.name,
       issueRaised,
       requirementType,
@@ -103,6 +108,14 @@ export class CustomerCallsEngine {
       await this.repo.skipCustomerQueues(item.externalCustomerId);
       const skipped = await this.repo.getQueueItem(item.id);
       return { interaction, item: skipped! };
+    }
+
+    if (input.outcome === "Already Purchased" && item.sourceKey?.startsWith("abandoned:")) {
+      const checkoutExternalId = item.sourceKey.slice("abandoned:".length);
+      await this.repo.markAbandonedCheckoutConverted(
+        checkoutExternalId,
+        input.linkedOrderExternalId?.trim() || null,
+      );
     }
 
     const status = outcomeToQueueStatus(input.outcome);

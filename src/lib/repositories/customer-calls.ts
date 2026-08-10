@@ -31,6 +31,19 @@ export type ReengagementQueueCandidateRow = {
   productsSummary: string | null;
 };
 
+export type AbandonedCartQueueCandidateRow = {
+  externalCheckoutId: string;
+  externalCustomerId: string;
+  customerName: string;
+  phone: string;
+  email: string | null;
+  checkoutUrl: string | null;
+  subtotal: number;
+  currency: string;
+  lastActivityAt: string;
+  productsSummary: string | null;
+};
+
 export interface CustomerCallsRepository {
   listSegments(): Promise<CustomerCallSegment[]>;
   getSegmentByType(type: CallSegmentType): Promise<CustomerCallSegment | null>;
@@ -70,6 +83,15 @@ export interface CustomerCallsRepository {
   listDeliveryFollowUpCandidates(lookbackDays: number): Promise<DeliveryQueueCandidateRow[]>;
   /** Customers whose latest valid order is older than lapseDays. */
   listReengagementCandidates(lapseDays: number): Promise<ReengagementQueueCandidateRow[]>;
+  /** Shopify abandoned checkouts eligible for outreach (see docs/customer-calls.md). */
+  listAbandonedCartCandidates(lookbackDays: number): Promise<AbandonedCartQueueCandidateRow[]>;
+  /** Mark an abandoned checkout converted once the customer completes an order. */
+  markAbandonedCheckoutConverted(
+    checkoutExternalId: string,
+    orderExternalId: string | null,
+  ): Promise<void>;
+  /** Ensure queue columns checkout_url/cart_subtotal/cart_currency + segment constraint exist. */
+  ensureAbandonedCartSchema(): Promise<void>;
   upsertQueueCandidate(
     input: QueueCandidateInput,
   ): Promise<{ created: boolean; item: CustomerCallQueueItem }>;

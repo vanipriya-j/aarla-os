@@ -10,7 +10,10 @@ import type {
   CustomerInteraction,
   QueueItemStatus,
 } from "@/lib/domain/customer-calls-types";
-import type { CustomerCallsRepository } from "@/lib/repositories/customer-calls";
+import type {
+  AbandonedCartQueueCandidateRow,
+  CustomerCallsRepository,
+} from "@/lib/repositories/customer-calls";
 import { randomUUID } from "node:crypto";
 
 function isoOrNull(value: unknown): string | null {
@@ -30,6 +33,25 @@ function dateOnly(value: unknown): string | null {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   const s = String(value);
   return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+async function ensureAbandonedCartColumns(q: Q): Promise<void> {
+  await q(`
+    alter table customer_call_queue_items add column if not exists checkout_url text
+  `);
+  await q(`
+    alter table customer_call_queue_items add column if not exists cart_subtotal numeric(12, 2)
+  `);
+  await q(`
+    alter table customer_call_queue_items add column if not exists cart_currency text
+  `);
+  await q(`
+    alter table customer_call_segments drop constraint if exists customer_call_segments_segment_type_check
+  `);
+  await q(`
+    alter table customer_call_segments add constraint customer_call_segments_segment_type_check
+      check (segment_type in ('delivery-follow-up', 're-engagement', 'abandoned-cart'))
+  `);
 }
 
 function mapSegment(r: Record<string, unknown>): CustomerCallSegment {
@@ -52,6 +74,7 @@ function mapQueue(r: Record<string, unknown>): CustomerCallQueueItem {
     id: String(r.id),
     organizationId: String(r.organization_id),
     segmentId: String(r.segment_id),
+    sourceKey: r.source_key ? String(r.source_key) : undefined,
     externalCustomerId: String(r.external_customer_id),
     externalOrderId: r.external_order_id ? String(r.external_order_id) : null,
     customerName: String(r.customer_name),
@@ -61,6 +84,9 @@ function mapQueue(r: Record<string, unknown>): CustomerCallQueueItem {
     lastOrderDate: dateOnly(r.last_order_date),
     deliveredAt: r.delivered_at ? new Date(String(r.delivered_at)).toISOString() : null,
     productsSummary: r.products_summary ? String(r.products_summary) : null,
+    checkoutUrl: r.checkout_url ? String(r.checkout_url) : null,
+    cartSubtotal: r.cart_subtotal == null ? null : Number(r.cart_subtotal),
+    cartCurrency: r.cart_currency ? String(r.cart_currency) : null,
     status: r.status as QueueItemStatus,
     assignedTo: r.assigned_to ? String(r.assigned_to) : null,
     createdAt: new Date(String(r.created_at)).toISOString(),
@@ -294,6 +320,19 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
            )`,
         [ORG_ID],
       );
+      const abandonedCart = await q<{ n: string }>(
+        `select count(*)::text as n from customer_call_queue_items q
+         join customer_call_segments s on s.id = q.segment_id
+         where q.organization_id = $1 and s.segment_type = 'abandoned-cart'
+           and q.status in ('pending','in-progress')
+           and not exists (
+             select 1 from customer_contact_preferences p
+             where p.organization_id = q.organization_id
+               and p.external_customer_id = q.external_customer_id
+               and p.do_not_contact = true
+           )`,
+        [ORG_ID],
+      );
       const completed = await q<{ n: string }>(
         `select count(*)::text as n from customer_interactions
          where organization_id = $1 and created_at::date = current_date`,
@@ -313,6 +352,7 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
       return {
         deliveryPending: Number(delivery[0]?.n ?? 0),
         reengagementPending: Number(reeng[0]?.n ?? 0),
+        abandonedCartPending: Number(abandonedCart[0]?.n ?? 0),
         completedToday: Number(completed[0]?.n ?? 0),
         issuesRaised: Number(issues[0]?.n ?? 0),
         followUpsDue: Number(followUps[0]?.n ?? 0),
@@ -340,6 +380,11 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
         create unique index if not exists customer_call_queue_source_key_uidx
           on customer_call_queue_items (organization_id, segment_id, source_key)
       `);
+      await ensureAbandonedCartColumns(q);
+    },
+
+    async ensureAbandonedCartSchema() {
+      await ensureAbandonedCartColumns(q);
     },
 
     async hasSyncedCommerce() {
@@ -494,15 +539,113 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
       }));
     },
 
+    async listAbandonedCartCandidates(lookbackDays): Promise<AbandonedCartQueueCandidateRow[]> {
+      const days = Math.max(1, Math.floor(lookbackDays));
+      const rows = await q<{
+        external_checkout_id: string;
+        external_customer_id: string;
+        customer_name: string;
+        phone: string;
+        email: string | null;
+        checkout_url: string | null;
+        subtotal: string | number;
+        currency: string;
+        last_activity_at: Date | string;
+        products_summary: string | null;
+      }>(
+        `select
+           ac.external_id as external_checkout_id,
+           coalesce(ac.external_customer_id, 'checkout:' || ac.external_id) as external_customer_id,
+           coalesce(nullif(btrim(ac.customer_name), ''), 'Customer') as customer_name,
+           btrim(ac.phone) as phone,
+           ac.email,
+           ac.checkout_url,
+           ac.subtotal,
+           ac.currency,
+           ac.last_activity_at,
+           (
+             select string_agg(
+               trim(both from i.title) || ' ×' || i.quantity::text,
+               ', '
+               order by i.title
+             )
+             from external_abandoned_checkout_items i
+             where i.checkout_id = ac.id
+           ) as products_summary
+         from external_abandoned_checkouts ac
+         where ac.organization_id = $1
+           and ac.provider = 'shopify'
+           and ac.completed_at is null
+           and ac.converted_order_external_id is null
+           and ac.phone is not null
+           and btrim(ac.phone) <> ''
+           and ac.last_activity_at >= (now() - make_interval(days => $2))
+           and not exists (
+             select 1 from customer_contact_preferences p
+             where p.organization_id = ac.organization_id
+               and p.external_customer_id = ac.external_customer_id
+               and p.do_not_contact = true
+           )
+           and not exists (
+             select 1 from customer_call_queue_items q
+             where q.organization_id = ac.organization_id
+               and q.source_key = 'abandoned:' || ac.external_id
+               and q.status = 'completed'
+           )
+           and not exists (
+             select 1 from external_orders o
+             left join external_customers c on c.id = o.external_customer_id
+             where o.organization_id = ac.organization_id
+               and o.is_valid = true
+               and o.order_date >= (now() - make_interval(days => $2))
+               and (
+                 (ac.external_customer_id is not null and c.external_id = ac.external_customer_id)
+                 or (
+                   ac.phone is not null and btrim(ac.phone) <> ''
+                   and c.phone is not null and btrim(c.phone) = btrim(ac.phone)
+                 )
+                 or (
+                   ac.email is not null and btrim(ac.email) <> ''
+                   and c.email is not null and lower(btrim(c.email)) = lower(btrim(ac.email))
+                 )
+               )
+           )
+         order by ac.last_activity_at desc`,
+        [ORG_ID, days],
+      );
+
+      return rows.map((r) => ({
+        externalCheckoutId: String(r.external_checkout_id),
+        externalCustomerId: String(r.external_customer_id),
+        customerName: String(r.customer_name),
+        phone: String(r.phone),
+        email: r.email ? String(r.email) : null,
+        checkoutUrl: r.checkout_url ? String(r.checkout_url) : null,
+        subtotal: Number(r.subtotal ?? 0),
+        currency: String(r.currency ?? "INR"),
+        lastActivityAt: isoOrNull(r.last_activity_at)!,
+        productsSummary: r.products_summary ? String(r.products_summary) : null,
+      }));
+    },
+
+    async markAbandonedCheckoutConverted(checkoutExternalId, orderExternalId) {
+      await q(
+        `update external_abandoned_checkouts
+         set converted_order_external_id = $3
+         where organization_id = $1 and provider = 'shopify' and external_id = $2`,
+        [ORG_ID, checkoutExternalId, orderExternalId],
+      );
+    },
+
     async upsertQueueCandidate(input) {
       const id = randomUUID();
       const rows = await q(
         `insert into customer_call_queue_items (
            id, organization_id, segment_id, source_key, external_customer_id, external_order_id,
            customer_name, phone, email, reason, last_order_date, delivered_at,
-           products_summary, status
+           products_summary, checkout_url, cart_subtotal, cart_currency, status
          ) values (
-           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending'
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending'
          )
          on conflict (organization_id, segment_id, source_key)
          do update set
@@ -519,6 +662,9 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
            last_order_date = excluded.last_order_date,
            delivered_at = excluded.delivered_at,
            products_summary = excluded.products_summary,
+           checkout_url = excluded.checkout_url,
+           cart_subtotal = excluded.cart_subtotal,
+           cart_currency = excluded.cart_currency,
            -- Refresh re-opens skipped rows that are still eligible; keep
            -- completed / in-progress / call-later as the founder left them.
            status = case
@@ -541,6 +687,9 @@ export function createCustomerCallsRepository(): CustomerCallsRepository {
           input.lastOrderDate,
           input.deliveredAt,
           input.productsSummary,
+          input.checkoutUrl ?? null,
+          input.cartSubtotal ?? null,
+          input.cartCurrency ?? null,
         ],
       );
       const row = rows[0];
