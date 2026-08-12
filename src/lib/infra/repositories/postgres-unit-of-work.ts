@@ -7,6 +7,7 @@ import type {
   Product,
   ProductRegistration,
   PurchaseOrder,
+  ReorderRule,
   StockMovement,
   Vendor,
 } from "@/lib/domain/types";
@@ -20,6 +21,7 @@ import type {
   ProductRepository,
   PurchaseOrderRepository,
   RegistrationRepository,
+  ReorderRuleRepository,
   StockMovementRepository,
   UnitOfWork,
   VendorRepository,
@@ -88,10 +90,11 @@ function createProductRepo(q: QueryFn): ProductRepository {
         status: string;
         idea_origin: string | null;
         designed_date: string | Date | null;
+        inventory_presentation: string;
         id: string;
       }>(
         `select id, code, sku, title, category, world, story, selling_price, cost,
-                velocity, status, idea_origin, designed_date
+                velocity, status, idea_origin, designed_date, inventory_presentation
          from products where organization_id = $1 order by title`,
         [ORG_ID],
       );
@@ -101,15 +104,20 @@ function createProductRepo(q: QueryFn): ProductRepository {
         code: string;
         label: string;
         sku: string;
+        options: Record<string, string> | null;
       }>(
-        `select product_id, code, label, sku from product_variants
+        `select product_id, code, label, sku, options from product_variants
          where organization_id = $1 order by sku`,
         [ORG_ID],
       );
-      const byProduct = new Map<string, { id: string; label: string; sku: string }[]>();
+      const byProduct = new Map<
+        string,
+        { id: string; label: string; sku: string; options?: Record<string, string> }[]
+      >();
       for (const v of variants) {
         const list = byProduct.get(v.product_id) ?? [];
-        list.push({ id: v.code, label: v.label, sku: v.sku });
+        const options = v.options && Object.keys(v.options).length ? v.options : undefined;
+        list.push({ id: v.code, label: v.label, sku: v.sku, options });
         byProduct.set(v.product_id, list);
       }
       return products.map((p) => ({
@@ -126,6 +134,8 @@ function createProductRepo(q: QueryFn): ProductRepository {
         status: p.status,
         ideaOrigin: p.idea_origin ?? undefined,
         designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
+        inventoryPresentation: (p.inventory_presentation ??
+          "auto") as Product["inventoryPresentation"],
       }));
     },
     async getByCode(code: string): Promise<Product | null> {
@@ -625,6 +635,74 @@ function createRegistrationRepo(q: QueryFn): RegistrationRepository {
   };
 }
 
+function createReorderRuleRepo(q: QueryFn): ReorderRuleRepository {
+  return {
+    async list(): Promise<ReorderRule[]> {
+      const rows = await q<{
+        id: string;
+        product_code: string;
+        variant_code: string | null;
+        partner_code: string | null;
+        min_quantity: number;
+        notes: string;
+      }>(
+        `select r.id, p.code as product_code, pv.code as variant_code,
+                pt.code as partner_code, r.min_quantity, r.notes
+         from inventory_reorder_rules r
+         join products p on p.id = r.product_id
+         left join product_variants pv on pv.id = r.variant_id
+         left join partners pt on pt.id = r.partner_id
+         where r.organization_id = $1
+         order by p.title`,
+        [ORG_ID],
+      );
+      return rows.map((r) => ({
+        id: r.id,
+        productId: r.product_code,
+        variantId: r.variant_code ?? undefined,
+        partnerId: r.partner_code ?? undefined,
+        minQuantity: r.min_quantity,
+        notes: r.notes,
+      }));
+    },
+    async upsert(rule: Omit<ReorderRule, "id"> & { id?: string }): Promise<ReorderRule> {
+      const rows = await q<{ id: string }>(
+        `insert into inventory_reorder_rules (
+           id, organization_id, product_id, variant_id, partner_id, min_quantity, notes
+         ) values (
+           coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7
+         )
+         on conflict (
+           organization_id, product_id,
+           coalesce(variant_id, '00000000-0000-0000-0000-000000000000'::uuid),
+           coalesce(partner_id, '00000000-0000-0000-0000-000000000000'::uuid)
+         ) do update set
+           min_quantity = excluded.min_quantity,
+           notes = excluded.notes,
+           updated_at = now()
+         returning id`,
+        [
+          rule.id ?? null,
+          ORG_ID,
+          stableId(rule.productId),
+          rule.variantId ? stableId(rule.variantId) : null,
+          rule.partnerId ? stableId(rule.partnerId) : null,
+          rule.minQuantity,
+          rule.notes ?? "",
+        ],
+      );
+      return {
+        id: rows[0]?.id ?? rule.id ?? "",
+        productId: rule.productId,
+        variantId: rule.variantId,
+        partnerId: rule.partnerId,
+        minQuantity: rule.minQuantity,
+        notes: rule.notes,
+      };
+    },
+  };
+}
+
 function createOpsRepo(q: QueryFn): OpsRepository {
   return {
     async listProjects(): Promise<unknown[]> {
@@ -927,6 +1005,7 @@ export function createPostgresUnitOfWork(client?: PoolClient): UnitOfWork {
     movements: createMovementRepo(q),
     people: createPersonRepo(q),
     registrations: createRegistrationRepo(q),
+    reorderRules: createReorderRuleRepo(q),
     ops: createOpsRepo(q),
   };
 }

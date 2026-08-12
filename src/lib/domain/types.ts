@@ -50,7 +50,12 @@ export interface ProductVariant {
   id: string;
   label: string;
   sku: string;
+  /** Structured attributes for category matrices — e.g. { Size: "M", Colour: "Black" } or { Format: "8x10" }. */
+  options?: Record<string, string>;
 }
+
+/** Inventory screen presentation hint — "auto" infers from category/options. */
+export type InventoryPresentation = "auto" | "matrix-apparel" | "matrix-art" | "list";
 
 /** Canonical sellable product (single catalog). */
 export interface Product {
@@ -68,6 +73,8 @@ export interface Product {
   status: string;
   ideaOrigin?: string;
   designedDate?: string;
+  /** Optional override for how Inventory renders this product's variants. */
+  inventoryPresentation?: InventoryPresentation;
 }
 
 /** Canonical supply-side vendor. */
@@ -132,6 +139,8 @@ export interface PurchaseOrder {
 /** Derived from the ledger — never stored as source of truth. */
 export interface InventoryBalance {
   productId: string;
+  /** Empty string ("") when the movement did not carry a variant. */
+  variantId: string;
   locationId: string;
   quantity: number;
 }
@@ -145,6 +154,36 @@ export interface InventorySnapshot {
   damaged: number;
   available: number;
   totalOnHand: number;
+}
+
+/** Reason codes for manual stock adjustments (count corrections, damage, loss). */
+export type AdjustmentReason = "missing" | "damaged" | "count correction" | "other";
+
+/** Configurable minimum-stock rule — product and/or variant, optionally scoped to a partner. */
+export interface ReorderRule {
+  id: string;
+  productId: string;
+  variantId?: string | null;
+  partnerId?: string | null;
+  minQuantity: number;
+  notes?: string;
+}
+
+/** Variant-aware stock breakdown for a single product+variant across all locations. */
+export interface VariantStockCell {
+  productId: string;
+  variantId: string;
+  total: number;
+  studio: number;
+  partner: number;
+  /** Shopify/channel pool — treated as reserved for fulfilment. */
+  channel: number;
+  damaged: number;
+  /** Studio stock — what's actually sellable/transferable right now. */
+  available: number;
+  /** Alias for `channel` — kept explicit for UI clarity. */
+  reserved: number;
+  byLocation: { locationId: string; locationName: string; kind: string; quantity: number }[];
 }
 
 export type PersonRole = "Customer" | "User" | "Community Member";

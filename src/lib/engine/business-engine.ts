@@ -1,11 +1,15 @@
 import {
   DEFAULT_INVENTORY_LOC,
+  balanceAt,
+  buildAdjustmentMovement,
+  buildTransferMovement,
   deriveBalances,
   deriveInventorySnapshots,
   partnerStockFor,
   type AppendMovementInput,
 } from "@/lib/domain/ledger";
 import type {
+  AdjustmentReason,
   InventorySnapshot,
   Location,
   ManufacturingBatch,
@@ -15,6 +19,7 @@ import type {
   Product,
   ProductRegistration,
   PurchaseOrder,
+  ReorderRule,
   StockMovement,
   Vendor,
 } from "@/lib/domain/types";
@@ -116,6 +121,10 @@ export class BusinessEngine {
       this.uow.locations.list(),
     ]);
     return partnerStockFor(movements, partnerId, locations);
+  }
+
+  listReorderRules(): Promise<ReorderRule[]> {
+    return this.uow.reorderRules.list();
   }
 
   async createManufacturingPO(input: {
@@ -222,6 +231,7 @@ export class BusinessEngine {
 
   async transferToPartner(input: {
     productId: string;
+    variantId?: string;
     partnerId: string;
     quantity: number;
     notes?: string;
@@ -233,29 +243,26 @@ export class BusinessEngine {
       const loc = locations.find((l) => l.partnerId === input.partnerId);
       if (!loc || input.quantity <= 0) return null;
 
-      const [movements, products, batches] = await Promise.all([
-        tx.movements.list(),
-        tx.products.list(),
-        tx.batches.list(),
-      ]);
-      const snapshots = deriveInventorySnapshots(
-        movements,
-        products,
-        locations,
-        DEFAULT_INVENTORY_LOC,
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const available = Math.max(
+        balanceAt(balances, input.productId, LOC_CODES.studio, input.variantId),
+        0,
       );
-      const snap = snapshots.find((s) => s.productId === input.productId);
-      if (!snap || snap.available < input.quantity) return null;
+      if (available < input.quantity) return null;
 
       const batch = batches.find((b) => b.productId === input.productId);
       const partner = await tx.partners.getByCode(input.partnerId);
       const reference =
         input.reference ??
-        `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}-${input.quantity}`;
+        `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
+          input.variantId ? `-${input.variantId}` : ""
+        }-${input.quantity}`;
 
       const created = await this.appendMovementsTx(tx, [
         {
           productId: input.productId,
+          variantId: input.variantId,
           batchId: batch?.id,
           quantity: input.quantity,
           fromLocationId: LOC_CODES.studio,
@@ -271,6 +278,7 @@ export class BusinessEngine {
 
   async recordPartnerSale(input: {
     productId: string;
+    variantId?: string;
     partnerId: string;
     quantity: number;
     notes?: string;
@@ -282,22 +290,22 @@ export class BusinessEngine {
       const loc = locations.find((l) => l.partnerId === input.partnerId);
       if (!loc || input.quantity <= 0) return null;
 
-      const [movements, batches] = await Promise.all([
-        tx.movements.list(),
-        tx.batches.list(),
-      ]);
-      const stock = partnerStockFor(movements, input.partnerId, locations);
-      const bal = stock.find((s) => s.productId === input.productId)?.quantity ?? 0;
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const bal = Math.max(balanceAt(balances, input.productId, loc.id, input.variantId), 0);
       if (bal < input.quantity) return null;
 
       const batch = batches.find((b) => b.productId === input.productId);
       const reference =
         input.reference ??
-        `PSALE-${input.partnerId}-${input.productId}-${input.quantity}`;
+        `PSALE-${input.partnerId}-${input.productId}${
+          input.variantId ? `-${input.variantId}` : ""
+        }-${input.quantity}`;
 
       const created = await this.appendMovementsTx(tx, [
         {
           productId: input.productId,
+          variantId: input.variantId,
           batchId: batch?.id,
           quantity: input.quantity,
           fromLocationId: loc.id,
@@ -307,6 +315,71 @@ export class BusinessEngine {
           notes: input.notes || "Partner sale",
         },
       ]);
+      return created[0] ?? null;
+    });
+  }
+
+  /** General-purpose location-to-location transfer (studio ↔ partner, partner ↔ partner, etc.). */
+  async transferStock(input: {
+    productId: string;
+    variantId?: string;
+    fromLocationId: string;
+    toLocationId: string;
+    quantity: number;
+    notes?: string;
+    reference?: string;
+  }): Promise<StockMovement | null> {
+    if (input.quantity <= 0) return null;
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const available = balanceAt(balances, input.productId, input.fromLocationId, input.variantId);
+      if (input.fromLocationId !== LOC_CODES.external && available < input.quantity) {
+        return null;
+      }
+
+      const batch = batches.find((b) => b.productId === input.productId);
+      const movement = buildTransferMovement({
+        productId: input.productId,
+        variantId: input.variantId,
+        fromLocationId: input.fromLocationId,
+        toLocationId: input.toLocationId,
+        quantity: input.quantity,
+        batchId: batch?.id,
+        notes: input.notes,
+        reference: input.reference,
+      });
+
+      const created = await this.appendMovementsTx(tx, [movement]);
+      return created[0] ?? null;
+    });
+  }
+
+  /** Writes a compensating Adjustment movement for the delta between system and physical counts. */
+  async adjustStock(input: {
+    productId: string;
+    variantId?: string;
+    locationId: string;
+    systemQty: number;
+    physicalQty: number;
+    reason: AdjustmentReason;
+    notes?: string;
+  }): Promise<StockMovement | null> {
+    const delta = input.physicalQty - input.systemQty;
+    const movement = buildAdjustmentMovement({
+      productId: input.productId,
+      variantId: input.variantId,
+      locationId: input.locationId,
+      delta,
+      reason: input.reason,
+      notes: input.notes,
+    });
+    if (!movement) return null;
+
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const created = await this.appendMovementsTx(tx, [movement]);
       return created[0] ?? null;
     });
   }
@@ -405,7 +478,17 @@ export class BusinessEngine {
     const current = await tx.movements.list();
     const existingFingerprints = new Set(current.map(movementFingerprint));
     const balances = deriveBalances(current);
-    const balMap = new Map(balances.map((b) => [`${b.productId}::${b.locationId}`, b.quantity]));
+    // Exact bucket (product+variant+location) drives commits; pooled bucket (product+location,
+    // summed across variants) is used to check entries that don't name a variant — backward
+    // compatible with product-level callers that predate variant tracking.
+    const exactMap = new Map(
+      balances.map((b) => [`${b.productId}::${b.variantId}::${b.locationId}`, b.quantity]),
+    );
+    const pooledMap = new Map<string, number>();
+    for (const b of balances) {
+      const k = `${b.productId}::${b.locationId}`;
+      pooledMap.set(k, (pooledMap.get(k) ?? 0) + b.quantity);
+    }
 
     const created: StockMovement[] = [];
     for (const e of entries) {
@@ -413,9 +496,16 @@ export class BusinessEngine {
       const fp = movementFingerprint(e);
       if (existingFingerprints.has(fp)) continue;
 
-      const fromKey = `${e.productId}::${e.fromLocationId}`;
-      const toKey = `${e.productId}::${e.toLocationId}`;
-      const fromBal = balMap.get(fromKey) ?? 0;
+      const variantId = e.variantId ?? "";
+      const fromExactKey = `${e.productId}::${variantId}::${e.fromLocationId}`;
+      const toExactKey = `${e.productId}::${variantId}::${e.toLocationId}`;
+      const fromPooledKey = `${e.productId}::${e.fromLocationId}`;
+      const toPooledKey = `${e.productId}::${e.toLocationId}`;
+
+      const fromBal =
+        e.variantId !== undefined
+          ? exactMap.get(fromExactKey) ?? 0
+          : pooledMap.get(fromPooledKey) ?? 0;
       const nextFrom = fromBal - e.quantity;
       if (e.fromLocationId !== LOC_CODES.external && nextFrom < 0) {
         continue;
@@ -436,8 +526,10 @@ export class BusinessEngine {
       };
       created.push(movement);
       existingFingerprints.add(fp);
-      balMap.set(fromKey, nextFrom);
-      balMap.set(toKey, (balMap.get(toKey) ?? 0) + e.quantity);
+      exactMap.set(fromExactKey, (exactMap.get(fromExactKey) ?? 0) - e.quantity);
+      exactMap.set(toExactKey, (exactMap.get(toExactKey) ?? 0) + e.quantity);
+      pooledMap.set(fromPooledKey, (pooledMap.get(fromPooledKey) ?? 0) - e.quantity);
+      pooledMap.set(toPooledKey, (pooledMap.get(toPooledKey) ?? 0) + e.quantity);
     }
 
     if (created.length) {

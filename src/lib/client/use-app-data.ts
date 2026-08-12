@@ -2,16 +2,19 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
+  adjustStockAction,
   createManufacturingPOAction,
   getLedgerBundleAction,
   getNetworkBundleAction,
   partnerSaleAction,
   receiveAgainstPOAction,
   registerProductAction,
+  transferStockAction,
   transferToPartnerAction,
 } from "@/app/actions/app-actions";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
 import type {
+  AdjustmentReason,
   InventorySnapshot,
   Location,
   ManufacturingBatch,
@@ -20,6 +23,7 @@ import type {
   Product,
   ProductRegistration,
   PurchaseOrder,
+  ReorderRule,
   StockMovement,
   Vendor,
 } from "@/lib/domain/types";
@@ -49,6 +53,7 @@ export function useAppLedger() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [catalog, setCatalog] = useState<AppCatalog>(emptyCatalog);
+  const [reorderRules, setReorderRules] = useState<ReorderRule[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -65,6 +70,7 @@ export function useAppLedger() {
     setMovements(result.data.movements);
     setPurchaseOrders(result.data.purchaseOrders);
     setCatalog(result.data.catalog);
+    setReorderRules(result.data.reorderRules);
     setHydrated(true);
   }, []);
 
@@ -96,6 +102,7 @@ export function useAppLedger() {
   const transfer = useCallback(
     async (input: {
       productId: string;
+      variantId?: string;
       partnerId: string;
       quantity: number;
       notes?: string;
@@ -115,12 +122,55 @@ export function useAppLedger() {
   const partnerSale = useCallback(
     async (input: {
       productId: string;
+      variantId?: string;
       partnerId: string;
       quantity: number;
       notes?: string;
       reference?: string;
     }) => {
       const result = await partnerSaleAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      await refresh();
+      return result.data;
+    },
+    [refresh],
+  );
+
+  const transferStock = useCallback(
+    async (input: {
+      productId: string;
+      variantId?: string;
+      fromLocationId: string;
+      toLocationId: string;
+      quantity: number;
+      notes?: string;
+      reference?: string;
+    }) => {
+      const result = await transferStockAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      await refresh();
+      return result.data;
+    },
+    [refresh],
+  );
+
+  const adjustStock = useCallback(
+    async (input: {
+      productId: string;
+      variantId?: string;
+      locationId: string;
+      systemQty: number;
+      physicalQty: number;
+      reason: AdjustmentReason;
+      notes?: string;
+    }) => {
+      const result = await adjustStockAction(input);
       if (!result.ok) {
         setError(result.error);
         return null;
@@ -156,6 +206,7 @@ export function useAppLedger() {
     movements,
     purchaseOrders,
     catalog,
+    reorderRules,
     products: catalog.products,
     vendors: catalog.vendors,
     locations: catalog.locations,
@@ -166,6 +217,8 @@ export function useAppLedger() {
     receive,
     transfer,
     partnerSale,
+    transferStock,
+    adjustStock,
     createManufacturingPO,
     refresh,
   };

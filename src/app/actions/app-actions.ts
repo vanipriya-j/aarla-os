@@ -6,6 +6,7 @@ import {
 } from "@/lib/infra/db/errors";
 import * as services from "@/lib/application/services";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
+import type { AdjustmentReason } from "@/lib/domain/types";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -88,6 +89,7 @@ export async function receiveAgainstPOAction(input: {
 
 export async function transferToPartnerAction(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
@@ -98,6 +100,7 @@ export async function transferToPartnerAction(input: {
 
 export async function partnerSaleAction(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
@@ -108,6 +111,34 @@ export async function partnerSaleAction(input: {
 
 export async function partnerStockAction(partnerId: string) {
   return wrap(() => services.partnerStock(partnerId));
+}
+
+export async function transferStockAction(input: {
+  productId: string;
+  variantId?: string;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  notes?: string;
+  reference?: string;
+}) {
+  return wrap(() => services.transferStock(input));
+}
+
+export async function adjustStockAction(input: {
+  productId: string;
+  variantId?: string;
+  locationId: string;
+  systemQty: number;
+  physicalQty: number;
+  reason: AdjustmentReason;
+  notes?: string;
+}) {
+  return wrap(() => services.adjustStock(input));
+}
+
+export async function listReorderRulesAction() {
+  return wrap(() => services.listReorderRules());
 }
 
 export async function listPeopleAction() {
@@ -187,13 +218,14 @@ export async function getHomeDashboardDataAction() {
 
 export async function getLedgerBundleAction() {
   return wrap(async () => {
-    const [snapshots, movements, purchaseOrders, catalog] = await Promise.all([
+    const [snapshots, movements, purchaseOrders, catalog, reorderRules] = await Promise.all([
       services.getInventorySnapshots(),
       services.listMovements(),
       services.listPurchaseOrders(),
       services.listCatalog(),
+      services.listReorderRules(),
     ]);
-    return { snapshots, movements, purchaseOrders, catalog };
+    return { snapshots, movements, purchaseOrders, catalog, reorderRules };
   });
 }
 
