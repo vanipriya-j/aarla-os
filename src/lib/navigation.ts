@@ -108,7 +108,7 @@ export const networkNav: NavItem[] = [
     label: "Inventory",
     href: "/inventory",
     icon: Package,
-    description: "Stock, batches and movement ledger.",
+    description: "Stock, replenishment, locations and movement ledger.",
   },
   {
     label: "Registrations",

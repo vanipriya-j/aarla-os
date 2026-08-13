@@ -3,17 +3,19 @@ import {
   batches,
   getLocation,
   locations,
-  products,
   purchaseOrdersSeed,
 } from "./catalog";
 import type {
+  AdjustmentReason,
   InventoryBalance,
   InventorySnapshot,
   Location,
   MovementType,
   Product,
+  ProductVariant,
   PurchaseOrder,
   StockMovement,
+  VariantStockCell,
 } from "./types";
 
 /** Location codes used when projecting inventory snapshots. */
@@ -437,17 +439,131 @@ export const movementsSeed: StockMovement[] = [
     reference: "OPEN-ART",
     notes: "Opening studio stock",
   },
+
+  // --- Kolam Framed Art — per-format variant stock ---
+  {
+    id: "mv-art-08-open",
+    date: "2026-07-05",
+    productId: "prod-kolam-art",
+    variantId: "var-art-08",
+    quantity: 12,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-ART-08",
+    notes: "8x10 format — opening studio stock",
+  },
+  {
+    id: "mv-art-12-open",
+    date: "2026-07-05",
+    productId: "prod-kolam-art",
+    variantId: "var-art-12",
+    quantity: 5,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-ART-12",
+    notes: "12x16 format — opening studio stock",
+  },
+  {
+    id: "mv-art-16-nimalli",
+    date: "2026-07-06",
+    productId: "prod-kolam-art",
+    variantId: "var-art-12",
+    quantity: 2,
+    fromLocationId: LOC.studio,
+    toLocationId: LOC.nimalli,
+    movementType: "Transfer",
+    reference: "TR-NIM-ART-12",
+    notes: "12x16 format — display piece",
+  },
+
+  // --- Chennai Kolam Tee — Size × Colour variant stock ---
+  {
+    id: "mv-tee-ind-s-open",
+    date: "2026-07-25",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-ind-s",
+    quantity: 24,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-IND-S",
+    notes: "Opening studio stock",
+  },
+  {
+    id: "mv-tee-ind-m-open",
+    date: "2026-07-25",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-ind-m",
+    quantity: 30,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-IND-M",
+    notes: "Opening studio stock",
+  },
+  {
+    id: "mv-tee-ind-l-open",
+    date: "2026-07-25",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-ind-l",
+    quantity: 3,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-IND-L",
+    notes: "Opening studio stock — low",
+  },
+  {
+    id: "mv-tee-mus-s-open",
+    date: "2026-07-25",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-mus-s",
+    quantity: 18,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-MUS-S",
+    notes: "Opening studio stock",
+  },
+  {
+    id: "mv-tee-mus-m-open",
+    date: "2026-07-25",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-mus-m",
+    quantity: 20,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.studio,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-MUS-M",
+    notes: "Opening studio stock",
+  },
+  {
+    id: "mv-tee-mus-l-freshly",
+    date: "2026-07-26",
+    productId: "prod-chennai-tee",
+    variantId: "var-tee-mus-l",
+    quantity: 6,
+    fromLocationId: LOC.external,
+    toLocationId: LOC.freshly,
+    movementType: "Purchase Receipt",
+    reference: "OPEN-TEE-MUS-L-FB",
+    notes: "Direct-to-partner opening stock",
+  },
 ];
 
-/** Pure: derive location balances from an ordered movement list. */
+/** Pure: derive variant-aware location balances from an ordered movement list. */
 export function deriveBalances(movements: StockMovement[]): InventoryBalance[] {
   const map = new Map<string, number>();
-  const key = (productId: string, locationId: string) => `${productId}::${locationId}`;
+  const key = (productId: string, variantId: string, locationId: string) =>
+    `${productId}::${variantId}::${locationId}`;
 
   for (const m of movements) {
     if (m.quantity <= 0) continue;
-    const fromKey = key(m.productId, m.fromLocationId);
-    const toKey = key(m.productId, m.toLocationId);
+    const variantId = m.variantId ?? "";
+    const fromKey = key(m.productId, variantId, m.fromLocationId);
+    const toKey = key(m.productId, variantId, m.toLocationId);
     map.set(fromKey, (map.get(fromKey) ?? 0) - m.quantity);
     map.set(toKey, (map.get(toKey) ?? 0) + m.quantity);
   }
@@ -455,18 +571,34 @@ export function deriveBalances(movements: StockMovement[]): InventoryBalance[] {
   const balances: InventoryBalance[] = [];
   for (const [k, quantity] of map.entries()) {
     if (quantity === 0) continue;
-    const [productId, locationId] = k.split("::");
-    balances.push({ productId, locationId, quantity });
+    const [productId, variantId, locationId] = k.split("::");
+    balances.push({ productId, variantId, locationId, quantity });
   }
   return balances;
 }
 
+/**
+ * Balance for a product at a location. Pass `variantId` for a single variant's balance;
+ * omit it to sum across all variants (and unspecified-variant movements) — backward compatible
+ * with product-level callers.
+ */
 export function balanceAt(
   balances: InventoryBalance[],
   productId: string,
   locationId: string,
+  variantId?: string,
 ): number {
-  return balances.find((b) => b.productId === productId && b.locationId === locationId)?.quantity ?? 0;
+  if (variantId !== undefined) {
+    return (
+      balances.find(
+        (b) =>
+          b.productId === productId && b.locationId === locationId && b.variantId === variantId,
+      )?.quantity ?? 0
+    );
+  }
+  return balances
+    .filter((b) => b.productId === productId && b.locationId === locationId)
+    .reduce((sum, b) => sum + b.quantity, 0);
 }
 
 /** Snapshot used by Inventory UI and dashboard. Catalog must be passed (DB-loaded or seed). */
@@ -511,10 +643,70 @@ export function partnerStockFor(
 ): { productId: string; quantity: number }[] {
   const loc = catalogLocations.find((l) => l.partnerId === partnerId);
   if (!loc) return [];
-  const balances = deriveBalances(movements).filter(
-    (b) => b.locationId === loc.id && b.quantity > 0,
+  const balances = deriveBalances(movements).filter((b) => b.locationId === loc.id);
+  const byProduct = new Map<string, number>();
+  for (const b of balances) {
+    byProduct.set(b.productId, (byProduct.get(b.productId) ?? 0) + b.quantity);
+  }
+  return Array.from(byProduct.entries())
+    .filter(([, quantity]) => quantity > 0)
+    .map(([productId, quantity]) => ({ productId, quantity }));
+}
+
+/** Variant-aware stock breakdown for a single product+variant across all locations. */
+export function deriveVariantLocationBreakdown(
+  movements: StockMovement[],
+  productId: string,
+  variantId: string,
+  catalogLocations: Location[],
+  locCodes: InventoryLocCodes = DEFAULT_INVENTORY_LOC,
+): VariantStockCell {
+  const balances = deriveBalances(movements);
+  const partnerLocIds = catalogLocations.filter((l) => l.kind === "Partner").map((l) => l.id);
+
+  const studio = Math.max(balanceAt(balances, productId, locCodes.studio, variantId), 0);
+  const partner = partnerLocIds.reduce(
+    (sum, locId) => sum + Math.max(balanceAt(balances, productId, locId, variantId), 0),
+    0,
   );
-  return balances.map((b) => ({ productId: b.productId, quantity: b.quantity }));
+  const channel = Math.max(balanceAt(balances, productId, locCodes.shopify, variantId), 0);
+  const damaged = Math.max(balanceAt(balances, productId, locCodes.damage, variantId), 0);
+  const total = studio + partner + channel;
+
+  const byLocation = catalogLocations
+    .map((loc) => ({
+      locationId: loc.id,
+      locationName: loc.name,
+      kind: loc.kind as string,
+      quantity: Math.max(balanceAt(balances, productId, loc.id, variantId), 0),
+    }))
+    .filter((l) => l.quantity > 0);
+
+  return {
+    productId,
+    variantId,
+    total,
+    studio,
+    partner,
+    channel,
+    damaged,
+    available: studio,
+    reserved: channel,
+    byLocation,
+  };
+}
+
+/** Variant-aware stock breakdown for every variant of a product. */
+export function deriveVariantTotals(
+  movements: StockMovement[],
+  productId: string,
+  variants: Pick<ProductVariant, "id">[],
+  catalogLocations: Location[],
+  locCodes: InventoryLocCodes = DEFAULT_INVENTORY_LOC,
+): VariantStockCell[] {
+  return variants.map((v) =>
+    deriveVariantLocationBreakdown(movements, productId, v.id, catalogLocations, locCodes),
+  );
 }
 
 export function registrationsFromPartner(partnerId: string, regCountFallback: number) {
@@ -576,7 +768,17 @@ export function appendMovements(entries: AppendMovementInput[]): StockMovement[]
   const current = getMovements();
   const existingFingerprints = new Set(current.map(movementFingerprint));
   const balances = deriveBalances(current);
-  const balMap = new Map(balances.map((b) => [`${b.productId}::${b.locationId}`, b.quantity]));
+  // Exact bucket (product+variant+location) drives commits; pooled bucket (product+location,
+  // summed across variants) is used to check entries that don't name a variant — backward
+  // compatible with product-level callers that predate variant tracking.
+  const exactMap = new Map(
+    balances.map((b) => [`${b.productId}::${b.variantId}::${b.locationId}`, b.quantity]),
+  );
+  const pooledMap = new Map<string, number>();
+  for (const b of balances) {
+    const k = `${b.productId}::${b.locationId}`;
+    pooledMap.set(k, (pooledMap.get(k) ?? 0) + b.quantity);
+  }
 
   const created: StockMovement[] = [];
   for (const e of entries) {
@@ -584,9 +786,14 @@ export function appendMovements(entries: AppendMovementInput[]): StockMovement[]
     const fp = movementFingerprint(e);
     if (existingFingerprints.has(fp)) continue;
 
-    const fromKey = `${e.productId}::${e.fromLocationId}`;
-    const toKey = `${e.productId}::${e.toLocationId}`;
-    const fromBal = balMap.get(fromKey) ?? 0;
+    const variantId = e.variantId ?? "";
+    const fromExactKey = `${e.productId}::${variantId}::${e.fromLocationId}`;
+    const toExactKey = `${e.productId}::${variantId}::${e.toLocationId}`;
+    const fromPooledKey = `${e.productId}::${e.fromLocationId}`;
+    const toPooledKey = `${e.productId}::${e.toLocationId}`;
+
+    const fromBal =
+      e.variantId !== undefined ? exactMap.get(fromExactKey) ?? 0 : pooledMap.get(fromPooledKey) ?? 0;
     const nextFrom = fromBal - e.quantity;
     if (e.fromLocationId !== LOC.external && nextFrom < 0) {
       continue;
@@ -607,8 +814,10 @@ export function appendMovements(entries: AppendMovementInput[]): StockMovement[]
     };
     created.push(movement);
     existingFingerprints.add(fp);
-    balMap.set(fromKey, nextFrom);
-    balMap.set(toKey, (balMap.get(toKey) ?? 0) + e.quantity);
+    exactMap.set(fromExactKey, (exactMap.get(fromExactKey) ?? 0) - e.quantity);
+    exactMap.set(toExactKey, (exactMap.get(toExactKey) ?? 0) + e.quantity);
+    pooledMap.set(fromPooledKey, (pooledMap.get(fromPooledKey) ?? 0) - e.quantity);
+    pooledMap.set(toPooledKey, (pooledMap.get(toPooledKey) ?? 0) + e.quantity);
   }
 
   if (!created.length) return [];
@@ -728,6 +937,7 @@ export function receiveAgainstPO(input: {
 
 export function transferToPartner(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
@@ -736,17 +946,20 @@ export function transferToPartner(input: {
   const loc = locations.find((l) => l.partnerId === input.partnerId);
   if (!loc || input.quantity <= 0) return null;
 
-  const snapshots = deriveInventorySnapshots(getMovements(), products, locations, DEFAULT_INVENTORY_LOC);
-  const snap = snapshots.find((s) => s.productId === input.productId);
-  if (!snap || snap.available < input.quantity) return null;
+  const balances = deriveBalances(getMovements());
+  const available = Math.max(balanceAt(balances, input.productId, LOC.studio, input.variantId), 0);
+  if (available < input.quantity) return null;
 
   const batch = batches.find((b) => b.productId === input.productId);
   const reference =
     input.reference ??
-    `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}-${input.quantity}`;
+    `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
+      input.variantId ? `-${input.variantId}` : ""
+    }-${input.quantity}`;
   const [created] = appendMovements([
     {
       productId: input.productId,
+      variantId: input.variantId,
       batchId: batch?.id,
       quantity: input.quantity,
       fromLocationId: LOC.studio,
@@ -761,6 +974,7 @@ export function transferToPartner(input: {
 
 export function recordPartnerSale(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
@@ -768,16 +982,19 @@ export function recordPartnerSale(input: {
 }): StockMovement | null {
   const loc = locations.find((l) => l.partnerId === input.partnerId);
   if (!loc || input.quantity <= 0) return null;
-  const bal = balanceAt(deriveBalances(getMovements()), input.productId, loc.id);
+  const bal = balanceAt(deriveBalances(getMovements()), input.productId, loc.id, input.variantId);
   if (bal < input.quantity) return null;
 
   const batch = batches.find((b) => b.productId === input.productId);
   const reference =
     input.reference ??
-    `PSALE-${input.partnerId}-${input.productId}-${input.quantity}`;
+    `PSALE-${input.partnerId}-${input.productId}${
+      input.variantId ? `-${input.variantId}` : ""
+    }-${input.quantity}`;
   const [created] = appendMovements([
     {
       productId: input.productId,
+      variantId: input.variantId,
       batchId: batch?.id,
       quantity: input.quantity,
       fromLocationId: loc.id,
@@ -788,6 +1005,97 @@ export function recordPartnerSale(input: {
     },
   ]);
   return created ?? null;
+}
+
+/** Pure: build a Transfer movement input (no I/O, no idempotency check). */
+export function buildTransferMovement(input: {
+  productId: string;
+  variantId?: string;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  batchId?: string;
+  notes?: string;
+  reference?: string;
+  date?: string;
+}): AppendMovementInput {
+  return {
+    productId: input.productId,
+    variantId: input.variantId,
+    batchId: input.batchId,
+    quantity: input.quantity,
+    fromLocationId: input.fromLocationId,
+    toLocationId: input.toLocationId,
+    movementType: "Transfer",
+    reference:
+      input.reference ??
+      `TR-${input.fromLocationId}-${input.toLocationId}-${input.productId}${
+        input.variantId ? `-${input.variantId}` : ""
+      }-${input.quantity}`,
+    notes: input.notes ?? "",
+    date: input.date,
+  };
+}
+
+export interface BuildAdjustmentMovementInput {
+  productId: string;
+  variantId?: string;
+  locationId: string;
+  /** Positive: stock found (External → location). Negative: stock lost (location → External). */
+  delta: number;
+  reason: AdjustmentReason;
+  notes?: string;
+  reference?: string;
+  /** Current balance at `locationId` — when provided, prevents a negative-delta adjustment from overdrawing it. */
+  currentQty?: number;
+  date?: string;
+}
+
+/**
+ * Pure: build an Adjustment movement input for a system-vs-physical count delta.
+ * Returns null for a zero delta, or when a negative delta would exceed known current stock.
+ */
+export function buildAdjustmentMovement(
+  input: BuildAdjustmentMovementInput,
+): AppendMovementInput | null {
+  const { delta } = input;
+  if (!Number.isFinite(delta) || delta === 0) return null;
+
+  const quantity = Math.abs(delta);
+  const reasonNote = `Adjustment (${input.reason})${input.notes ? ` — ${input.notes}` : ""}`;
+  const reference =
+    input.reference ??
+    `ADJ-${input.productId}${input.variantId ? `-${input.variantId}` : ""}-${
+      input.locationId
+    }-${input.reason.replace(/\s+/g, "-")}-${quantity}-${delta > 0 ? "in" : "out"}`;
+
+  if (delta > 0) {
+    return {
+      productId: input.productId,
+      variantId: input.variantId,
+      quantity,
+      fromLocationId: LOC.external,
+      toLocationId: input.locationId,
+      movementType: "Adjustment",
+      reference,
+      notes: reasonNote,
+      date: input.date,
+    };
+  }
+
+  if (input.currentQty !== undefined && quantity > input.currentQty) return null;
+
+  return {
+    productId: input.productId,
+    variantId: input.variantId,
+    quantity,
+    fromLocationId: input.locationId,
+    toLocationId: LOC.external,
+    movementType: "Adjustment",
+    reference,
+    notes: reasonNote,
+    date: input.date,
+  };
 }
 
 function getMovementsSnapshot() {

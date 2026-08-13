@@ -220,8 +220,9 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
     await client.query(
       `insert into products (
         id, organization_id, code, sku, title, category, world, story,
-        selling_price, cost, velocity, status, idea_origin, designed_date
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        selling_price, cost, velocity, status, idea_origin, designed_date,
+        inventory_presentation
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         stableId(p.id),
         ORG_ID,
@@ -237,13 +238,14 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
         p.status,
         p.ideaOrigin ?? null,
         emptyToNull(p.designedDate),
+        p.inventoryPresentation ?? "auto",
       ],
     );
     for (const variant of p.variants) {
       await client.query(
         `insert into product_variants (
-          id, organization_id, product_id, code, label, sku
-        ) values ($1,$2,$3,$4,$5,$6)`,
+          id, organization_id, product_id, code, label, sku, options
+        ) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
         [
           stableId(variant.id),
           ORG_ID,
@@ -251,6 +253,7 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
           variant.id,
           variant.label,
           variant.sku,
+          JSON.stringify(variant.options ?? {}),
         ],
       );
       variantCount += 1;
@@ -392,6 +395,56 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
         m.movementType,
         m.reference,
         m.notes,
+      ],
+    );
+  }
+
+  // --- inventory reorder rules (light demo set — replenishment worklist) ---
+  const reorderRulesSeed: {
+    productId: string;
+    variantId?: string;
+    partnerId?: string;
+    minQuantity: number;
+    notes: string;
+  }[] = [
+    {
+      productId: "prod-chennai-tee",
+      variantId: "var-tee-ind-l",
+      minQuantity: 10,
+      notes: "Indigo L runs out first — keep a buffer at studio.",
+    },
+    {
+      productId: "prod-chennai-tee",
+      variantId: "var-tee-mus-l",
+      partnerId: "partner-freshly",
+      minQuantity: 10,
+      notes: "Freshly Brewed needs a healthy Mustard L display stack.",
+    },
+    {
+      productId: "prod-kolam-art",
+      variantId: "var-art-12",
+      minQuantity: 8,
+      notes: "12x16 is the best seller — replenish before it's gone.",
+    },
+    {
+      productId: "prod-carnatic-tray",
+      minQuantity: 15,
+      notes: "Slow mover, but studio + partner combined must not run dry.",
+    },
+  ];
+  log(`inventory_reorder_rules (${reorderRulesSeed.length})…`);
+  for (const rule of reorderRulesSeed) {
+    await client.query(
+      `insert into inventory_reorder_rules (
+        id, organization_id, product_id, variant_id, partner_id, min_quantity, notes
+      ) values (gen_random_uuid(),$1,$2,$3,$4,$5,$6)`,
+      [
+        ORG_ID,
+        stableId(rule.productId),
+        rule.variantId ? stableId(rule.variantId) : null,
+        rule.partnerId ? stableId(rule.partnerId) : null,
+        rule.minQuantity,
+        rule.notes,
       ],
     );
   }

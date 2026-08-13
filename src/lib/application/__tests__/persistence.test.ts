@@ -1,14 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closePool } from "@/lib/infra/db/pool";
 import {
+  adjustStock,
   createManufacturingPO,
   getInventorySnapshots,
   healthCheck,
   listProducts,
   listPurchaseOrders,
+  listReorderRules,
   receiveAgainstPO,
   recordPartnerSale,
   registerProduct,
+  transferStock,
   transferToPartner,
 } from "@/lib/application/services";
 
@@ -94,6 +97,117 @@ describe.runIf(hasDb)("Postgres persistence (application services)", () => {
       reference: `PSALE-PERSIST-${runId}`,
     });
     expect(sale).not.toBeNull();
+  });
+
+  it("variant-aware partner transfer and sale move a specific variant's stock", async () => {
+    const productId = "prod-chennai-tee";
+    const variantId = "var-tee-ind-m";
+    const before = await getInventorySnapshots();
+    const productBefore = before.find((s) => s.productId === productId)!;
+
+    const mv = await transferToPartner({
+      productId,
+      variantId,
+      partnerId: "partner-nimalli",
+      quantity: 2,
+      reference: `TR-VARIANT-PERSIST-${runId}`,
+    });
+    expect(mv).not.toBeNull();
+    expect(mv?.variantId).toBe(variantId);
+
+    // Product-level snapshot still sums across variants (studio drops by exactly the transfer).
+    const after = await getInventorySnapshots();
+    const productAfter = after.find((s) => s.productId === productId)!;
+    expect(productAfter.studioStock).toBe(productBefore.studioStock - 2);
+
+    const sale = await recordPartnerSale({
+      productId,
+      variantId,
+      partnerId: "partner-nimalli",
+      quantity: 1,
+      reference: `PSALE-VARIANT-PERSIST-${runId}`,
+    });
+    expect(sale).not.toBeNull();
+    expect(sale?.variantId).toBe(variantId);
+  });
+
+  it("transferStock moves stock between arbitrary locations and persists", async () => {
+    const productId = "prod-chennai-tee";
+    const variantId = "var-tee-ind-s";
+    const before = await getInventorySnapshots();
+    const productBefore = before.find((s) => s.productId === productId)!;
+
+    const mv = await transferStock({
+      productId,
+      variantId,
+      fromLocationId: "loc-studio",
+      toLocationId: "loc-partner-ngs",
+      quantity: 3,
+      reference: `TR-GENERIC-PERSIST-${runId}`,
+    });
+    expect(mv).not.toBeNull();
+    expect(mv?.movementType).toBe("Transfer");
+
+    const after = await getInventorySnapshots();
+    const productAfter = after.find((s) => s.productId === productId)!;
+    expect(productAfter.studioStock).toBe(productBefore.studioStock - 3);
+    expect(productAfter.partnerStock).toBe(productBefore.partnerStock + 3);
+  });
+
+  it("transferStock rejects a transfer that would overdraw the source location", async () => {
+    const mv = await transferStock({
+      productId: "prod-chennai-tee",
+      variantId: "var-tee-ind-l", // seeded with only 3 units in studio
+      fromLocationId: "loc-studio",
+      toLocationId: "loc-partner-ngs",
+      quantity: 999,
+      reference: `TR-GENERIC-NEG-${runId}`,
+    });
+    expect(mv).toBeNull();
+  });
+
+  it("adjustStock writes a compensating Adjustment movement and updates derived stock", async () => {
+    const productId = "prod-kolam-art";
+    const variantId = "var-art-08";
+    const before = await getInventorySnapshots();
+    const productBefore = before.find((s) => s.productId === productId)!;
+
+    const mv = await adjustStock({
+      productId,
+      variantId,
+      locationId: "loc-studio",
+      systemQty: productBefore.studioStock,
+      physicalQty: productBefore.studioStock + 4,
+      reason: "count correction",
+      notes: `persistence test ${runId}`,
+    });
+    expect(mv).not.toBeNull();
+    expect(mv?.movementType).toBe("Adjustment");
+    expect(mv?.fromLocationId).toBe("loc-external");
+    expect(mv?.toLocationId).toBe("loc-studio");
+
+    const after = await getInventorySnapshots();
+    const productAfter = after.find((s) => s.productId === productId)!;
+    expect(productAfter.studioStock).toBe(productBefore.studioStock + 4);
+  });
+
+  it("adjustStock returns null for a zero delta", async () => {
+    const productId = "prod-kolam-art";
+    const snap = (await getInventorySnapshots()).find((s) => s.productId === productId)!;
+    const mv = await adjustStock({
+      productId,
+      locationId: "loc-studio",
+      systemQty: snap.studioStock,
+      physicalQty: snap.studioStock,
+      reason: "other",
+    });
+    expect(mv).toBeNull();
+  });
+
+  it("reorder rules seeded for the demo org load from the database", async () => {
+    const rules = await listReorderRules();
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules.some((r) => r.productId === "prod-chennai-tee")).toBe(true);
   });
 
   it("registration persists", async () => {

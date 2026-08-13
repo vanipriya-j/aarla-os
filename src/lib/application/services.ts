@@ -3,11 +3,13 @@ import { assertDatabaseAvailable } from "@/lib/infra/db/pool";
 import { createPostgresUnitOfWork } from "@/lib/infra/repositories/postgres-unit-of-work";
 import { projectProductJourney } from "@/lib/domain/journey";
 import type {
+  AdjustmentReason,
   InventorySnapshot,
   Person,
   Product,
   ProductRegistration,
   PurchaseOrder,
+  ReorderRule,
   StockMovement,
 } from "@/lib/domain/types";
 
@@ -99,6 +101,7 @@ export async function receiveAgainstPO(input: {
 
 export async function transferToPartner(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
@@ -109,12 +112,41 @@ export async function transferToPartner(input: {
 
 export async function recordPartnerSale(input: {
   productId: string;
+  variantId?: string;
   partnerId: string;
   quantity: number;
   notes?: string;
   reference?: string;
 }) {
   return engine().recordPartnerSale(input);
+}
+
+export async function transferStock(input: {
+  productId: string;
+  variantId?: string;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  notes?: string;
+  reference?: string;
+}) {
+  return engine().transferStock(input);
+}
+
+export async function adjustStock(input: {
+  productId: string;
+  variantId?: string;
+  locationId: string;
+  systemQty: number;
+  physicalQty: number;
+  reason: AdjustmentReason;
+  notes?: string;
+}) {
+  return engine().adjustStock(input);
+}
+
+export async function listReorderRules(): Promise<ReorderRule[]> {
+  return engine().listReorderRules();
 }
 
 export async function listPeople(): Promise<Person[]> {

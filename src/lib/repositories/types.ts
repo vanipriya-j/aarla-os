@@ -6,6 +6,7 @@ import type {
   Product,
   ProductRegistration,
   PurchaseOrder,
+  ReorderRule,
   StockMovement,
   Vendor,
 } from "@/lib/domain/types";
@@ -72,6 +73,11 @@ export interface RegistrationRepository {
   create(reg: ProductRegistration): Promise<ProductRegistration>;
 }
 
+export interface ReorderRuleRepository {
+  list(): Promise<ReorderRule[]>;
+  upsert(rule: Omit<ReorderRule, "id"> & { id?: string }): Promise<ReorderRule>;
+}
+
 export interface OpsRepository {
   listProjects(): Promise<unknown[]>;
   listContentTasks(): Promise<unknown[]>;
@@ -101,5 +107,6 @@ export interface UnitOfWork {
   movements: StockMovementRepository;
   people: PersonRepository;
   registrations: RegistrationRepository;
+  reorderRules: ReorderRuleRepository;
   ops: OpsRepository;
 }

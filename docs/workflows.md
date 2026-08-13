@@ -39,3 +39,14 @@ Sample projects with status, deadline, budget, capital, products, vendors, tasks
 ## 10. Business Dashboard (`/dashboard`)
 
 Revenue, orders, AOV, margin, capital blocked, fast/slow movers, pending manufacturing, receivables, upcoming launches, channel mix, mock revenue chart.
+
+## 11. Inventory & Replenishment (`/inventory`)
+
+Tabs: **Stock** | **Replenishment** | **Locations** | **Movements** (deep-link with `?tab=`; the old `?tab=products` and `?tab=batches` still resolve — to Stock and Locations respectively).
+
+- **Stock** — products grouped by category. `resolvePresentation()` picks the layout per product: `matrix-apparel` (Colour × Size), `matrix-art` (Design × Format), or a plain variant `list`. Every cell/row shows the variant's total on-hand and is clickable; a "low" marker/chip appears when a variant falls under its `ReorderRule` minimum. Clicking opens the **Variant Stock Detail** drawer — total, available (=Studio), reserved (=Channel/Shopify), damaged, and a full by-location breakdown — with **Transfer** and **Adjust** actions.
+- **Transfer** — From location / To location / Quantity / notes → `transferStock({ productId, variantId, fromLocationId, toLocationId, quantity, notes })`. Writes a `Transfer` movement; fails safely (no movement written) if the source location doesn't have enough stock.
+- **Adjust** — pick a location, see its system quantity, enter a physical count and a reason (`missing` | `damaged` | `count correction` | `other`) → `adjustStock({ productId, variantId, locationId, systemQty, physicalQty, reason, notes })`. Writes a compensating `Adjustment` movement for the delta only (no-op when the count matches).
+- **Replenishment** — `computeReplenishment()` turns reorder rules + ledger balances into three worklists: **A. Aarla Low Stock** (studio under minimum), **B. Partner Replenishment Needed** (a specific partner under its partner-scoped minimum), **C. Global Low Stock** (studio + partner combined under minimum). Each row suggests Transfer (opens the Transfer modal, prefilled Studio ⇄ partner) or Manufacture/Reorder (links to `/manufacture`).
+- **Locations / Movements** — read-only location cards (with a folded-in Batches table) and the full movement ledger, unchanged from the prior Inventory screen.
+- Shopify is never double-counted: the Shopify/Channel location is treated purely as `reserved` stock already derived from the ledger — there is no separate call to the Shopify inventory API from this screen.
