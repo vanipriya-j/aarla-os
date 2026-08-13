@@ -36,11 +36,24 @@ Formats: Instagram, Reel, LinkedIn, Pinterest, WhatsApp, Product story, Founder 
 
 Sample projects with status, deadline, budget, capital, products, vendors, tasks, MOs, content, risks, notes. Detail pages at `/projects/[id]`.
 
-## 10. Business Dashboard (`/dashboard`)
+## 10. This Week (`/weekly`)
+
+Weekly operating board (Mon–Sun, `Asia/Kolkata`): are we doing what we need to do this week?
+
+- **Orders & revenue** — from live `external_orders` (`is_valid`, INR). Shows today, week-to-date, daily average, weekly target, and a Mon–Sun daily strip.
+- **Followers & views** — manual entry for the week (`operating_manual_metrics`). Not pulled from Instagram APIs yet.
+- **Targets** — org defaults in `operating_targets` (+50 followers/week, 50k views/week, 5 orders/day, ₹3500/day). Status chips: ON TRACK / AT RISK / BEHIND / DONE from pace vs expected-by-now.
+- **Retailers** — active Retail Partner + Café locations; completed = Transfer into that partner location during the week.
+- **Vendors** — open POs vs Received this week (links to `/manufacture`).
+- Nav label **This Week**; Business Dashboard (`/dashboard`) is unchanged. No AI/RAG.
+
+After deploy, run `/setup` with **Load demo data unchecked** so `operating_*` tables exist without wiping commerce data.
+
+## 11. Business Dashboard (`/dashboard`)
 
 Revenue, orders, AOV, margin, capital blocked, fast/slow movers, pending manufacturing, receivables, upcoming launches, channel mix, mock revenue chart.
 
-## 11. Inventory & Replenishment (`/inventory`)
+## 12. Inventory & Replenishment (`/inventory`)
 
 Tabs: **Stock** | **Replenishment** | **Locations** | **Movements** (deep-link with `?tab=`; the old `?tab=products` and `?tab=batches` still resolve — to Stock and Locations respectively).
 
