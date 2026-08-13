@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { upsertManualMetricAction } from "@/app/actions/operating-metrics-actions";
 
 type Props = {
@@ -17,12 +17,6 @@ export function ManualMetricEditor({ weekStart, followers, views, onSaved }: Pro
   );
   const [viewsValue, setViewsValue] = useState(views !== null ? String(views) : "");
   const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    setFollowersValue(followers !== null ? String(followers) : "");
-    setViewsValue(views !== null ? String(views) : "");
-    setMessage(null);
-  }, [weekStart, followers, views]);
 
   function save(kind: "followers" | "views", raw: string) {
     const parsed = Number(raw);

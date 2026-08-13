@@ -216,6 +216,7 @@ export default function WeeklyBoardPage() {
             </section>
 
             <ManualMetricEditor
+              key={`${board.weekStart}:${board.manualMetrics.followers.updatedAt ?? "none"}:${board.manualMetrics.views.updatedAt ?? "none"}`}
               weekStart={board.weekStart}
               followers={
                 board.manualMetrics.followers.updatedAt !== null
