@@ -32,6 +32,21 @@ export type UpsertOrderInput = {
   totalAmount: number;
   currency: string;
   contactPhone?: string | null;
+  taxesIncluded?: boolean | null;
+  subtotalAmount?: number | null;
+  totalDiscounts?: number | null;
+  shippingAmount?: number | null;
+  shippingTax?: number | null;
+  totalTax?: number | null;
+  cgst?: number | null;
+  sgst?: number | null;
+  igst?: number | null;
+  taxableAmount?: number | null;
+  totalRefunded?: number | null;
+  shippingProvince?: string | null;
+  shippingCountry?: string | null;
+  customerGstin?: string | null;
+  taxLines?: Array<{ title: string | null; price: number; rate: number | null }>;
   lineItems: Array<{
     externalLineItemId: string;
     externalProductId: string | null;
@@ -94,6 +109,8 @@ export interface ExternalCommerceRepository {
   upsertFulfilment(input: UpsertFulfilmentInput): Promise<UpsertResult>;
   /** Ensure contact_phone column exists (safe if migration not recorded). */
   ensureOrderContactPhoneSchema(): Promise<void>;
+  /** Ensure GST / tax columns exist (safe if migration not recorded). */
+  ensureOrderTaxSchema(): Promise<void>;
   /** Delivered orders still missing both customer + order phone. */
   listDeliveredOrdersMissingPhone(limit?: number): Promise<
     Array<{ orderNumber: string; customerExternalId: string }>

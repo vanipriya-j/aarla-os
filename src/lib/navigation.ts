@@ -16,6 +16,7 @@ import {
   Rocket,
   Phone,
   Activity,
+  Receipt,
   ScanLine,
   Store,
   Truck,
@@ -91,10 +92,26 @@ export const primaryTiles: NavItem[] = [
     description: "Weekly operating board — targets vs actuals.",
   },
   {
+    label: "GST Reconciliation",
+    href: "/finance/gst",
+    icon: Receipt,
+    description: "Monthly sales & purchase capture for your accountant.",
+  },
+  {
     label: "Business Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
     description: "Revenue, capital and movement at a glance.",
+  },
+];
+
+/** Finance workflows — also listed in primaryTiles for home/sidebar. */
+export const financeNav: NavItem[] = [
+  {
+    label: "GST Reconciliation",
+    href: "/finance/gst",
+    icon: Receipt,
+    description: "Monthly sales & purchase capture for your accountant.",
   },
 ];
 

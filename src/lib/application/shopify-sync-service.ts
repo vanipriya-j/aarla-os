@@ -80,6 +80,8 @@ export async function syncShopifyCustomerCallData(
   const mode = deps.mode === "full" ? "full" : "incremental";
   summary.mode = mode;
 
+  await repo.ensureOrderTaxSchema();
+
   let query: string | null = null;
   if (mode === "incremental") {
     const watermark = await getShopifyOrdersWatermark();
@@ -221,6 +223,21 @@ export async function syncShopifyCustomerCallData(
         totalAmount: order.totalAmount,
         currency: order.currency,
         contactPhone: order.contactPhone ?? null,
+        taxesIncluded: order.taxesIncluded ?? null,
+        subtotalAmount: order.subtotalAmount ?? null,
+        totalDiscounts: order.totalDiscounts ?? null,
+        shippingAmount: order.shippingAmount ?? null,
+        shippingTax: order.shippingTax ?? null,
+        totalTax: order.totalTax ?? null,
+        cgst: order.cgst ?? null,
+        sgst: order.sgst ?? null,
+        igst: order.igst ?? null,
+        taxableAmount: order.taxableAmount ?? null,
+        totalRefunded: order.totalRefunded ?? null,
+        shippingProvince: order.shippingProvince ?? null,
+        shippingCountry: order.shippingCountry ?? null,
+        customerGstin: order.customerGstin ?? null,
+        taxLines: order.taxLines ?? [],
         lineItems: order.lineItems,
       });
       if (result.created) summary.ordersAdded += 1;
