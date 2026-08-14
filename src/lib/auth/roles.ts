@@ -29,6 +29,8 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/auth/logout",
   "/setup",
   "/api/setup",
+  // Machine callers (Shopify) — route still gated by SHOPIFY_INTEGRATION_SECRET.
+  "/api/integrations/shopify/reservations",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

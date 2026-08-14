@@ -91,9 +91,46 @@ Invalid / flagged (still stored when possible):
 
 Shopify fulfilment tracking is **not** treated as proof of physical delivery.
 
+## Soft reserve API (Shopify → Aarla OS)
+
+WhatsApp / checkout assist on Shopify can soft-hold Studio stock without moving the ledger.
+
+```
+Shopify (server / app proxy)
+  → POST /api/integrations/shopify/reservations
+       Authorization: Bearer <SHOPIFY_INTEGRATION_SECRET>
+       body: { externalReference, quantity, sku | productId, variantId? }
+  → createShopifyReservation(...)
+       → idempotent on externalReference
+       → Studio available = ledger Studio − active soft holds
+       → insert channel_reservations (no stock_movements)
+  → response always includes continueWhatsApp: true  # fail-safe
+```
+
+### Auth (server-only)
+
+```
+SHOPIFY_INTEGRATION_SECRET=…   # long random; not the Shopify Admin token
+```
+
+Path is public to cookie auth (machine callers) but gated by this secret. Prefer
+`Authorization: Bearer …` or header `x-aarla-integration-secret`.
+
+### Request / response
+
+- **Required:** `externalReference` (idempotent key), `quantity` (positive int), and `sku` **or** `productId` (optional `variantId`)
+- **Optional:** `contactPhone`, `contactName`, `notes`, `metadata`
+- **Success `200`:** `{ ok: true, data: ChannelReservation, continueWhatsApp: true }`
+- **Fail soft `4xx`:** `{ ok: false, code, error, continueWhatsApp: true, … }` — Shopify should **still** continue the WhatsApp path
+- Codes: `validation_error`, `product_not_found`, `insufficient_stock`
+
+Does **not** Transfer Studio → Channel and does **not** call Shopify Inventory APIs.
+Channel “reserved” in Inventory UI remains ledger qty only.
+
 ## Out of scope
 
 - Delhivery tracking API (see `docs/delhivery-connector.md`)
 - AI / RAG
+- WhatsApp send provider (Shopify owns the WhatsApp UX)
 
 Call-queue eligibility is built from synced `external_*` + `shipments` via **Refresh call queues** (see `docs/customer-calls.md`).

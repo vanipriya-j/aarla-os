@@ -7,7 +7,7 @@ Aarla OS supports two shared logins via a sign-in form and HttpOnly cookies.
 | **admin** | Full founder OS (all pages + `/setup` + diagnostics) |
 | **crm** | Outreach only: `/customer-calls` and `/api/commerce/sync/*` |
 
-`/api/health` stays public for uptime checks. `/login` and `/api/auth/login` are public so users can sign in. `/setup` and `/api/setup` stay public so you can migrate (including `auth_sessions`) before the first login — `/api/setup` still requires `SETUP_SECRET`.
+`/api/health` stays public for uptime checks. `/login` and `/api/auth/login` are public so users can sign in. `/setup` and `/api/setup` stay public so you can migrate (including `auth_sessions`) before the first login — `/api/setup` still requires `SETUP_SECRET`. `POST /api/integrations/shopify/reservations` is public to cookie auth (Shopify machine callers) but gated by `SHOPIFY_INTEGRATION_SECRET`.
 
 ## Enable (Vercel / production)
 
