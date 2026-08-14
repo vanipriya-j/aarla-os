@@ -3,8 +3,9 @@ import {
   canSoftReserve,
   resolveCatalogTarget,
   softAvailableStudio,
+  studioLedgerAvailable,
 } from "@/lib/domain/channel-reservation";
-import type { Product } from "@/lib/domain/types";
+import type { InventoryBalance, Product } from "@/lib/domain/types";
 
 const products: Product[] = [
   {
@@ -36,6 +37,19 @@ const products: Product[] = [
     velocity: "Fast",
     status: "Active",
   },
+  {
+    id: "prod-book",
+    sku: "BOOK",
+    title: "Story Book",
+    category: "Books",
+    world: "Amman",
+    story: "",
+    variants: [{ id: "var-std", label: "Standard", sku: "BOOK" }],
+    sellingPrice: 500,
+    cost: 200,
+    velocity: "Steady",
+    status: "Active",
+  },
 ];
 
 describe("channel reservation domain", () => {
@@ -53,6 +67,11 @@ describe("channel reservation domain", () => {
     const target = resolveCatalogTarget(products, { sku: "MAGNET" });
     expect(target?.productId).toBe("prod-magnet");
     expect(target?.variantId).toBeNull();
+  });
+
+  it("resolves shared product/variant SKU to the variant", () => {
+    const target = resolveCatalogTarget(products, { sku: "BOOK" });
+    expect(target?.variantId).toBe("var-std");
   });
 
   it("resolves by productId + variantId", () => {
@@ -74,5 +93,27 @@ describe("channel reservation domain", () => {
     expect(canSoftReserve(7, 7)).toBe(true);
     expect(canSoftReserve(7, 8)).toBe(false);
     expect(canSoftReserve(1, 0)).toBe(false);
+  });
+
+  it("attributes unspecified-variant Studio stock for single-variant products", () => {
+    const balances: InventoryBalance[] = [
+      { productId: "prod-book", variantId: "", locationId: "loc-studio", quantity: 40 },
+      { productId: "prod-bottle", variantId: "", locationId: "loc-studio", quantity: 9 },
+      {
+        productId: "prod-bottle",
+        variantId: "var-black-m",
+        locationId: "loc-studio",
+        quantity: 2,
+      },
+    ];
+    expect(
+      studioLedgerAvailable(balances, products, "prod-book", "var-std", "loc-studio"),
+    ).toBe(40);
+    expect(
+      studioLedgerAvailable(balances, products, "prod-bottle", "var-black-m", "loc-studio"),
+    ).toBe(2);
+    expect(
+      studioLedgerAvailable(balances, products, "prod-magnet", null, "loc-studio"),
+    ).toBe(0);
   });
 });

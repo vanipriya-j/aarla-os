@@ -1,5 +1,6 @@
-import type { Product } from "@/lib/domain/types";
+import type { InventoryBalance, Product } from "@/lib/domain/types";
 import type { ResolvedCatalogTarget } from "@/lib/domain/channel-reservation-types";
+import { balanceAt } from "@/lib/domain/ledger";
 
 /**
  * Resolve a catalog target from SKU and/or product/variant domain codes.
@@ -59,6 +60,37 @@ export function resolveCatalogTarget(
   }
 
   return null;
+}
+
+/**
+ * Studio ledger qty for a soft-reserve target.
+ * Product-level (no variant): sum across all variant buckets.
+ * Variant target: that variant's qty; if the product has ≤1 variant, also
+ * include unspecified-variant (legacy product-level) movements so SKU holds work.
+ */
+export function studioLedgerAvailable(
+  balances: InventoryBalance[],
+  products: Product[],
+  productId: string,
+  variantId: string | null,
+  studioLocationId: string,
+): number {
+  if (variantId == null) {
+    return Math.max(0, balanceAt(balances, productId, studioLocationId));
+  }
+  const specific = Math.max(
+    0,
+    balanceAt(balances, productId, studioLocationId, variantId),
+  );
+  const product = products.find((p) => p.id === productId);
+  if (product && product.variants.length <= 1) {
+    const unspecified = Math.max(
+      0,
+      balanceAt(balances, productId, studioLocationId, ""),
+    );
+    return specific + unspecified;
+  }
+  return specific;
 }
 
 /**

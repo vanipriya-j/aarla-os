@@ -2,13 +2,14 @@ import {
   canSoftReserve,
   resolveCatalogTarget,
   softAvailableStudio,
+  studioLedgerAvailable,
 } from "@/lib/domain/channel-reservation";
 import type {
   CreateChannelReservationInput,
   CreateChannelReservationResult,
 } from "@/lib/domain/channel-reservation-types";
 import { LOC_CODES } from "@/lib/engine/business-engine";
-import { balanceAt, deriveBalances } from "@/lib/domain/ledger";
+import { deriveBalances } from "@/lib/domain/ledger";
 import { createPostgresUnitOfWork } from "@/lib/infra/repositories/postgres-unit-of-work";
 import { createChannelReservationRepository } from "@/lib/infra/repositories/postgres-channel-reservations";
 import {
@@ -88,14 +89,12 @@ export async function createShopifyReservation(
   }
 
   const balances = deriveBalances(movements);
-  const studioBalance = Math.max(
-    balanceAt(
-      balances,
-      target.productId,
-      LOC_CODES.studio,
-      target.variantId ?? undefined,
-    ),
-    0,
+  const studioBalance = studioLedgerAvailable(
+    balances,
+    products,
+    target.productId,
+    target.variantId,
+    LOC_CODES.studio,
   );
   const alreadyReserved = await repo().sumActiveQuantity(
     target.productId,

@@ -66,7 +66,7 @@ describe.runIf(hasDb)("Shopify soft reservation service", () => {
          from_location_id, to_location_id, movement_type, reference, notes
        ) values (
          gen_random_uuid(), $1, $2, current_date, $3, null, 25,
-         $4, $5, 'Receive', $6, 'test soft reserve stock'
+         $4, $5, 'Purchase Receipt', $6, 'test soft reserve stock'
        )`,
       [
         ORG_ID,
