@@ -51,11 +51,6 @@ function numOrNull(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function boolOrNull(value: unknown): boolean | null {
-  if (value == null) return null;
-  return Boolean(value);
-}
-
 function mapSettings(r: {
   organization_id: string;
   legal_name: string;
@@ -151,14 +146,13 @@ function salesTaxComplete(row: {
   cgst: string | number | null;
   sgst: string | number | null;
   igst: string | number | null;
-  total_tax: string | number | null;
 }): boolean {
   const taxable = numOrNull(row.taxable_amount);
   if (taxable == null) return false;
   const cgst = numOrNull(row.cgst);
   const sgst = numOrNull(row.sgst);
   const igst = numOrNull(row.igst);
-  // At least one GST component captured (or explicit zeros with total_tax known).
+  // At least one GST component captured (zeros count as captured).
   if (cgst == null && sgst == null && igst == null) return false;
   return true;
 }
