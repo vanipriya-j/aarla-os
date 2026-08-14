@@ -17,6 +17,7 @@ A single founder operating Aarla day to day.
 | Prepare a product for launch | Launch Products |
 | Plan multi-channel content | Content Studio |
 | Track Worlds, clients and trips | Projects |
+| Know if this week’s ops targets are on track | This Week |
 | See capital, revenue and movement | Business Dashboard |
 
 ## Home

@@ -8,6 +8,7 @@ import {
   Factory,
   FolderKanban,
   LayoutDashboard,
+  CalendarRange,
   MessageCircleHeart,
   Package,
   PackageCheck,
@@ -82,6 +83,12 @@ export const primaryTiles: NavItem[] = [
     href: "/projects",
     icon: FolderKanban,
     description: "Track Worlds, trips and client work.",
+  },
+  {
+    label: "This Week",
+    href: "/weekly",
+    icon: CalendarRange,
+    description: "Weekly operating board — targets vs actuals.",
   },
   {
     label: "Business Dashboard",

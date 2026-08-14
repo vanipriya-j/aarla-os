@@ -730,6 +730,17 @@ export async function runSeedDemo(client: DbClient): Promise<void> {
     );
   }
 
+  // --- Weekly Operating Board: typed defaults (idempotent) ---
+  log("operating_targets…");
+  await client.query(
+    `insert into operating_targets (
+      organization_id, followers_per_week, views_per_week, orders_per_day,
+      revenue_per_day, timezone
+    ) values ($1,$2,$3,$4,$5,$6)
+    on conflict (organization_id) do nothing`,
+    [ORG_ID, 50, 50000, 5, 3500, "Asia/Kolkata"],
+  );
+
   // --- Aarla Universe creative graph ---
   await seedUniverse(client);
 
