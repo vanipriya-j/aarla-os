@@ -79,7 +79,8 @@ describe("role-based credentials + cookie sessions", () => {
     const admin = navForRole("admin");
     expect(admin.showHome).toBe(true);
     expect(admin.outreach.some((i) => i.href === "/diagnostics")).toBe(true);
-    expect(admin.workflows.some((i) => i.href === "/finance/gst")).toBe(true);
+    expect(admin.finance.some((i) => i.href === "/finance/gst")).toBe(true);
+    expect(crm.finance).toHaveLength(0);
   });
 
   it("disables auth when no passwords are set", () => {

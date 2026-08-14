@@ -57,7 +57,7 @@ Monthly GST **preparation** board — not GST filing / GSTN software and not tax
 - **Purchases** — manual tax-invoice bills (`purchase_bills`), separate from manufacturing POs. Arithmetic and duplicate checks flag blockers.
 - **Period status** — Collecting → Needs Review → Ready. **Mark Sent** on an accountant pack sets Sent (download + mark-sent channel).
 - **Accountant pack** — immutable Excel snapshot (Summary, Sales, Purchases, Refunds / Credits, Exceptions, Source Summary). Download the file and share outside the app.
-- After deploy, **re-sync Shopify** (full or incremental catch-up) so order tax columns populate. Run `/setup` (migrations only) for GST tables.
+- After deploy of this migration set, **re-sync Shopify** (full or incremental catch-up) so order tax columns populate. Do **not** run `/setup` until after PR 8 is merged (one clean migrations-only setup then).
 
 ## 12. Business Dashboard (`/dashboard`)
 

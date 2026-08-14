@@ -92,12 +92,6 @@ export const primaryTiles: NavItem[] = [
     description: "Weekly operating board — targets vs actuals.",
   },
   {
-    label: "GST Reconciliation",
-    href: "/finance/gst",
-    icon: Receipt,
-    description: "Monthly sales & purchase capture for your accountant.",
-  },
-  {
     label: "Business Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
@@ -105,7 +99,7 @@ export const primaryTiles: NavItem[] = [
   },
 ];
 
-/** Finance workflows — also listed in primaryTiles for home/sidebar. */
+/** Finance — GST preparation only (not a general accounting module). */
 export const financeNav: NavItem[] = [
   {
     label: "GST Reconciliation",
@@ -172,6 +166,7 @@ export const sidebarNav: NavItem[] = [
     description: "Today’s operating view",
   },
   ...primaryTiles,
+  ...financeNav,
   ...networkNav,
   ...outreachNav,
   {
