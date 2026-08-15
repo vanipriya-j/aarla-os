@@ -73,6 +73,33 @@ export function Sidebar() {
           </>
         ) : null}
 
+        {nav.finance.length > 0 ? (
+          <>
+            <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+              Finance
+            </p>
+            {nav.finance.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  data-testid="nav-gst-reconciliation"
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                    active
+                      ? "bg-aarla-red text-white"
+                      : "text-deep-navy hover:bg-pale-cream"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                  <span className="font-medium leading-snug">{item.label}</span>
+                </Link>
+              );
+            })}
+          </>
+        ) : null}
+
         {nav.network.length > 0 ? (
           <>
             <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">

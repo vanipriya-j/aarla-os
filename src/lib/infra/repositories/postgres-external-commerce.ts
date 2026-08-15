@@ -202,6 +202,8 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
         [ORG_ID, input.provider, input.externalId],
       );
 
+      const taxLinesJson = JSON.stringify(input.taxLines ?? []);
+
       let orderId: string;
       let created: boolean;
       if (existing[0]) {
@@ -221,6 +223,21 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
              total_amount = $12,
              currency = $13,
              contact_phone = coalesce(nullif(btrim($14), ''), contact_phone),
+             taxes_included = $15,
+             subtotal_amount = $16,
+             total_discounts = $17,
+             shipping_amount = $18,
+             shipping_tax = $19,
+             total_tax = $20,
+             cgst = $21,
+             sgst = $22,
+             igst = $23,
+             taxable_amount = $24,
+             total_refunded = $25,
+             shipping_province = $26,
+             shipping_country = $27,
+             customer_gstin = $28,
+             tax_lines_json = $29::jsonb,
              last_synced_at = now()
            where id = $1 and organization_id = $2`,
           [
@@ -238,6 +255,21 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.totalAmount,
             input.currency,
             input.contactPhone ?? null,
+            input.taxesIncluded ?? null,
+            input.subtotalAmount ?? null,
+            input.totalDiscounts ?? null,
+            input.shippingAmount ?? null,
+            input.shippingTax ?? null,
+            input.totalTax ?? null,
+            input.cgst ?? null,
+            input.sgst ?? null,
+            input.igst ?? null,
+            input.taxableAmount ?? null,
+            input.totalRefunded ?? null,
+            input.shippingProvince ?? null,
+            input.shippingCountry ?? null,
+            input.customerGstin ?? null,
+            taxLinesJson,
           ],
         );
       } else {
@@ -247,8 +279,15 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
              organization_id, provider, external_id, order_number, external_customer_id,
              order_date, financial_status, fulfilment_status, cancelled_at,
              is_test, is_valid, exclusion_reason, total_amount, currency, contact_phone,
+             taxes_included, subtotal_amount, total_discounts, shipping_amount, shipping_tax,
+             total_tax, cgst, sgst, igst, taxable_amount, total_refunded,
+             shipping_province, shipping_country, customer_gstin, tax_lines_json,
              last_synced_at
-           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())
+           ) values (
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+             $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,
+             now()
+           )
            returning id`,
           [
             ORG_ID,
@@ -266,6 +305,21 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.totalAmount,
             input.currency,
             input.contactPhone ?? null,
+            input.taxesIncluded ?? null,
+            input.subtotalAmount ?? null,
+            input.totalDiscounts ?? null,
+            input.shippingAmount ?? null,
+            input.shippingTax ?? null,
+            input.totalTax ?? null,
+            input.cgst ?? null,
+            input.sgst ?? null,
+            input.igst ?? null,
+            input.taxableAmount ?? null,
+            input.totalRefunded ?? null,
+            input.shippingProvince ?? null,
+            input.shippingCountry ?? null,
+            input.customerGstin ?? null,
+            taxLinesJson,
           ],
         );
         orderId = rows[0]!.id;
@@ -305,6 +359,29 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
         alter table external_orders
           add column if not exists contact_phone text
       `);
+    },
+
+    async ensureOrderTaxSchema() {
+      const alters = [
+        `alter table external_orders add column if not exists taxes_included boolean`,
+        `alter table external_orders add column if not exists subtotal_amount numeric(12,2)`,
+        `alter table external_orders add column if not exists total_discounts numeric(12,2)`,
+        `alter table external_orders add column if not exists shipping_amount numeric(12,2)`,
+        `alter table external_orders add column if not exists shipping_tax numeric(12,2)`,
+        `alter table external_orders add column if not exists total_tax numeric(12,2)`,
+        `alter table external_orders add column if not exists cgst numeric(12,2)`,
+        `alter table external_orders add column if not exists sgst numeric(12,2)`,
+        `alter table external_orders add column if not exists igst numeric(12,2)`,
+        `alter table external_orders add column if not exists taxable_amount numeric(12,2)`,
+        `alter table external_orders add column if not exists total_refunded numeric(12,2)`,
+        `alter table external_orders add column if not exists shipping_province text`,
+        `alter table external_orders add column if not exists shipping_country text`,
+        `alter table external_orders add column if not exists customer_gstin text`,
+        `alter table external_orders add column if not exists tax_lines_json jsonb not null default '[]'::jsonb`,
+      ];
+      for (const sql of alters) {
+        await q(sql);
+      }
     },
 
     async listDeliveredOrdersMissingPhone(limit = 40) {

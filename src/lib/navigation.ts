@@ -16,6 +16,7 @@ import {
   Rocket,
   Phone,
   Activity,
+  Receipt,
   ScanLine,
   Store,
   Truck,
@@ -98,6 +99,16 @@ export const primaryTiles: NavItem[] = [
   },
 ];
 
+/** Finance — GST preparation only (not a general accounting module). */
+export const financeNav: NavItem[] = [
+  {
+    label: "GST Reconciliation",
+    href: "/finance/gst",
+    icon: Receipt,
+    description: "Monthly sales & purchase capture for your accountant.",
+  },
+];
+
 export const networkNav: NavItem[] = [
   {
     label: "People",
@@ -155,6 +166,7 @@ export const sidebarNav: NavItem[] = [
     description: "Today’s operating view",
   },
   ...primaryTiles,
+  ...financeNav,
   ...networkNav,
   ...outreachNav,
   {

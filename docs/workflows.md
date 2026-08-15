@@ -49,11 +49,21 @@ Weekly operating board (Mon–Sun, `Asia/Kolkata`): are we doing what we need to
 
 After deploy, run `/setup` with **Load demo data unchecked** so `operating_*` tables exist without wiping commerce data.
 
-## 11. Business Dashboard (`/dashboard`)
+## 11. GST Reconciliation (`/finance/gst`)
+
+Monthly GST **preparation** board — not GST filing / GSTN software and not tax advice.
+
+- **Sales** — valid INR `external_orders` in the selected FY month, with tax columns from Shopify sync (`cgst` / `sgst` / `igst`, taxable, shipping tax, refunds). Missing tax fields surface as exceptions; amounts are never invented.
+- **Purchases** — manual tax-invoice bills (`purchase_bills`), separate from manufacturing POs. Arithmetic and duplicate checks flag blockers.
+- **Period status** — Collecting → Needs Review → Ready. **Mark Sent** on an accountant pack sets Sent (download + mark-sent channel).
+- **Accountant pack** — immutable Excel snapshot (Summary, Sales, Purchases, Refunds / Credits, Exceptions, Source Summary). Download the file and share outside the app.
+- After deploy of this migration set, **re-sync Shopify** (full or incremental catch-up) so order tax columns populate. Do **not** run `/setup` until after PR 8 is merged (one clean migrations-only setup then).
+
+## 12. Business Dashboard (`/dashboard`)
 
 Revenue, orders, AOV, margin, capital blocked, fast/slow movers, pending manufacturing, receivables, upcoming launches, channel mix, mock revenue chart.
 
-## 12. Inventory & Replenishment (`/inventory`)
+## 13. Inventory & Replenishment (`/inventory`)
 
 Tabs: **Stock** | **Replenishment** | **Locations** | **Movements** (deep-link with `?tab=`; the old `?tab=products` and `?tab=batches` still resolve — to Stock and Locations respectively).
 

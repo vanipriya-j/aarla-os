@@ -1,5 +1,6 @@
 import type { AppRole } from "@/lib/auth/roles";
 import {
+  financeNav,
   networkNav,
   outreachNav,
   primaryTiles,
@@ -9,6 +10,7 @@ import {
 export type NavSections = {
   showHome: boolean;
   workflows: NavItem[];
+  finance: NavItem[];
   network: NavItem[];
   outreach: NavItem[];
 };
@@ -19,6 +21,7 @@ export function navForRole(role: AppRole): NavSections {
     return {
       showHome: false,
       workflows: [],
+      finance: [],
       network: [],
       outreach: outreachNav.filter((item) => item.href === "/customer-calls"),
     };
@@ -26,6 +29,7 @@ export function navForRole(role: AppRole): NavSections {
   return {
     showHome: true,
     workflows: primaryTiles,
+    finance: financeNav,
     network: networkNav,
     outreach: outreachNav,
   };

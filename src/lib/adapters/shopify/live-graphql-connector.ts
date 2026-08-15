@@ -21,6 +21,7 @@ import type {
   ShopifyFulfilmentRecord,
   ShopifyLineItemRecord,
   ShopifyOrderRecord,
+  ShopifyTaxLineRecord,
 } from "./port";
 import { shopifyGidToExternalId } from "./normalize";
 import {
@@ -29,6 +30,7 @@ import {
   resolveShopifyAccessToken,
   type ShopifyAuthConfig,
 } from "./auth";
+import { aggregateTaxLines } from "@/lib/domain/gst-validation";
 
 export type LiveShopifyConfig = ShopifyAuthConfig;
 
@@ -57,10 +59,33 @@ query SyncOrders($cursor: String, $query: String) {
         createdAt
         cancelledAt
         test
+        taxesIncluded
         displayFinancialStatus
         displayFulfillmentStatus
         totalPriceSet { shopMoney { amount currencyCode } }
-        shippingAddress { phone }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        totalDiscountsSet { shopMoney { amount } }
+        totalShippingPriceSet { shopMoney { amount } }
+        totalTaxSet { shopMoney { amount } }
+        totalRefundedSet { shopMoney { amount } }
+        taxLines {
+          title
+          rate
+          priceSet { shopMoney { amount } }
+        }
+        shippingLine {
+          discountedPriceSet { shopMoney { amount } }
+          taxLines {
+            title
+            rate
+            priceSet { shopMoney { amount } }
+          }
+        }
+        shippingAddress {
+          phone
+          province
+          countryCodeV2
+        }
         billingAddress { phone }
         customer {
           id
@@ -155,16 +180,39 @@ type OrdersQueryData = {
   };
 };
 
+type MoneySet = { shopMoney?: { amount?: string; currencyCode?: string } } | null | undefined;
+
+type RawTaxLine = {
+  title?: string | null;
+  rate?: number | null;
+  priceSet?: MoneySet;
+};
+
 type RawOrderNode = {
   id: string;
   name: string;
   createdAt: string;
   cancelledAt: string | null;
   test: boolean;
+  taxesIncluded?: boolean | null;
   displayFinancialStatus: string | null;
   displayFulfillmentStatus: string | null;
-  totalPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
-  shippingAddress?: { phone?: string | null } | null;
+  totalPriceSet?: MoneySet;
+  currentSubtotalPriceSet?: MoneySet;
+  totalDiscountsSet?: MoneySet;
+  totalShippingPriceSet?: MoneySet;
+  totalTaxSet?: MoneySet;
+  totalRefundedSet?: MoneySet;
+  taxLines?: RawTaxLine[] | null;
+  shippingLine?: {
+    discountedPriceSet?: MoneySet;
+    taxLines?: RawTaxLine[] | null;
+  } | null;
+  shippingAddress?: {
+    phone?: string | null;
+    province?: string | null;
+    countryCodeV2?: string | null;
+  } | null;
   billingAddress?: { phone?: string | null } | null;
   customer: {
     id: string;
@@ -200,6 +248,22 @@ type RawOrderNode = {
     }>;
   }>;
 };
+
+function moneyAmount(set: MoneySet): number | null {
+  const raw = set?.shopMoney?.amount;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapTaxLines(lines: RawTaxLine[] | null | undefined): ShopifyTaxLineRecord[] {
+  if (!lines?.length) return [];
+  return lines.map((line) => ({
+    title: line.title ?? null,
+    price: moneyAmount(line.priceSet) ?? 0,
+    rate: line.rate == null ? null : Number(line.rate),
+  }));
+}
 
 type AbandonedCheckoutsQueryData = {
   abandonedCheckouts: {
@@ -372,6 +436,18 @@ function mapOrder(node: RawOrderNode): {
     });
   }
 
+  const orderTaxLines = mapTaxLines(node.taxLines);
+  const shippingTaxLines = mapTaxLines(node.shippingLine?.taxLines);
+  const allTaxLines = [...orderTaxLines, ...shippingTaxLines];
+  const buckets = aggregateTaxLines(allTaxLines);
+  const shippingTaxTotal = shippingTaxLines.reduce((s, l) => s + l.price, 0);
+  const subtotalAmount = moneyAmount(node.currentSubtotalPriceSet);
+  const taxesIncluded = node.taxesIncluded ?? null;
+  // When taxes are excluded, subtotal is the taxable base. When included, leave null
+  // rather than inventing a reverse calculation.
+  const taxableAmount =
+    taxesIncluded === false ? subtotalAmount : taxesIncluded === true ? null : subtotalAmount;
+
   return {
     customer,
     order: {
@@ -386,6 +462,23 @@ function mapOrder(node: RawOrderNode): {
       totalAmount: Number(node.totalPriceSet?.shopMoney?.amount ?? 0),
       currency: node.totalPriceSet?.shopMoney?.currencyCode ?? "INR",
       contactPhone: resolveShopifyOrderPhone(node),
+      taxesIncluded,
+      subtotalAmount,
+      totalDiscounts: moneyAmount(node.totalDiscountsSet),
+      shippingAmount:
+        moneyAmount(node.shippingLine?.discountedPriceSet) ??
+        moneyAmount(node.totalShippingPriceSet),
+      shippingTax: shippingTaxTotal > 0 ? shippingTaxTotal : null,
+      totalTax: moneyAmount(node.totalTaxSet),
+      cgst: allTaxLines.length ? buckets.cgst : null,
+      sgst: allTaxLines.length ? buckets.sgst : null,
+      igst: allTaxLines.length ? buckets.igst : null,
+      taxableAmount,
+      totalRefunded: moneyAmount(node.totalRefundedSet),
+      shippingProvince: node.shippingAddress?.province?.trim() || null,
+      shippingCountry: node.shippingAddress?.countryCodeV2?.trim() || null,
+      customerGstin: null,
+      taxLines: allTaxLines,
       lineItems,
       fulfilments,
     },

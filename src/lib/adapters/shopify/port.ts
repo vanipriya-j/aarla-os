@@ -31,6 +31,12 @@ export interface ShopifyFulfilmentRecord {
   fulfilmentStatus: string | null;
 }
 
+export interface ShopifyTaxLineRecord {
+  title: string | null;
+  price: number;
+  rate: number | null;
+}
+
 export interface ShopifyOrderRecord {
   externalId: string;
   orderNumber: string;
@@ -44,6 +50,22 @@ export interface ShopifyOrderRecord {
   currency: string;
   /** Best phone from customer/shipping/billing at sync time. */
   contactPhone: string | null;
+  /** GST / tax fields — optional; null means not captured (never invent). */
+  taxesIncluded?: boolean | null;
+  subtotalAmount?: number | null;
+  totalDiscounts?: number | null;
+  shippingAmount?: number | null;
+  shippingTax?: number | null;
+  totalTax?: number | null;
+  cgst?: number | null;
+  sgst?: number | null;
+  igst?: number | null;
+  taxableAmount?: number | null;
+  totalRefunded?: number | null;
+  shippingProvince?: string | null;
+  shippingCountry?: string | null;
+  customerGstin?: string | null;
+  taxLines?: ShopifyTaxLineRecord[];
   lineItems: ShopifyLineItemRecord[];
   fulfilments: ShopifyFulfilmentRecord[];
 }
