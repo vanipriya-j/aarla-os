@@ -127,10 +127,36 @@ Path is public to cookie auth (machine callers) but gated by this secret. Prefer
 Does **not** Transfer Studio → Channel and does **not** call Shopify Inventory APIs.
 Channel “reserved” in Inventory UI remains ledger qty only.
 
+## Live cart funnel (Web Pixel → Aarla OS)
+
+Pixel / Custom Pixel posts browse + cart + checkout events for demand signal and
+Customer Calls **Live carts** / campaign funnel panels. Extends abandoned-checkout
+Admin sync (#32); does **not** replace it.
+
+```
+Shopify Web Pixel / Custom Pixel
+  → POST /api/integrations/shopify/commerce-events
+       Authorization: Bearer <SHOPIFY_INTEGRATION_SECRET>
+  → ingestCommerceEvent(...)
+       → commerce_events (idempotent fingerprint)
+       → cart_sessions + items when event materializes a session
+  → never stock_movements / channel_reservations
+```
+
+See **`docs/shopify-web-pixel.md`** for extension deploy, Custom Pixel paste fallback,
+UTM → campaign mapping, and status thresholds.
+
+After PR 8 merge: one clean setup (demo off) or `aarla-os-complete.sql`, deploy pixel,
+then re-sync Shopify.
+
 ## Out of scope
 
 - Delhivery tracking API (see `docs/delhivery-connector.md`)
 - AI / RAG
 - WhatsApp send provider (Shopify owns the WhatsApp UX)
+- Auto cart soft-reservations from the pixel
 
-Call-queue eligibility is built from synced `external_*` + `shipments` via **Refresh call queues** (see `docs/customer-calls.md`).
+Call-queue eligibility for Admin abandoned checkouts is built from synced
+`external_abandoned_checkouts` via **Refresh call queues**. Identified pixel cart
+sessions can be enqueued separately (`cartsession:{id}` source keys) from **Live carts**
+— still no auto-send (see `docs/customer-calls.md`).

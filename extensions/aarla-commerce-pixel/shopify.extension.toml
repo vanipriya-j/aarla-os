@@ -1,0 +1,25 @@
+api_version = "2025-01"
+
+[[extensions]]
+name = "aarla-commerce-pixel"
+handle = "aarla-commerce-pixel"
+type = "web_pixel"
+uid = "aarla-commerce-pixel-001"
+runtime_context = "strict"
+
+  [extensions.targeting]
+  module = "./src/index.js"
+  target = "web_pixel"
+
+  [extensions.settings]
+    [[extensions.settings.fields]]
+    key = "ingestUrl"
+    name = "Aarla ingest URL"
+    description = "POST target, e.g. https://your-app.vercel.app/api/integrations/shopify/commerce-events"
+    type = "single_line_text_field"
+
+    [[extensions.settings.fields]]
+    key = "secret"
+    name = "Integration secret"
+    description = "Must match SHOPIFY_INTEGRATION_SECRET on the Aarla OS server"
+    type = "single_line_text_field"
