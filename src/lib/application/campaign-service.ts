@@ -1,25 +1,31 @@
 import {
   canMarkReady,
   campaignTotals,
+  computePotentialReadiness,
   computeReadiness,
   lineGap,
   lineNeed,
   lineTotals,
+  selectedRecallQty,
   softAvailableForCampaignTarget,
+  trueProcurementGap,
 } from "@/lib/domain/campaign-planner";
 import type {
   Campaign,
   CampaignBoard,
   CampaignLineBoardRow,
+  CampaignPartnerRecallStatus,
   CampaignStatus,
   CreateCampaignInput,
+  PartnerRecallBreakdown,
   UpdateCampaignInput,
   UpsertCampaignLineItemInput,
+  UpsertPartnerRecallInput,
 } from "@/lib/domain/campaign-types";
 import { studioLedgerAvailable } from "@/lib/domain/channel-reservation";
 import { resolvePresentation } from "@/lib/domain/inventory-presentation";
-import { deriveBalances } from "@/lib/domain/ledger";
-import type { Product } from "@/lib/domain/types";
+import { balanceAt, deriveBalances } from "@/lib/domain/ledger";
+import type { Location, Partner, Product } from "@/lib/domain/types";
 import { LOC_CODES } from "@/lib/engine/business-engine";
 import { createCampaignRepository } from "@/lib/infra/repositories/postgres-campaigns";
 import { createChannelReservationRepository } from "@/lib/infra/repositories/postgres-channel-reservations";
@@ -34,6 +40,12 @@ const ALLOWED_TRANSITIONS: Record<CampaignStatus, CampaignStatus[]> = {
   PAUSED: ["LIVE", "INVENTORY_PLANNING", "COMPLETED"],
   COMPLETED: [],
 };
+
+const RECALL_STATUSES: CampaignPartnerRecallStatus[] = [
+  "AVAILABLE_TO_RECALL",
+  "DO_NOT_RECALL",
+  "RECALL_REQUESTED",
+];
 
 function repo(): CampaignRepository {
   return createCampaignRepository();
@@ -65,6 +77,70 @@ function lineSku(product: Product | undefined, variantCode: string | null): stri
     return product.variants.find((v) => v.id === variantCode)?.sku ?? product.sku;
   }
   return product.sku;
+}
+
+function partnerHeldAt(
+  balances: ReturnType<typeof deriveBalances>,
+  productCode: string,
+  variantCode: string | null,
+  locationId: string,
+): number {
+  if (variantCode == null) {
+    return Math.max(0, balanceAt(balances, productCode, locationId));
+  }
+  return Math.max(0, balanceAt(balances, productCode, locationId, variantCode));
+}
+
+function buildPartnerBreakdown(input: {
+  productCode: string;
+  variantCode: string | null;
+  balances: ReturnType<typeof deriveBalances>;
+  partnerLocations: Location[];
+  partnersByCode: Map<string, Partner>;
+  recallsByPartner: Map<string, { quantity: number; status: CampaignPartnerRecallStatus }>;
+}): PartnerRecallBreakdown[] {
+  const {
+    productCode,
+    variantCode,
+    balances,
+    partnerLocations,
+    partnersByCode,
+    recallsByPartner,
+  } = input;
+
+  const heldByPartner = new Map<string, number>();
+  for (const loc of partnerLocations) {
+    const partnerCode = loc.partnerId;
+    if (!partnerCode) continue;
+    const held = partnerHeldAt(balances, productCode, variantCode, loc.id);
+    if (held <= 0 && !recallsByPartner.has(partnerCode)) continue;
+    heldByPartner.set(partnerCode, (heldByPartner.get(partnerCode) ?? 0) + held);
+  }
+
+  // Include recall rows even when partner currently holds 0 (planning history).
+  for (const partnerCode of recallsByPartner.keys()) {
+    if (!heldByPartner.has(partnerCode)) heldByPartner.set(partnerCode, 0);
+  }
+
+  const rows: PartnerRecallBreakdown[] = [];
+  for (const [partnerCode, partnerHeld] of heldByPartner) {
+    const recall = recallsByPartner.get(partnerCode);
+    const status: CampaignPartnerRecallStatus = recall?.status ?? "AVAILABLE_TO_RECALL";
+    const rawQty = Math.max(0, Math.floor(recall?.quantity ?? 0));
+    const cappedQty = Math.min(rawQty, partnerHeld);
+    const selectedQty = Math.min(selectedRecallQty(status, cappedQty), partnerHeld);
+    rows.push({
+      partnerCode,
+      partnerName: partnersByCode.get(partnerCode)?.name ?? partnerCode,
+      partnerHeld,
+      quantity: cappedQty,
+      selectedQty,
+      status,
+    });
+  }
+
+  rows.sort((a, b) => a.partnerName.localeCompare(b.partnerName));
+  return rows;
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
@@ -271,6 +347,60 @@ export async function releaseAllocation(input: {
   return getCampaignBoard(input.campaignId);
 }
 
+/**
+ * Plan partner recall for a campaign line. Writes campaign_partner_recalls only —
+ * never transfers stock or appends stock_movements.
+ */
+export async function upsertPartnerRecall(input: UpsertPartnerRecallInput) {
+  const r = repo();
+  const campaign = await r.getCampaign(input.campaignId);
+  if (!campaign) throw new Error("Campaign not found.");
+
+  const partnerCode = input.partnerCode?.trim();
+  if (!partnerCode) throw new Error("Partner code is required.");
+
+  const productCode = input.productCode?.trim();
+  if (!productCode) throw new Error("Product code is required.");
+
+  if (!RECALL_STATUSES.includes(input.status)) {
+    throw new Error("Invalid partner recall status.");
+  }
+
+  const quantity = Math.floor(Number(input.quantity));
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error("Recall quantity must be an integer ≥ 0.");
+  }
+
+  const variantCode = input.variantCode?.trim() || null;
+  const uow = createPostgresUnitOfWork();
+  const partner = await uow.partners.getByCode(partnerCode);
+  if (!partner) throw new Error("Partner not found.");
+
+  const product = await uow.products.getByCode(productCode);
+  if (!product) throw new Error("Product not found in catalog.");
+  if (variantCode) {
+    const variant = product.variants.find((v) => v.id === variantCode);
+    if (!variant) throw new Error("Variant not found on product.");
+  }
+
+  // DO_NOT_RECALL may keep qty 0 or store qty as excluded planning note.
+  await r.upsertPartnerRecall({
+    campaignId: input.campaignId,
+    partnerCode,
+    productCode,
+    variantCode,
+    quantity,
+    status: input.status,
+    notes: input.notes ?? "",
+  });
+
+  if (campaign.status === "DRAFT") {
+    await r.setStatus(campaign.id, "INVENTORY_PLANNING");
+  }
+
+  return getCampaignBoard(input.campaignId);
+}
+
 export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
   const r = repo();
   const campaign = await r.getCampaign(id);
@@ -278,17 +408,40 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
 
   const uow = createPostgresUnitOfWork();
   const channelRepo = createChannelReservationRepository();
-  const [lineItems, allocations, products, movements] = await Promise.all([
-    r.listLineItems(id),
-    r.listActiveAllocations(id),
-    uow.products.list(),
-    uow.movements.list(),
-  ]);
+  const [lineItems, allocations, recalls, products, movements, locations, partners] =
+    await Promise.all([
+      r.listLineItems(id),
+      r.listActiveAllocations(id),
+      r.listRecallsForCampaign(id),
+      uow.products.list(),
+      uow.movements.list(),
+      uow.locations.list(),
+      uow.partners.list(),
+    ]);
 
   const balances = deriveBalances(movements);
+  const partnersByCode = new Map(partners.map((p) => [p.id, p]));
+  const partnerLocations = locations.filter((l) => l.kind === "Partner");
   const allocMap = new Map(
     allocations.map((a) => [`${a.productCode}::${a.variantCode ?? ""}`, a.quantity]),
   );
+
+  const recallsByLinePartner = new Map<
+    string,
+    Map<string, { quantity: number; status: CampaignPartnerRecallStatus }>
+  >();
+  for (const recall of recalls) {
+    const lineKey = `${recall.productCode}::${recall.variantCode ?? ""}`;
+    let byPartner = recallsByLinePartner.get(lineKey);
+    if (!byPartner) {
+      byPartner = new Map();
+      recallsByLinePartner.set(lineKey, byPartner);
+    }
+    byPartner.set(recall.partnerCode, {
+      quantity: recall.quantity,
+      status: recall.status,
+    });
+  }
 
   const lines: CampaignLineBoardRow[] = [];
   for (const line of lineItems) {
@@ -311,6 +464,7 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
     ]);
     // Soft available for Gap: exclude this campaign's own hold (already counted in allocated).
     // Current = allocated; Need = planned − allocated; Gap = need − softAvailable.
+    // Partner recall planning does NOT subtract from Studio soft-available.
     const softExcludingThis = softAvailableForCampaignTarget(
       studioBalance,
       shopifyHolds,
@@ -318,6 +472,29 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
     );
     const need = lineNeed(line.plannedQuantity, allocated);
     const gap = lineGap(need, softExcludingThis);
+
+    const lineKey = `${line.productCode}::${line.variantCode ?? ""}`;
+    const partnerBreakdown = buildPartnerBreakdown({
+      productCode: line.productCode,
+      variantCode: line.variantCode,
+      balances,
+      partnerLocations,
+      partnersByCode,
+      recallsByPartner: recallsByLinePartner.get(lineKey) ?? new Map(),
+    });
+
+    const partnerHeldTotal = partnerBreakdown.reduce((sum, p) => sum + p.partnerHeld, 0);
+    const selectedForRecall = partnerBreakdown.reduce((sum, p) => sum + p.selectedQty, 0);
+    const recallRequested = partnerBreakdown.reduce(
+      (sum, p) =>
+        sum +
+        (p.status === "RECALL_REQUESTED"
+          ? Math.min(Math.max(0, p.selectedQty), p.partnerHeld)
+          : 0),
+      0,
+    );
+    const lineTrueGap = trueProcurementGap(line.plannedQuantity, allocated, selectedForRecall);
+    const potentialGap = lineGap(Math.max(0, need - selectedForRecall), softExcludingThis);
 
     lines.push({
       lineItem: line,
@@ -331,6 +508,13 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
       planned: line.plannedQuantity,
       need,
       gap,
+      partnerHeldTotal,
+      partnerBreakdown,
+      selectedForRecall,
+      recallRequested,
+      currentGap: gap,
+      potentialGap,
+      trueProcurementGap: lineTrueGap,
       lineTotals: lineTotals(line),
     });
   }
@@ -342,6 +526,14 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
       allocatedQuantity: l.allocated,
     })),
   );
+  const potentialReadiness = computePotentialReadiness(
+    lines.map((l) => ({
+      planned: l.planned,
+      allocated: l.allocated,
+      selectedRecall: l.selectedForRecall,
+    })),
+  );
+  const campaignTrueGap = lines.reduce((sum, l) => sum + l.trueProcurementGap, 0);
 
   let attributedSales = null;
   if (campaign.status === "LIVE" || campaign.status === "COMPLETED" || campaign.status === "PAUSED") {
@@ -379,6 +571,9 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
     lines,
     totals,
     readiness,
+    currentReadiness: readiness,
+    potentialReadiness,
+    trueProcurementGap: campaignTrueGap,
     canMarkReady: canMarkReady(readiness),
     attributedSales,
   };

@@ -10,12 +10,15 @@ import {
   updateCampaignAction,
   updateLinePlannedQuantityAction,
   upsertCampaignLineItemAction,
+  upsertPartnerRecallAction,
 } from "@/app/actions/campaign-actions";
 import { CampaignPlannerMatrix } from "@/components/campaigns/CampaignPlannerMatrix";
 import { CampaignStatusChip } from "@/components/campaigns/CampaignStatusChip";
+import { PartnerRecallPanel } from "@/components/campaigns/PartnerRecallPanel";
 import { planningModeHelper } from "@/lib/domain/campaign-planner";
 import type {
   CampaignBoard,
+  CampaignPartnerRecallStatus,
   CampaignPlanningMode,
   CampaignStatus,
 } from "@/lib/domain/campaign-types";
@@ -200,7 +203,28 @@ export function CampaignPlannerClient({
     });
   }
 
-  const { campaign, totals, readiness } = board;
+  function savePartnerRecall(input: {
+    productCode: string;
+    variantCode: string | null;
+    partnerCode: string;
+    quantity: number;
+    status: CampaignPartnerRecallStatus;
+  }) {
+    startTransition(async () => {
+      setError(null);
+      const res = await upsertPartnerRecallAction({
+        campaignId: board.campaign.id,
+        ...input,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      reload(res.data);
+    });
+  }
+
+  const { campaign, totals, readiness, currentReadiness, potentialReadiness } = board;
   const actions = STATUS_ACTIONS[campaign.status] ?? [];
 
   return (
@@ -333,11 +357,12 @@ export function CampaignPlannerClient({
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 className="font-display text-lg text-deep-navy">Inventory readiness</h2>
           <p className="text-sm text-charcoal/55">
-            Required {readiness.required} · Ready {readiness.ready} · Missing{" "}
+            Current {currentReadiness.readinessPct}% · Potential{" "}
+            {potentialReadiness.readinessPct}% · Required {readiness.required} · Ready{" "}
+            {readiness.ready} · Missing{" "}
             <span className={readiness.missing > 0 ? "text-aarla-red" : ""}>
               {readiness.missing}
-            </span>{" "}
-            · {readiness.readinessPct}%
+            </span>
           </p>
         </div>
         <div className="h-2 rounded-full bg-soft-beige overflow-hidden">
@@ -359,9 +384,15 @@ export function CampaignPlannerClient({
             >
               Inventory replenishment
             </Link>
+            {" · "}
+            <Link href="/inventory" className="text-aarla-red hover:underline">
+              Transfer
+            </Link>
           </p>
         ) : null}
       </section>
+
+      <PartnerRecallPanel board={board} pending={pending} onSave={savePartnerRecall} />
 
       {board.attributedSales ? (
         <section className="rounded-xl border border-border bg-white p-4">
@@ -547,6 +578,7 @@ function LineControls({
           <span className={line.gap > 0 ? "text-aarla-red" : ""}>{line.gap}</span>
           {" · "}
           Soft avail {line.studioAvailable}
+          {line.partnerHeldTotal > 0 ? ` · Partner held ${line.partnerHeldTotal}` : ""}
         </p>
       </div>
       <label className="text-xs space-y-1">

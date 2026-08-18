@@ -2,6 +2,8 @@ import type {
   Campaign,
   CampaignAllocation,
   CampaignLineItem,
+  CampaignPartnerRecall,
+  CampaignPartnerRecallStatus,
   CampaignStatus,
   CreateCampaignInput,
   UpdateCampaignInput,
@@ -22,6 +24,16 @@ export interface InsertCampaignAllocationInput {
   productCode: string;
   variantCode: string | null;
   quantity: number;
+}
+
+export interface UpsertCampaignPartnerRecallInput {
+  campaignId: string;
+  partnerCode: string;
+  productCode: string;
+  variantCode: string | null;
+  quantity: number;
+  status: CampaignPartnerRecallStatus;
+  notes: string;
 }
 
 export interface CampaignAttributedSalesRow {
@@ -58,6 +70,15 @@ export interface CampaignRepository {
     allocationId: string,
     newQuantity: number,
   ): Promise<CampaignAllocation | null>;
+
+  listRecallsForCampaign(campaignId: string): Promise<CampaignPartnerRecall[]>;
+  upsertPartnerRecall(input: UpsertCampaignPartnerRecallInput): Promise<CampaignPartnerRecall>;
+  deletePartnerRecall?(
+    campaignId: string,
+    partnerCode: string,
+    productCode: string,
+    variantCode: string | null,
+  ): Promise<boolean>;
 
   /** Sum of active campaign allocation qty for product (+ optional variant) across ALL campaigns. */
   sumActiveCampaignHolds(productCode: string, variantCode: string | null): Promise<number>;

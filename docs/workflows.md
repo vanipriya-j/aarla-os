@@ -67,9 +67,10 @@ Ops campaigns for planning inventory soft-holds against ad spend and revenue tar
 - **Line mix** — catalog products/variants with planned qty; unit cost and selling price snapshotted from Product.
 - **Totals** — Investment, Potential Revenue, Gross Profit before Ads, Planned Ad Spend, Contribution after Ads (never labelled “Net Profit”). Planning-mode tabs (Ad Budget / Revenue Target / Inventory Investment) change helper text and which total is highlighted only — **no** auto optimal mix or forecasting.
 - **Soft allocation** — `campaign_allocations` share the Studio pool with Shopify `channel_reservations`. Soft available = Studio ledger − active channel holds − active campaign holds (all campaigns). Allocate writes allocations only — **no** `stock_movements` / physical Transfer. Soft campaign allocation ≠ Channel reserved qty.
-- **Readiness** — Required / Ready / Missing / %; gap links to `/manufacture` and `/inventory?tab=replenishment`.
+- **Readiness** — Required / Ready / Missing / %; gap links to `/manufacture` and `/inventory?tab=replenishment`. **READY gate uses Current readiness only** (Studio soft-allocated). Potential readiness (partner recall planning) does **not** unlock Ready.
+- **Partner recall (Potentially Recoverable)** — `campaign_partner_recalls` plans partner-held stock for a campaign (`AVAILABLE_TO_RECALL` / `DO_NOT_RECALL` / `RECALL_REQUESTED`). Planning only: does **not** change inventory balances or append `stock_movements`. Partner stock is **not** campaign-ready until transferred. Board shows Current readiness %, Potential readiness %, and True procurement gap (planned − allocated − selected recall). Physical move = existing Transfer UI (`/inventory`); Manufacture / Replenishment links remain. No In Transit location in this PR.
 - **Live sales** — weak website/Shopify attribution from valid `external_orders` in the campaign date window (Partner sales not included).
-- **Schema** — also folded into `supabase/aarla-os-complete.sql` (single concatenated schema for the final clean setup).
+- **Schema** — also folded into `supabase/aarla-os-complete.sql` (single concatenated schema for the final clean setup). Append partner-recall migration there via `npm run schema:complete`.
 - Do **not** run `/setup` until after PR 8 is merged.
 
 ## 13. Business Dashboard (`/dashboard`)

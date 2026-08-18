@@ -5,6 +5,8 @@ import type {
   Campaign,
   CampaignAllocation,
   CampaignLineItem,
+  CampaignPartnerRecall,
+  CampaignPartnerRecallStatus,
   CampaignStatus,
   CreateCampaignInput,
   UpdateCampaignInput,
@@ -14,6 +16,7 @@ import type {
   CampaignRepository,
   InsertCampaignAllocationInput,
   InsertCampaignLineItemInput,
+  UpsertCampaignPartnerRecallInput,
 } from "@/lib/repositories/campaigns";
 
 type Q = <T extends QueryResultRow = QueryResultRow>(
@@ -127,6 +130,32 @@ function mapAllocation(r: {
   };
 }
 
+function mapPartnerRecall(r: {
+  id: string;
+  campaign_id: string;
+  partner_code: string;
+  product_code: string;
+  variant_code: string | null;
+  quantity: number | string;
+  status: string;
+  notes: string;
+  created_at: string | Date;
+  updated_at: string | Date;
+}): CampaignPartnerRecall {
+  return {
+    id: String(r.id),
+    campaignId: String(r.campaign_id),
+    partnerCode: String(r.partner_code),
+    productCode: String(r.product_code),
+    variantCode: r.variant_code ? String(r.variant_code) : null,
+    quantity: num(r.quantity),
+    status: r.status as CampaignPartnerRecallStatus,
+    notes: String(r.notes ?? ""),
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  };
+}
+
 const CAMPAIGN_COLS = `
   id, code, name, start_date, end_date, daily_ad_budget, planned_ad_spend,
   target_revenue, target_orders, target_aov, status, notes, created_at, updated_at
@@ -139,6 +168,11 @@ const LINE_COLS = `
 
 const ALLOC_COLS = `
   id, campaign_id, product_code, variant_code, quantity, status, created_at, updated_at
+`;
+
+const RECALL_COLS = `
+  id, campaign_id, partner_code, product_code, variant_code, quantity,
+  status, notes, created_at, updated_at
 `;
 
 export function createCampaignRepository(): CampaignRepository {
@@ -401,6 +435,86 @@ export function createCampaignRepository(): CampaignRepository {
         [ORG_ID, allocationId, newQuantity],
       );
       return rows[0] ? mapAllocation(rows[0]) : null;
+    },
+
+    async listRecallsForCampaign(campaignId) {
+      const rows = await q<Parameters<typeof mapPartnerRecall>[0]>(
+        `select ${RECALL_COLS}
+         from campaign_partner_recalls
+         where organization_id = $1 and campaign_id = $2
+         order by partner_code, product_code, coalesce(variant_code, '')`,
+        [ORG_ID, campaignId],
+      );
+      return rows.map(mapPartnerRecall);
+    },
+
+    async upsertPartnerRecall(input: UpsertCampaignPartnerRecallInput) {
+      const existing = await q<Parameters<typeof mapPartnerRecall>[0]>(
+        input.variantCode == null
+          ? `select ${RECALL_COLS} from campaign_partner_recalls
+             where organization_id = $1 and campaign_id = $2
+               and partner_code = $3 and product_code = $4 and variant_code is null
+             limit 1`
+          : `select ${RECALL_COLS} from campaign_partner_recalls
+             where organization_id = $1 and campaign_id = $2
+               and partner_code = $3 and product_code = $4 and variant_code = $5
+             limit 1`,
+        input.variantCode == null
+          ? [ORG_ID, input.campaignId, input.partnerCode, input.productCode]
+          : [
+              ORG_ID,
+              input.campaignId,
+              input.partnerCode,
+              input.productCode,
+              input.variantCode,
+            ],
+      );
+      if (existing[0]) {
+        const rows = await q<Parameters<typeof mapPartnerRecall>[0]>(
+          `update campaign_partner_recalls set
+             quantity = $2, status = $3, notes = $4
+           where id = $1
+           returning ${RECALL_COLS}`,
+          [existing[0].id, input.quantity, input.status, input.notes],
+        );
+        return mapPartnerRecall(rows[0]!);
+      }
+      const rows = await q<Parameters<typeof mapPartnerRecall>[0]>(
+        `insert into campaign_partner_recalls (
+           organization_id, campaign_id, partner_code, product_code, variant_code,
+           quantity, status, notes
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8)
+         returning ${RECALL_COLS}`,
+        [
+          ORG_ID,
+          input.campaignId,
+          input.partnerCode,
+          input.productCode,
+          input.variantCode,
+          input.quantity,
+          input.status,
+          input.notes,
+        ],
+      );
+      return mapPartnerRecall(rows[0]!);
+    },
+
+    async deletePartnerRecall(campaignId, partnerCode, productCode, variantCode) {
+      const rows = await q<{ id: string }>(
+        variantCode == null
+          ? `delete from campaign_partner_recalls
+             where organization_id = $1 and campaign_id = $2
+               and partner_code = $3 and product_code = $4 and variant_code is null
+             returning id`
+          : `delete from campaign_partner_recalls
+             where organization_id = $1 and campaign_id = $2
+               and partner_code = $3 and product_code = $4 and variant_code = $5
+             returning id`,
+        variantCode == null
+          ? [ORG_ID, campaignId, partnerCode, productCode]
+          : [ORG_ID, campaignId, partnerCode, productCode, variantCode],
+      );
+      return rows.length > 0;
     },
 
     async sumActiveCampaignHolds(productCode, variantCode) {
