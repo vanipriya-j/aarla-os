@@ -112,7 +112,8 @@ function normalizeBody(body: Record<string, unknown>): IngestCommerceEventInput 
     provider: "shopify",
     eventType,
     occurredAt: asString(body.timestamp ?? body.occurredAt ?? data.timestamp) ?? undefined,
-    eventFingerprint: asString(body.eventFingerprint ?? body.id ?? body.event_id),
+    eventFingerprint:
+      asString(body.eventFingerprint ?? body.id ?? body.event_id) ?? undefined,
     anonymousSessionId: asString(
       body.anonymousSessionId ?? context.sessionId ?? body.clientId,
     ),
@@ -158,10 +159,9 @@ function normalizeBody(body: Record<string, unknown>): IngestCommerceEventInput 
     ),
     currency: asString(
       body.currency ??
-        cart.cost?.toString?.() ??
         (checkout.currencyCode as string) ??
         data.currency,
-    ),
+    ) ?? undefined,
     referrer: asString(body.referrer ?? document.referrer ?? context.referrer),
     utmSource: asString(body.utmSource ?? utm.source ?? utm.utm_source),
     utmMedium: asString(body.utmMedium ?? utm.medium ?? utm.utm_medium),

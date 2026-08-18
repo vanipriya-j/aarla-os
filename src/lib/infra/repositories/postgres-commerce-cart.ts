@@ -4,7 +4,6 @@ import { ORG_ID } from "@/lib/infra/db/ids";
 import { query as poolQuery } from "@/lib/infra/db/pool";
 import type {
   CampaignDemandByVariant,
-  CampaignFunnelCounts,
   CartDashboardFilters,
   CartSession,
   CartSessionItemInput,
