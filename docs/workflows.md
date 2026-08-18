@@ -69,6 +69,7 @@ Ops campaigns for planning inventory soft-holds against ad spend and revenue tar
 - **Soft allocation** — `campaign_allocations` share the Studio pool with Shopify `channel_reservations`. Soft available = Studio ledger − active channel holds − active campaign holds (all campaigns). Allocate writes allocations only — **no** `stock_movements` / physical Transfer. Soft campaign allocation ≠ Channel reserved qty.
 - **Readiness** — Required / Ready / Missing / %; gap links to `/manufacture` and `/inventory?tab=replenishment`.
 - **Live sales** — weak website/Shopify attribution from valid `external_orders` in the campaign date window (Partner sales not included).
+- **Schema** — also folded into `supabase/aarla-os-complete.sql` (single concatenated schema for the final clean setup).
 - Do **not** run `/setup` until after PR 8 is merged.
 
 ## 13. Business Dashboard (`/dashboard`)
