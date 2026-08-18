@@ -1,19 +1,18 @@
 -- =============================================================================
 -- Aarla OS — COMPLETE SCHEMA (single file for clean setup)
 -- =============================================================================
--- Generated from supabase/migrations/*.sql in filename order.
--- Includes foundation + PRs 1–6 schema so far:
---   #32 Abandoned Carts, #33 Inventory, #34 Weekly Board, #35 Shopify Reserve,
---   #36 GST Reconciliation, #37 Campaign Planner (when on this branch)
--- PR 7–8 objects will be appended here as those PRs land.
+-- Auto-generated from supabase/migrations/*.sql (17 files).
+-- Regenerate: node scripts/generate-complete-schema.js
 --
--- HOW TO USE (after PR 8 is merged — not before):
---   Option A: Vercel /setup with Load demo data UNCHECKED (runs migrations via app)
---   Option B: Paste this file once in Supabase SQL Editor on an empty project
+-- Covers foundation + daily-ops / build-set migrations through the current branch
+-- (Abandoned Carts, Inventory, Weekly Board, Shopify Reserve, GST, Campaigns,
+-- and later PR 7–8 objects as those migrations land).
 --
--- Do NOT load demo seed against live commerce data.
--- Do NOT re-run casually on a database that already has production rows unless
--- you understand IF NOT EXISTS / idempotent alters.
+-- AFTER PR 8 IS MERGED — one clean initialization:
+--   Option A: Vercel /setup with "Load demo data" UNCHECKED
+--   Option B: Run this file once in Supabase SQL Editor on an empty DB
+--
+-- Do not load demo seed against live commerce data.
 -- =============================================================================
 
 
@@ -1424,5 +1423,49 @@ create unique index if not exists campaign_allocations_active_unique_idx
 drop trigger if exists campaign_allocations_updated_at on campaign_allocations;
 create trigger campaign_allocations_updated_at
   before update on campaign_allocations
+  for each row execute function set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- SOURCE: 20260817120000_campaign_partner_recall.sql
+-- ---------------------------------------------------------------------------
+
+-- Campaign Partner Inventory Recall (planning only — Potentially Recoverable).
+-- Does NOT write stock_movements / change location balances.
+-- READY gate remains Current readiness (Studio soft-allocated) only.
+-- Idempotent for /setup after PR 8.
+
+-- ---------------------------------------------------------------------------
+-- Partner recall planning rows (one per campaign × partner × product × variant)
+-- ---------------------------------------------------------------------------
+create table if not exists campaign_partner_recalls (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  campaign_id uuid not null references campaigns(id) on delete cascade,
+  partner_code text not null,
+  product_code text not null,
+  variant_code text,
+  quantity integer not null check (quantity >= 0),
+  status text not null
+    check (status in ('AVAILABLE_TO_RECALL', 'DO_NOT_RECALL', 'RECALL_REQUESTED')),
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists campaign_partner_recalls_scope_uidx
+  on campaign_partner_recalls (
+    campaign_id, partner_code, product_code,
+    coalesce(variant_code, '')
+  );
+
+create index if not exists campaign_partner_recalls_campaign_idx
+  on campaign_partner_recalls(campaign_id);
+
+create index if not exists campaign_partner_recalls_org_product_idx
+  on campaign_partner_recalls(organization_id, product_code, (coalesce(variant_code, '')));
+
+drop trigger if exists campaign_partner_recalls_updated_at on campaign_partner_recalls;
+create trigger campaign_partner_recalls_updated_at
+  before update on campaign_partner_recalls
   for each row execute function set_updated_at();
 

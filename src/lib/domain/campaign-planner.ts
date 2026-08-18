@@ -6,6 +6,7 @@
 import type {
   CampaignLineItem,
   CampaignLineTotals,
+  CampaignPartnerRecallStatus,
   CampaignPlannerTotals,
   CampaignPlanningMode,
   CampaignReadiness,
@@ -116,6 +117,56 @@ export function lineNeed(planned: number, allocated: number): number {
 
 export function lineGap(need: number, studioAvailable: number): number {
   return Math.max(0, Math.floor(need) - Math.max(0, Math.floor(studioAvailable)));
+}
+
+/**
+ * Qty that counts toward potential readiness from a partner recall row.
+ * AVAILABLE_TO_RECALL and RECALL_REQUESTED count; DO_NOT_RECALL = 0.
+ */
+export function selectedRecallQty(
+  status: CampaignPartnerRecallStatus,
+  quantity: number,
+): number {
+  const qty = Math.max(0, Math.floor(quantity));
+  if (status === "DO_NOT_RECALL") return 0;
+  return qty;
+}
+
+/**
+ * Potential readiness: Current ready + min(remainingNeed, selectedRecall) per line.
+ * Does not change inventory — planning math only.
+ */
+export function computePotentialReadiness(
+  lines: Array<{ planned: number; allocated: number; selectedRecall: number }>,
+): CampaignReadiness {
+  let required = 0;
+  let ready = 0;
+  for (const line of lines) {
+    const planned = Math.max(0, Math.floor(line.planned));
+    const allocated = Math.max(0, Math.floor(line.allocated));
+    const selectedRecall = Math.max(0, Math.floor(line.selectedRecall));
+    const readyCurrent = Math.min(planned, allocated);
+    const remainingNeed = Math.max(0, planned - allocated);
+    required += planned;
+    ready += readyCurrent + Math.min(remainingNeed, selectedRecall);
+  }
+  const missing = Math.max(0, required - ready);
+  const readinessPct = required <= 0 ? 0 : Math.round((ready / required) * 100);
+  return { required, ready, missing, readinessPct };
+}
+
+/** Units still to procure after Studio soft-alloc + selected partner recall. */
+export function trueProcurementGap(
+  planned: number,
+  allocated: number,
+  selectedRecall: number,
+): number {
+  return Math.max(
+    0,
+    Math.floor(planned) -
+      Math.max(0, Math.floor(allocated)) -
+      Math.max(0, Math.floor(selectedRecall)),
+  );
 }
 
 /** Helper copy for planning-mode tabs — no auto optimal mix. */

@@ -10,6 +10,7 @@ import type {
   CreateCampaignInput,
   UpdateCampaignInput,
   UpsertCampaignLineItemInput,
+  UpsertPartnerRecallInput,
 } from "@/lib/domain/campaign-types";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -79,4 +80,8 @@ export async function releaseAllocationAction(input: {
   reduceTo?: number;
 }) {
   return wrap(() => svc.releaseAllocation(input));
+}
+
+export async function upsertPartnerRecallAction(input: UpsertPartnerRecallInput) {
+  return wrap(() => svc.upsertPartnerRecall(input));
 }

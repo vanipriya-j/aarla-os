@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canMarkReady,
   campaignTotals,
+  computePotentialReadiness,
   computeReadiness,
   grossMargin,
   grossProfit,
@@ -10,7 +11,9 @@ import {
   lineNeed,
   lineTotals,
   potentialRevenue,
+  selectedRecallQty,
   softAvailableForCampaignTarget,
+  trueProcurementGap,
 } from "@/lib/domain/campaign-planner";
 
 describe("campaign planner arithmetic", () => {
@@ -77,5 +80,43 @@ describe("soft available for campaign target", () => {
     expect(softAvailableForCampaignTarget(100, 20, 15)).toBe(65);
     expect(softAvailableForCampaignTarget(10, 8, 5)).toBe(0);
     expect(softAvailableForCampaignTarget(50, -1, -2)).toBe(50);
+  });
+});
+
+describe("partner recall planning math", () => {
+  it("selectedRecallQty counts AVAILABLE and REQUESTED; DO_NOT_RECALL is 0", () => {
+    expect(selectedRecallQty("AVAILABLE_TO_RECALL", 5)).toBe(5);
+    expect(selectedRecallQty("RECALL_REQUESTED", 3)).toBe(3);
+    expect(selectedRecallQty("DO_NOT_RECALL", 8)).toBe(0);
+    expect(selectedRecallQty("AVAILABLE_TO_RECALL", -2)).toBe(0);
+  });
+
+  it("computePotentialReadiness adds min(remainingNeed, selectedRecall) to current ready", () => {
+    const r = computePotentialReadiness([
+      { planned: 10, allocated: 4, selectedRecall: 5 }, // ready 4 + 5 = 9
+      { planned: 6, allocated: 6, selectedRecall: 10 }, // ready 6 + 0 = 6
+      { planned: 8, allocated: 2, selectedRecall: 1 }, // ready 2 + 1 = 3
+    ]);
+    expect(r.required).toBe(24);
+    expect(r.ready).toBe(18);
+    expect(r.missing).toBe(6);
+    expect(r.readinessPct).toBe(75);
+  });
+
+  it("trueProcurementGap subtracts allocated and selected recall only", () => {
+    expect(trueProcurementGap(10, 3, 4)).toBe(3);
+    expect(trueProcurementGap(10, 7, 5)).toBe(0);
+    expect(trueProcurementGap(5, 0, 0)).toBe(5);
+  });
+
+  it("DO_NOT_RECALL does not improve potential readiness or shrink true gap", () => {
+    const selected = selectedRecallQty("DO_NOT_RECALL", 20);
+    expect(selected).toBe(0);
+    const potential = computePotentialReadiness([
+      { planned: 10, allocated: 2, selectedRecall: selected },
+    ]);
+    expect(potential.ready).toBe(2);
+    expect(potential.missing).toBe(8);
+    expect(trueProcurementGap(10, 2, selected)).toBe(8);
   });
 });
