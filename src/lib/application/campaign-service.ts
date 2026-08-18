@@ -309,14 +309,8 @@ export async function getCampaignBoard(id: string): Promise<CampaignBoard> {
       channelRepo.sumActiveQuantity(line.productCode, line.variantCode),
       r.sumActiveCampaignHolds(line.productCode, line.variantCode),
     ]);
-    const studioAvailable = softAvailableForCampaignTarget(
-      studioBalance,
-      shopifyHolds,
-      campaignHolds,
-    );
-    // Soft available for display includes this campaign's own hold as "used";
-    // Current/Need/Gap: Current = allocated; Need = planned − allocated;
-    // Gap = need − soft available outside this hold.
+    // Soft available for Gap: exclude this campaign's own hold (already counted in allocated).
+    // Current = allocated; Need = planned − allocated; Gap = need − softAvailable.
     const softExcludingThis = softAvailableForCampaignTarget(
       studioBalance,
       shopifyHolds,

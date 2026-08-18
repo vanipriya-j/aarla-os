@@ -70,7 +70,7 @@ export function CampaignPlannerClient({
   );
 
   const matrixGroups = useMemo(() => {
-    const byProduct = new Map<string, typeof board.lines>();
+    const byProduct = new Map<string, CampaignBoard["lines"]>();
     for (const line of board.lines) {
       if (line.presentation === "list") continue;
       const list = byProduct.get(line.lineItem.productCode) ?? [];
@@ -82,8 +82,8 @@ export function CampaignPlannerClient({
         product: products.find((p) => p.id === code),
         lines,
       }))
-      .filter((g): g is { product: Product; lines: typeof board.lines } => Boolean(g.product));
-  }, [board.lines, products]);
+      .filter((g): g is { product: Product; lines: CampaignBoard["lines"] } => Boolean(g.product));
+  }, [board, products]);
 
   const listLines = board.lines.filter((l) => l.presentation === "list");
 
