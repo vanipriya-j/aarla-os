@@ -9,6 +9,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   CalendarRange,
+  Megaphone,
   MessageCircleHeart,
   Package,
   PackageCheck,
@@ -90,6 +91,12 @@ export const primaryTiles: NavItem[] = [
     href: "/weekly",
     icon: CalendarRange,
     description: "Weekly operating board — targets vs actuals.",
+  },
+  {
+    label: "Campaigns",
+    href: "/campaigns",
+    icon: Megaphone,
+    description: "Ops campaign planner — soft inventory holds and readiness.",
   },
   {
     label: "Business Dashboard",
