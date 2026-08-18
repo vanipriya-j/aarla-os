@@ -17,6 +17,7 @@
     "db:seed": "tsx scripts/seed-db.ts",
     "db:reset": "npm run db:start && npm run db:migrate && npm run db:seed",
     "db:stop": "docker stop aarla-pg",
+    "schema:complete": "node scripts/generate-complete-schema.js",
     "supabase:start": "npx supabase start",
     "supabase:stop": "npx supabase stop",
     "shopify": "shopify",

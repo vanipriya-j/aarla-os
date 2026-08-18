@@ -59,11 +59,24 @@ Monthly GST **preparation** board — not GST filing / GSTN software and not tax
 - **Accountant pack** — immutable Excel snapshot (Summary, Sales, Purchases, Refunds / Credits, Exceptions, Source Summary). Download the file and share outside the app.
 - After deploy of this migration set, **re-sync Shopify** (full or incremental catch-up) so order tax columns populate. Do **not** run `/setup` until after PR 8 is merged (one clean migrations-only setup then).
 
-## 12. Business Dashboard (`/dashboard`)
+## 12. Campaign & Inventory Planner (`/campaigns`)
+
+Ops campaigns for planning inventory soft-holds against ad spend and revenue targets — **not** Universe creative “campaign” nodes.
+
+- **Campaign lifecycle** — Draft → Inventory Planning → Ready → Live (Pause / Complete). Ready requires readiness complete (`required > 0` and `missing = 0`). Live only from Ready (or resume from Paused).
+- **Line mix** — catalog products/variants with planned qty; unit cost and selling price snapshotted from Product.
+- **Totals** — Investment, Potential Revenue, Gross Profit before Ads, Planned Ad Spend, Contribution after Ads (never labelled “Net Profit”). Planning-mode tabs (Ad Budget / Revenue Target / Inventory Investment) change helper text and which total is highlighted only — **no** auto optimal mix or forecasting.
+- **Soft allocation** — `campaign_allocations` share the Studio pool with Shopify `channel_reservations`. Soft available = Studio ledger − active channel holds − active campaign holds (all campaigns). Allocate writes allocations only — **no** `stock_movements` / physical Transfer. Soft campaign allocation ≠ Channel reserved qty.
+- **Readiness** — Required / Ready / Missing / %; gap links to `/manufacture` and `/inventory?tab=replenishment`.
+- **Live sales** — weak website/Shopify attribution from valid `external_orders` in the campaign date window (Partner sales not included).
+- **Schema** — also folded into `supabase/aarla-os-complete.sql` (single concatenated schema for the final clean setup).
+- Do **not** run `/setup` until after PR 8 is merged.
+
+## 13. Business Dashboard (`/dashboard`)
 
 Revenue, orders, AOV, margin, capital blocked, fast/slow movers, pending manufacturing, receivables, upcoming launches, channel mix, mock revenue chart.
 
-## 13. Inventory & Replenishment (`/inventory`)
+## 14. Inventory & Replenishment (`/inventory`)
 
 Tabs: **Stock** | **Replenishment** | **Locations** | **Movements** (deep-link with `?tab=`; the old `?tab=products` and `?tab=batches` still resolve — to Stock and Locations respectively).
 

@@ -52,13 +52,21 @@ See `docs/auth.md` for role behaviour.
 
 Deployments → **Redeploy** (env changes only apply after redeploy).
 
-## 5. Initialize once
+## 5. Initialize once (after PR 8 — not during the PR 5–8 build)
 
+**Do not run setup while PRs 5–8 are still landing.** After PR 8 is merged:
+
+**Option A — app setup (preferred on Vercel)**  
 Open **https://aarla-os.vercel.app/setup**
 
 1. Paste `SETUP_SECRET`
-2. **Initialize database** (migrate + demo seed)
-3. Open **Inventory** / Home
+2. Leave **Load demo data unchecked** (migrations only — protects live commerce)
+3. Initialize
+
+**Option B — single SQL file**  
+`supabase/aarla-os-complete.sql` is the concatenated schema (all migrations in order).  
+Regenerate anytime with `node scripts/generate-complete-schema.js`.  
+Paste once into the Supabase SQL Editor on an **empty** project if you prefer not to use `/setup`.
 
 ### If you see `max clients reached in session mode`
 
