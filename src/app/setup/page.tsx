@@ -11,8 +11,7 @@ type Status = {
 export default function SetupPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [secret, setSecret] = useState("");
-  // Default off — demo seed truncates commerce tables (see earlier wipe).
-  const [seed, setSeed] = useState(false);
+  const [seed, setSeed] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -119,22 +118,13 @@ export default function SetupPage() {
           />
         </label>
 
-        <label className="mt-4 flex items-start gap-2 text-sm text-charcoal/90">
+        <label className="mt-4 flex items-center gap-2 text-sm text-charcoal/90">
           <input
             type="checkbox"
-            className="mt-0.5"
             checked={seed}
             onChange={(e) => setSeed(e.target.checked)}
           />
-          <span>
-            Load demo data (products, stock movements, etc.)
-            {seed ? (
-              <span className="mt-1 block text-aarla-red">
-                Warning: truncates existing products and stock before seeding.
-                Leave unchecked on production.
-              </span>
-            ) : null}
-          </span>
+          Load demo data (products, stock movements, etc.)
         </label>
 
         <button
@@ -146,14 +136,7 @@ export default function SetupPage() {
           {pending ? "Initializing…" : "Initialize database"}
         </button>
 
-        {message && (
-          <p className="mt-4 text-sm text-deep-navy">
-            {message}{" "}
-            <a href="/inventory" className="underline">
-              Open Inventory
-            </a>
-          </p>
-        )}
+        {message && <p className="mt-4 text-sm text-deep-navy">{message}</p>}
         {error && <p className="mt-4 text-sm text-aarla-red">{error}</p>}
       </div>
     </main>
