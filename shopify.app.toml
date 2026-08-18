@@ -9,6 +9,7 @@ embedded = false
 
 [access_scopes]
 # Minimum for Customer Calls commerce sync. Prefer read_all_orders for history.
+# Web Pixel does not require extra Admin scopes for client-side event posting.
 scopes = "read_customers,read_orders,read_all_orders"
 
 [auth]
@@ -16,3 +17,8 @@ redirect_urls = [ "https://shopify.dev/apps/default-app-home" ]
 
 [webhooks]
 api_version = "2025-01"
+
+# Web Pixel extension lives at extensions/aarla-commerce-pixel/
+# Deploy with: npx shopify app deploy
+# Then set ingestUrl + secret in the extension settings (see docs/shopify-web-pixel.md).
+# Fallback: Custom Pixel paste snippet in that doc if CLI wiring is incomplete.

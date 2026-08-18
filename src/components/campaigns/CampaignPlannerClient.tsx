@@ -15,6 +15,7 @@ import {
 import { CampaignPlannerMatrix } from "@/components/campaigns/CampaignPlannerMatrix";
 import { CampaignStatusChip } from "@/components/campaigns/CampaignStatusChip";
 import { PartnerRecallPanel } from "@/components/campaigns/PartnerRecallPanel";
+import { CampaignFunnelPanel } from "@/components/campaigns/CampaignFunnelPanel";
 import { planningModeHelper } from "@/lib/domain/campaign-planner";
 import type {
   CampaignBoard,
@@ -393,6 +394,13 @@ export function CampaignPlannerClient({
       </section>
 
       <PartnerRecallPanel board={board} pending={pending} onSave={savePartnerRecall} />
+
+      <CampaignFunnelPanel
+        campaignId={campaign.id}
+        startDate={campaign.startDate}
+        endDate={campaign.endDate}
+        isLive={campaign.status === "LIVE" || campaign.status === "PAUSED"}
+      />
 
       {board.attributedSales ? (
         <section className="rounded-xl border border-border bg-white p-4">

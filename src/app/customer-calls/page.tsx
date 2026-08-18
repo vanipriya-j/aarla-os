@@ -15,6 +15,7 @@ import { CommerceSyncProvider } from "@/components/customer-calls/CommerceSyncPr
 import { CommerceSyncBar } from "@/components/customer-calls/CommerceSyncBar";
 import { ShopifySyncPanel } from "@/components/customer-calls/ShopifySyncPanel";
 import { DelhiverySyncPanel } from "@/components/customer-calls/DelhiverySyncPanel";
+import { CartSessionsPanel } from "@/components/customer-calls/CartSessionsPanel";
 import {
   callLaterCustomerCallAction,
   getCustomerCallHistoryAction,
@@ -42,6 +43,7 @@ const STAGES = [
   { id: "delivery-follow-up", label: "Delivery Follow-up" },
   { id: "re-engagement", label: "Re-engagement" },
   { id: "abandoned-cart", label: "Abandoned Carts" },
+  { id: "live-carts", label: "Live carts" },
 ] as const;
 
 type StageId = (typeof STAGES)[number]["id"];
@@ -247,7 +249,9 @@ export default function CustomerCallsPage() {
                     ? "Stage 3 — Call customers with recent deliveries. Refresh also fills missing phones for those orders only."
                     : stage === "re-engagement"
                       ? "Stage 4 — Re-engage buyers with no purchase in 90+ days."
-                      : "Stage 5 — Recover Shopify checkouts started but never completed."}
+                      : stage === "abandoned-cart"
+                        ? "Stage 5 — Recover Shopify checkouts started but never completed."
+                        : "Stage 6 — Live pixel carts (Active / Abandoned / Recovered). Demand signal only — no inventory holds."}
             </p>
           </div>
 
@@ -272,6 +276,16 @@ export default function CustomerCallsPage() {
               aria-hidden={stage !== "shipments"}
             >
               <DelhiverySyncPanel />
+            </div>
+          ) : null}
+
+          {visited.has("live-carts") ? (
+            <div
+              className={`space-y-6 ${stage === "live-carts" ? "" : "hidden"}`}
+              data-testid="stage-live-carts"
+              aria-hidden={stage !== "live-carts"}
+            >
+              <CartSessionsPanel />
             </div>
           ) : null}
 

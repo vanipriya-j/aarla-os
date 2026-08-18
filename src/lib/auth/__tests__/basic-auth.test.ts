@@ -67,6 +67,7 @@ describe("role-based credentials + cookie sessions", () => {
     expect(isPublicPath("/setup")).toBe(true);
     expect(isPublicPath("/api/setup")).toBe(true);
     expect(isPublicPath("/api/integrations/shopify/reservations")).toBe(true);
+    expect(isPublicPath("/api/integrations/shopify/commerce-events")).toBe(true);
   });
 
   it("filters nav for crm to Customer Calls only", () => {
