@@ -11,7 +11,8 @@ type Status = {
 export default function SetupPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [secret, setSecret] = useState("");
-  const [seed, setSeed] = useState(true);
+  // Default off — demo seed truncates commerce tables (see earlier wipe).
+  const [seed, setSeed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -118,13 +119,22 @@ export default function SetupPage() {
           />
         </label>
 
-        <label className="mt-4 flex items-center gap-2 text-sm text-charcoal/90">
+        <label className="mt-4 flex items-start gap-2 text-sm text-charcoal/90">
           <input
             type="checkbox"
+            className="mt-0.5"
             checked={seed}
             onChange={(e) => setSeed(e.target.checked)}
           />
-          Load demo data (products, stock movements, etc.)
+          <span>
+            Load demo data (products, stock movements, etc.)
+            {seed ? (
+              <span className="mt-1 block text-aarla-red">
+                Warning: truncates existing products and stock before seeding.
+                Leave unchecked on production.
+              </span>
+            ) : null}
+          </span>
         </label>
 
         <button
