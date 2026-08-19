@@ -112,7 +112,7 @@ export function CommerceSyncBar() {
         return;
       }
       setServerLocked(false);
-      setStatus("Stuck sync lock cleared. You can sync again.");
+      setStatus("Stuck sync lock + sync cursor cleared. Full re-sync starts from the top.");
       await refreshMeta();
     } finally {
       setLocalAction("idle");
@@ -410,7 +410,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then tracks every Delhivery AWB already in the database (not just the last Shopify page). Use Full re-sync only when you need the whole catalog again."
+      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then tracks every Delhivery AWB already in the database (not just the last Shopify page). Use Full re-sync to walk history (small pages; click again if a chunk times out — it resumes). Clear stuck sync lock also resets the resume cursor if counts look frozen."
     >
       {counts ? (
         <p
