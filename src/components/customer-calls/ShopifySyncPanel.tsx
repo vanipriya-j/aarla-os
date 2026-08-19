@@ -125,8 +125,10 @@ export function ShopifySyncPanel() {
         total = mergeShopifySyncSummaries(total, res.data);
         setSummary({ ...total });
 
-        if (res.data.errors.length && !res.data.hasMore) {
+        if (res.data.errors.length && !res.data.complete) {
           setError(res.data.errors.slice(0, 3).join(" · "));
+          setStatus("Stopped — Shopify incomplete. Clear lock, then sync again (resumes).");
+          return;
         }
 
         if (!res.data.hasMore) break;
@@ -134,11 +136,13 @@ export function ShopifySyncPanel() {
         if (!cursor) break;
       }
 
-      setStatus(
-        total.complete
-          ? "Shopify sync complete."
-          : "Shopify sync paused — click Sync again to continue.",
-      );
+      if (total.hasMore || !total.complete) {
+        setStatus(
+          `Paused after ${guard} chunks (${total.ordersRead} orders). Sync again — it resumes.`,
+        );
+      } else {
+        setStatus("Shopify sync complete.");
+      }
       const diag = await getShopifyCommerceDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
       if (diag.ok) {
