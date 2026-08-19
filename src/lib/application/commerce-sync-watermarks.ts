@@ -15,6 +15,7 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
       watermark_at timestamptz,
       run_id text,
       run_high_water_at timestamptz,
+      run_next_cursor text,
       updated_at timestamptz not null default now()
     )
   `);
@@ -26,6 +27,10 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
     alter table commerce_sync_watermarks
       add constraint commerce_sync_watermarks_channel_check
       check (channel in ('shopify_orders', 'shopify_abandoned_checkouts'))
+  `);
+  await query(`
+    alter table commerce_sync_watermarks
+      add column if not exists run_next_cursor text
   `);
   ensured = true;
 }
@@ -49,20 +54,53 @@ export async function getCommittedShopifyOrdersWatermark(): Promise<string | nul
 }
 
 /**
- * Watermark used for incremental sync:
- * committed value if present, otherwise bootstrap from max saved order_date
- * so a store that already synced does not re-walk the full catalog.
+ * Watermark used for incremental sync — committed value only.
+ *
+ * Never bootstrap from max(order_date): a timed-out newest-first chunk would
+ * freeze incremental sync at ~one page of customers forever.
+ * No committed watermark → incremental walks like full until a run completes.
  */
 export async function getShopifyOrdersWatermark(): Promise<string | null> {
-  const committed = await getCommittedShopifyOrdersWatermark();
-  if (committed) return committed;
+  return getCommittedShopifyOrdersWatermark();
+}
 
-  const maxRows = await query<{ m: Date | string | null }>(
-    `select max(order_date) as m from external_orders
-     where organization_id = $1 and provider = 'shopify'`,
-    [ORG_ID],
+/** Resume cursor for an interrupted catalog walk (survives Vercel timeouts). */
+export async function getShopifyOrdersResumeCursor(): Promise<string | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const rows = await query<{ run_next_cursor: string | null }>(
+    `select run_next_cursor from commerce_sync_watermarks
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL, ORG_ID],
   );
-  return toIso(maxRows[0]?.m ?? null);
+  const c = rows[0]?.run_next_cursor?.trim();
+  return c || null;
+}
+
+export async function saveShopifyOrdersResumeCursor(
+  cursor: string | null,
+): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  const value = cursor?.trim() || null;
+  await query(
+    `insert into commerce_sync_watermarks as w (
+       channel, organization_id, run_next_cursor, updated_at
+     ) values ($1, $2, $3, now())
+     on conflict (channel) do update set
+       run_next_cursor = excluded.run_next_cursor,
+       updated_at = now()`,
+    [CHANNEL, ORG_ID, value],
+  );
+}
+
+/** Clear a bad tip watermark so the next sync re-walks history. */
+export async function clearShopifyOrdersWatermark(): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  await query(
+    `update commerce_sync_watermarks
+     set watermark_at = null, updated_at = now()
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL, ORG_ID],
+  );
 }
 
 /**
@@ -72,27 +110,36 @@ export async function getShopifyOrdersWatermark(): Promise<string | null> {
 export async function noteShopifyOrdersSyncProgress(input: {
   runId: string;
   maxOrderAt: string | null;
+  nextCursor?: string | null;
 }): Promise<void> {
   await ensureCommerceSyncWatermarksTable();
   const runId = input.runId.trim();
   if (!runId) return;
   const maxOrderAt = toIso(input.maxOrderAt);
-  if (!maxOrderAt) return;
+  const hasCursorUpdate = input.nextCursor !== undefined;
+  const nextCursor = hasCursorUpdate ? input.nextCursor?.trim() || null : null;
+
+  if (!maxOrderAt && !hasCursorUpdate) return;
 
   await query(
     `insert into commerce_sync_watermarks as w (
-       channel, organization_id, run_id, run_high_water_at, updated_at
-     ) values ($1, $2, $3, $4::timestamptz, now())
+       channel, organization_id, run_id, run_high_water_at, run_next_cursor, updated_at
+     ) values ($1, $2, $3, $4::timestamptz, $5, now())
      on conflict (channel) do update set
        run_id = excluded.run_id,
        run_high_water_at = case
+         when excluded.run_high_water_at is null then w.run_high_water_at
          when w.run_id is distinct from excluded.run_id then excluded.run_high_water_at
          when w.run_high_water_at is null then excluded.run_high_water_at
          when excluded.run_high_water_at > w.run_high_water_at then excluded.run_high_water_at
          else w.run_high_water_at
        end,
+       run_next_cursor = case
+         when $6::boolean then excluded.run_next_cursor
+         else w.run_next_cursor
+       end,
        updated_at = now()`,
-    [CHANNEL, ORG_ID, runId, maxOrderAt],
+    [CHANNEL, ORG_ID, runId, maxOrderAt, nextCursor, hasCursorUpdate],
   );
 }
 
@@ -113,6 +160,7 @@ export async function commitShopifyOrdersWatermark(runId: string): Promise<strin
        end,
        run_id = null,
        run_high_water_at = null,
+       run_next_cursor = null,
        updated_at = now()
      where w.channel = $1 and w.organization_id = $2 and w.run_id = $3
      returning watermark_at`,
@@ -141,20 +189,47 @@ export async function getCommittedShopifyAbandonedWatermark(): Promise<string | 
 }
 
 /**
- * Watermark used for incremental abandoned-checkout sync:
- * committed value if present, otherwise bootstrap from max saved last_activity_at
- * so a store that already synced does not re-walk the full history.
+ * Abandoned incremental watermark — committed only (same bootstrap trap as orders).
  */
 export async function getShopifyAbandonedWatermark(): Promise<string | null> {
-  const committed = await getCommittedShopifyAbandonedWatermark();
-  if (committed) return committed;
+  return getCommittedShopifyAbandonedWatermark();
+}
 
-  const maxRows = await query<{ m: Date | string | null }>(
-    `select max(last_activity_at) as m from external_abandoned_checkouts
-     where organization_id = $1 and provider = 'shopify'`,
-    [ORG_ID],
+export async function getShopifyAbandonedResumeCursor(): Promise<string | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const rows = await query<{ run_next_cursor: string | null }>(
+    `select run_next_cursor from commerce_sync_watermarks
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_ABANDONED, ORG_ID],
   );
-  return toIso(maxRows[0]?.m ?? null);
+  const c = rows[0]?.run_next_cursor?.trim();
+  return c || null;
+}
+
+export async function saveShopifyAbandonedResumeCursor(
+  cursor: string | null,
+): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  const value = cursor?.trim() || null;
+  await query(
+    `insert into commerce_sync_watermarks as w (
+       channel, organization_id, run_next_cursor, updated_at
+     ) values ($1, $2, $3, now())
+     on conflict (channel) do update set
+       run_next_cursor = excluded.run_next_cursor,
+       updated_at = now()`,
+    [CHANNEL_ABANDONED, ORG_ID, value],
+  );
+}
+
+export async function clearShopifyAbandonedWatermark(): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  await query(
+    `update commerce_sync_watermarks
+     set watermark_at = null, updated_at = now()
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_ABANDONED, ORG_ID],
+  );
 }
 
 /**
@@ -164,27 +239,36 @@ export async function getShopifyAbandonedWatermark(): Promise<string | null> {
 export async function noteShopifyAbandonedSyncProgress(input: {
   runId: string;
   maxActivityAt: string | null;
+  nextCursor?: string | null;
 }): Promise<void> {
   await ensureCommerceSyncWatermarksTable();
   const runId = input.runId.trim();
   if (!runId) return;
   const maxActivityAt = toIso(input.maxActivityAt);
-  if (!maxActivityAt) return;
+  const hasCursorUpdate = input.nextCursor !== undefined;
+  const nextCursor = hasCursorUpdate ? input.nextCursor?.trim() || null : null;
+
+  if (!maxActivityAt && !hasCursorUpdate) return;
 
   await query(
     `insert into commerce_sync_watermarks as w (
-       channel, organization_id, run_id, run_high_water_at, updated_at
-     ) values ($1, $2, $3, $4::timestamptz, now())
+       channel, organization_id, run_id, run_high_water_at, run_next_cursor, updated_at
+     ) values ($1, $2, $3, $4::timestamptz, $5, now())
      on conflict (channel) do update set
        run_id = excluded.run_id,
        run_high_water_at = case
+         when excluded.run_high_water_at is null then w.run_high_water_at
          when w.run_id is distinct from excluded.run_id then excluded.run_high_water_at
          when w.run_high_water_at is null then excluded.run_high_water_at
          when excluded.run_high_water_at > w.run_high_water_at then excluded.run_high_water_at
          else w.run_high_water_at
        end,
+       run_next_cursor = case
+         when $6::boolean then excluded.run_next_cursor
+         else w.run_next_cursor
+       end,
        updated_at = now()`,
-    [CHANNEL_ABANDONED, ORG_ID, runId, maxActivityAt],
+    [CHANNEL_ABANDONED, ORG_ID, runId, maxActivityAt, nextCursor, hasCursorUpdate],
   );
 }
 
@@ -205,6 +289,7 @@ export async function commitShopifyAbandonedWatermark(runId: string): Promise<st
        end,
        run_id = null,
        run_high_water_at = null,
+       run_next_cursor = null,
        updated_at = now()
      where w.channel = $1 and w.organization_id = $2 and w.run_id = $3
      returning watermark_at`,

@@ -25,8 +25,11 @@ UI Sync Shopify Data / Sync All
 Uses a Route Handler (not a Server Action) so Vercel timeouts return JSON instead of
 Next.js “An unexpected response was received from the server.”
 
-**Default sync is incremental:** only Shopify orders newer than the last successful
-watermark are fetched. Use **Full Shopify re-sync** to walk the whole catalog again.
+**Default sync is incremental:** only Shopify orders newer than the last **committed**
+successful watermark are fetched. A timed-out first page must not freeze the catalog —
+watermarks are never bootstrapped from `max(order_date)`. Use **Full Shopify re-sync**
+to walk the whole catalog; if a chunk times out, click Full re-sync again — it **resumes**
+from a saved cursor (does not restart at the newest 100 orders).
 Abandoned checkouts follow the same incremental/full watermark pattern (own
 `shopify_abandoned_checkouts` watermark channel), and run in **Sync All** right after
 Shopify orders and before Delhivery, using the same sync lock token.

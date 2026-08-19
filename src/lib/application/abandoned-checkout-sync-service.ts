@@ -8,7 +8,9 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
 import {
+  clearShopifyAbandonedWatermark,
   commitShopifyAbandonedWatermark,
+  getShopifyAbandonedResumeCursor,
   getShopifyAbandonedWatermark,
   noteShopifyAbandonedSyncProgress,
   shopifyAbandonedCreatedAfterQuery,
@@ -91,6 +93,11 @@ export async function syncShopifyAbandonedCheckouts(
   await repo.ensureAbandonedCheckoutSchema();
 
   let query: string | null = null;
+  let resumeCursor: string | null = deps.cursor ?? null;
+  if (!resumeCursor) {
+    resumeCursor = await getShopifyAbandonedResumeCursor();
+  }
+
   if (mode === "incremental") {
     const watermark = await getShopifyAbandonedWatermark();
     summary.incrementalFrom = watermark;
@@ -99,12 +106,15 @@ export async function syncShopifyAbandonedCheckouts(
     }
   } else {
     summary.incrementalFrom = null;
+    if (!deps.cursor && !resumeCursor) {
+      await clearShopifyAbandonedWatermark();
+    }
   }
 
   let page;
   try {
     page = await connector.fetchAbandonedCheckoutsPage({
-      cursor: deps.cursor ?? null,
+      cursor: resumeCursor,
       maxPages,
       query,
     });
@@ -115,7 +125,7 @@ export async function syncShopifyAbandonedCheckouts(
     summary.nextCursor = null;
     summary.pagesFetched = 0;
     summary.complete = false;
-    return summary;
+    throw new Error(message);
   }
 
   summary.checkoutsRead = page.checkouts.length;
@@ -128,6 +138,7 @@ export async function syncShopifyAbandonedCheckouts(
     await noteShopifyAbandonedSyncProgress({
       runId: deps.runId,
       maxActivityAt: maxActivityDateIso(page.checkouts),
+      nextCursor: page.hasMore ? page.nextCursor : null,
     });
   }
 
