@@ -184,8 +184,8 @@ export function CartSessionsPanel() {
 
       {sessions.length === 0 ? (
         <p className="text-sm text-charcoal/55">
-          No cart sessions yet. Deploy the web pixel (or Custom Pixel) and browse the
-          storefront.
+          No cart sessions yet. With the pixel connected, add a product to cart on the
+          storefront (product views alone do not create a live cart). Then refresh.
         </p>
       ) : (
         <ul className="divide-y divide-border border border-border rounded-lg">

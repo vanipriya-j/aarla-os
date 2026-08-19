@@ -6,6 +6,7 @@ import {
   type CustomerInteraction,
   type SaveCallOutcomeInput,
 } from "@/lib/domain/customer-calls-types";
+import { ensureTenantBasicsViaPool } from "@/lib/infra/db/ensure-tenant";
 import type { CustomerCallsRepository } from "@/lib/repositories/customer-calls";
 
 const STAFF = "vyshali";
@@ -14,10 +15,12 @@ export class CustomerCallsEngine {
   constructor(private readonly repo: CustomerCallsRepository) {}
 
   async listSegments(): Promise<CustomerCallSegment[]> {
+    await ensureTenantBasicsViaPool();
     return this.repo.listSegments();
   }
 
   async getWorkspace(segmentType: CallSegmentType) {
+    await ensureTenantBasicsViaPool();
     const segment = await this.repo.getSegmentByType(segmentType);
     if (!segment) throw new Error(`Segment not found: ${segmentType}`);
     const queue = await this.repo.listQueue(segment.id, true);

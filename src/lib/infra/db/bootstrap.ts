@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { resolveDatabaseUrl, shouldUseSsl } from "./env";
+import { ensureTenantBasics } from "./ensure-tenant";
 import { runMigrations } from "./migrate";
 import { runSeedDemo } from "./seed-demo";
 
@@ -10,8 +11,8 @@ export type BootstrapResult = {
 };
 
 /**
- * One-shot: apply migrations, then (optionally) load demo seed data.
- * Used by POST /api/setup so founders without a local machine can initialize Supabase Cloud.
+ * One-shot: apply migrations, always ensure org + call segments, then (optionally)
+ * load demo seed data. Used by POST /api/setup.
  */
 export async function bootstrapDatabase(options: {
   seed: boolean;
@@ -26,6 +27,17 @@ export async function bootstrapDatabase(options: {
   await client.connect();
   try {
     const migrate = await runMigrations(client);
+
+    // Always — migrate-only /setup must still create org + call segments
+    // so Customer Calls and commerce ingest work without demo data.
+    await client.query("begin");
+    try {
+      await ensureTenantBasics(client, { isDemo: options.seed });
+      await client.query("commit");
+    } catch (err) {
+      await client.query("rollback");
+      throw err;
+    }
 
     if (options.seed) {
       await client.query("begin");

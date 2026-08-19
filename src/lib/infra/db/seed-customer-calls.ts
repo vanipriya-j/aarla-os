@@ -165,11 +165,9 @@ async function clearSeedPending(client: DbClient): Promise<void> {
 }
 
 /**
- * Seed call segments always. Demo queue rows only when no commerce has been synced,
- * so production /setup after Shopify sync does not resurrect Meera Iyer.
+ * Idempotent segment definitions only (no demo queue). Safe after migrate-only /setup.
  */
-export async function seedCustomerCalls(client: DbClient): Promise<void> {
-  console.log("[seed-db] customer_call_segments…");
+export async function ensureCustomerCallSegments(client: DbClient): Promise<void> {
   await ensureSegmentTypeConstraint(client);
   await client.query(
     `insert into customer_call_segments (
@@ -189,8 +187,16 @@ export async function seedCustomerCalls(client: DbClient): Promise<void> {
       ABANDONED_CART_SCRIPT,
     ],
   );
-
   await ensureSourceKey(client);
+}
+
+/**
+ * Seed call segments always. Demo queue rows only when no commerce has been synced,
+ * so production /setup after Shopify sync does not resurrect Meera Iyer.
+ */
+export async function seedCustomerCalls(client: DbClient): Promise<void> {
+  console.log("[seed-db] customer_call_segments…");
+  await ensureCustomerCallSegments(client);
 
   const customers = await count(
     client,
@@ -217,25 +223,6 @@ export async function seedCustomerCalls(client: DbClient): Promise<void> {
 
 /** Test helper: force-insert a small demo queue regardless of commerce. */
 export async function seedDemoCallQueuesForTests(client: DbClient): Promise<void> {
-  await ensureSegmentTypeConstraint(client);
-  await client.query(
-    `insert into customer_call_segments (
-      id, organization_id, name, description, segment_type, script, is_active, cooldown_days
-    ) values
-      ($1,$2,'Delivery Follow-up','Check post-delivery experience','delivery-follow-up',$3,true,14),
-      ($4,$2,'Re-engagement — No Purchase in 90 Days','Warm outreach for lapsed buyers','re-engagement',$5,true,90),
-      ($6,$2,'Abandoned Carts','Outreach for Shopify checkouts started but never completed','abandoned-cart',$7,true,7)
-    on conflict (organization_id, segment_type) do nothing`,
-    [
-      DELIVERY_SEG,
-      ORG_ID,
-      DELIVERY_SCRIPT,
-      REENG_SEG,
-      REENGAGEMENT_SCRIPT,
-      ABANDONED_SEG,
-      ABANDONED_CART_SCRIPT,
-    ],
-  );
-  await ensureSourceKey(client);
+  await ensureCustomerCallSegments(client);
   await insertDemoQueue(client, DEMO_CALL_QUEUE);
 }

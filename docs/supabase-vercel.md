@@ -61,7 +61,7 @@ Open **https://aarla-os.vercel.app/setup**
 
 1. Paste `SETUP_SECRET`
 2. Leave **Load demo data unchecked** (migrations only — protects live commerce)
-3. Initialize
+3. Initialize — even with demo off, setup still creates the Aarla org + Customer Calls segments (Delivery / Re-engagement / Abandoned Cart). It does **not** load demo products or fake queue people.
 
 **Option B — single SQL file**  
 `supabase/aarla-os-complete.sql` is the concatenated schema (all migrations in order).  

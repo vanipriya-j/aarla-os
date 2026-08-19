@@ -28,6 +28,7 @@ import type {
   IngestCommerceEventResult,
 } from "@/lib/domain/commerce-cart-types";
 import { cartSessionQueueSourceKey } from "@/lib/domain/commerce-cart-types";
+import { ensureTenantBasicsViaPool } from "@/lib/infra/db/ensure-tenant";
 import { createCommerceCartRepository } from "@/lib/infra/repositories/postgres-commerce-cart";
 import { createCustomerCallsRepository } from "@/lib/infra/repositories/postgres-customer-calls";
 import type { CommerceCartRepository } from "@/lib/repositories/commerce-cart";
@@ -98,6 +99,10 @@ export async function ingestCommerceEvent(
   input: IngestCommerceEventInput,
   deps: CommerceCartServiceDeps = {},
 ): Promise<IngestCommerceEventResult> {
+  // Migrate-only /setup may have skipped org + segments — heal before FK writes.
+  if (!deps.repo) {
+    await ensureTenantBasicsViaPool();
+  }
   const repo = deps.repo ?? createCommerceCartRepository();
   const now = deps.now ?? new Date();
   const provider = input.provider ?? "shopify";
