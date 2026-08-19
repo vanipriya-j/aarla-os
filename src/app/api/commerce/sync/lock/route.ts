@@ -5,6 +5,12 @@ import {
   releaseCommerceSyncLock,
 } from "@/lib/application/commerce-sync-lock";
 import {
+  saveShopifyAbandonedResumeCursor,
+  saveShopifyOrdersResumeCursor,
+  clearShopifyAbandonedWatermark,
+  clearShopifyOrdersWatermark,
+} from "@/lib/application/commerce-sync-watermarks";
+import {
   ConfigurationError,
   DatabaseUnavailableError,
 } from "@/lib/infra/db/errors";
@@ -37,6 +43,9 @@ export async function GET() {
 /**
  * POST /api/commerce/sync/lock
  * Body: { action: "clear" } | { action: "release", lockToken: string }
+ *
+ * "clear" also resets Shopify resume cursors + tip watermarks so Full re-sync
+ * starts from the newest page again (recovery after a bad mid-page skip).
  */
 export async function POST(request: Request) {
   try {
@@ -47,6 +56,11 @@ export async function POST(request: Request) {
 
     if (body.action === "clear") {
       await forceClearCommerceSyncLock();
+      // Reset sync progress so the next Full re-sync does not skip unsaved orders.
+      await saveShopifyOrdersResumeCursor(null);
+      await saveShopifyAbandonedResumeCursor(null);
+      await clearShopifyOrdersWatermark();
+      await clearShopifyAbandonedWatermark();
       return NextResponse.json({ ok: true, data: { cleared: true as const } });
     }
 

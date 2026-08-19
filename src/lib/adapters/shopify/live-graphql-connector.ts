@@ -49,8 +49,8 @@ export function readLiveShopifyConfigFromEnv(
 }
 
 const ORDERS_QUERY = `
-query SyncOrders($cursor: String, $query: String) {
-  orders(first: 100, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
+query SyncOrders($cursor: String, $query: String, $pageSize: Int!) {
+  orders(first: $pageSize, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -545,9 +545,18 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     while (hasNext && pages < maxPages) {
       pages += 1;
-      const variables: { cursor: string | null; query: string | null } = {
+      // Keep pages small so sequential upserts finish inside Vercel’s ~60s limit.
+      // Advancing the resume cursor only after upserts (service layer) + this size
+      // avoids skipping half a page when a chunk times out mid-write.
+      const pageSize = Math.max(10, Math.min(options.pageSize ?? 25, 50));
+      const variables: {
+        cursor: string | null;
+        query: string | null;
+        pageSize: number;
+      } = {
         cursor,
         query: options.query?.trim() ? options.query.trim() : null,
+        pageSize,
       };
       const data: OrdersQueryData = await this.graphql<OrdersQueryData>(
         ORDERS_QUERY,
