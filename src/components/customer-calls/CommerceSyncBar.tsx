@@ -164,12 +164,22 @@ export function CommerceSyncBar() {
           `Shopify chunk ${guard} saved · ${shopifyTotal.ordersRead} new orders read${since}` +
             (res.data.hasMore ? " · more remaining…" : " · Shopify done"),
         );
-        if (res.data.errors.length && !res.data.hasMore) {
+        if (res.data.errors.length && !res.data.complete) {
           setError(res.data.errors.slice(0, 3).join(" · "));
+          setStatus("Stopped — Shopify incomplete. Clear the lock, then Sync All or Full re-sync.");
+          return;
         }
         if (!res.data.hasMore) break;
         cursor = res.data.nextCursor ?? null;
         if (!cursor) break;
+      }
+
+      if (shopifyTotal.hasMore || !shopifyTotal.complete) {
+        setStatus(
+          `Shopify paused after ${guard} chunks (${shopifyTotal.ordersRead} orders read). ` +
+            "Clear the lock if needed, then Sync All / Full re-sync — it resumes.",
+        );
+        return;
       }
 
       setStatus("Shopify orders done — checking for abandoned checkouts…");
@@ -321,9 +331,24 @@ export function CommerceSyncBar() {
           `Full re-sync chunk ${guard} · ${shopifyTotal.ordersRead} orders read` +
             (res.data.hasMore ? " · more remaining…" : " · full Shopify done"),
         );
+        if (res.data.errors.length && !res.data.complete) {
+          setError(res.data.errors.slice(0, 3).join(" · "));
+          setStatus(
+            "Stopped — full re-sync incomplete. Clear the lock, then Full re-sync again (resumes).",
+          );
+          return;
+        }
         if (!res.data.hasMore) break;
         cursor = res.data.nextCursor ?? null;
         if (!cursor) break;
+      }
+
+      if (shopifyTotal.hasMore || !shopifyTotal.complete) {
+        setStatus(
+          `Full re-sync paused after ${guard} chunks (${shopifyTotal.ordersRead} orders read). ` +
+            "Click Full re-sync again — it resumes from the saved cursor.",
+        );
+        return;
       }
 
       setStatus(

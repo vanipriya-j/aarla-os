@@ -15,7 +15,9 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
 import {
+  clearShopifyOrdersWatermark,
   commitShopifyOrdersWatermark,
+  getShopifyOrdersResumeCursor,
   getShopifyOrdersWatermark,
   noteShopifyOrdersSyncProgress,
   shopifyOrdersCreatedAfterQuery,
@@ -83,6 +85,11 @@ export async function syncShopifyCustomerCallData(
   await repo.ensureOrderTaxSchema();
 
   let query: string | null = null;
+  let resumeCursor: string | null = deps.cursor ?? null;
+  if (!resumeCursor) {
+    resumeCursor = await getShopifyOrdersResumeCursor();
+  }
+
   if (mode === "incremental") {
     const watermark = await getShopifyOrdersWatermark();
     summary.incrementalFrom = watermark;
@@ -91,6 +98,11 @@ export async function syncShopifyCustomerCallData(
     }
   } else {
     summary.incrementalFrom = null;
+    // Fresh full walk (no client cursor, no saved resume): drop a tip watermark
+    // frozen by a partial newest-first sync so history can be re-walked.
+    if (!deps.cursor && !resumeCursor) {
+      await clearShopifyOrdersWatermark();
+    }
   }
 
   let payload;
@@ -101,7 +113,7 @@ export async function syncShopifyCustomerCallData(
   try {
     if (typeof connector.fetchCustomerCallPage === "function") {
       const page = await connector.fetchCustomerCallPage({
-        cursor: deps.cursor ?? null,
+        cursor: resumeCursor,
         maxPages,
         query,
       });
@@ -111,7 +123,7 @@ export async function syncShopifyCustomerCallData(
       pagesFetched = page.pagesFetched;
     } else {
       payload = await connector.fetchCustomerCallPayload({
-        cursor: deps.cursor ?? null,
+        cursor: resumeCursor,
         maxPages,
         query,
       });
@@ -126,7 +138,8 @@ export async function syncShopifyCustomerCallData(
     summary.nextCursor = null;
     summary.pagesFetched = 0;
     summary.complete = false;
-    return summary;
+    // Surface as failure to the API — do not look like a finished catalog walk.
+    throw new Error(message);
   }
 
   summary.customersRead = payload.customers.length;
@@ -140,6 +153,7 @@ export async function syncShopifyCustomerCallData(
     await noteShopifyOrdersSyncProgress({
       runId: deps.runId,
       maxOrderAt: maxOrderDateIso(payload.orders),
+      nextCursor: hasMore ? nextCursor : null,
     });
   }
 
