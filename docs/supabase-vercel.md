@@ -74,6 +74,12 @@ Paste once into the Supabase SQL Editor on an **empty** project if you prefer no
 2. Merge/redeploy the build that uses Transaction pooler (port 6543) + pool size 1  
 3. Retry
 
+### Backlog — post-setup next steps
+
+Do **not** deep-link from `/setup` success into Inventory (or other ops screens).
+A guided “what to do after initialize” flow (sync Shopify, open Inventory, etc.)
+stays in the backlog.
+
 ### If Home still shows an old DB error after setup
 
 Home used to be statically baked at build time. Redeploy after tables exist (or use a build that calls Next `connection()` before DB reads).

@@ -136,14 +136,7 @@ export default function SetupPage() {
           {pending ? "Initializing…" : "Initialize database"}
         </button>
 
-        {message && (
-          <p className="mt-4 text-sm text-deep-navy">
-            {message}{" "}
-            <a href="/inventory" className="underline">
-              Open Inventory
-            </a>
-          </p>
-        )}
+        {message && <p className="mt-4 text-sm text-deep-navy">{message}</p>}
         {error && <p className="mt-4 text-sm text-aarla-red">{error}</p>}
       </div>
     </main>
