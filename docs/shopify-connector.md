@@ -29,7 +29,9 @@ Next.js “An unexpected response was received from the server.”
 successful watermark are fetched. A timed-out first page must not freeze the catalog —
 watermarks are never bootstrapped from `max(order_date)`. Use **Full Shopify re-sync**
 to walk the whole catalog; if a chunk times out, click Full re-sync again — it **resumes**
-from a saved cursor (does not restart at the newest 100 orders).
+from a saved cursor (advanced only after that chunk’s rows are saved). Page size is ~25
+orders so upserts fit under Vercel’s time limit. **Clear stuck sync lock** also resets the
+resume cursor + tip watermark if counts look frozen (e.g. many customers, few orders).
 Abandoned checkouts follow the same incremental/full watermark pattern (own
 `shopify_abandoned_checkouts` watermark channel), and run in **Sync All** right after
 Shopify orders and before Delhivery, using the same sync lock token.
