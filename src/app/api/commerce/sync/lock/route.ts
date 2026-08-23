@@ -42,10 +42,10 @@ export async function GET() {
 
 /**
  * POST /api/commerce/sync/lock
- * Body: { action: "clear" } | { action: "release", lockToken: string }
- *
- * "clear" also resets Shopify resume cursors + tip watermarks so Full re-sync
- * starts from the newest page again (recovery after a bad mid-page skip).
+ * Body:
+ *   { action: "unlock" }  — clear lock only (auto-resume; keeps cursors)
+ *   { action: "clear" }   — clear lock + resume cursors + tip watermarks (manual reset)
+ *   { action: "release", lockToken }
  */
 export async function POST(request: Request) {
   try {
@@ -53,6 +53,11 @@ export async function POST(request: Request) {
       action?: string;
       lockToken?: string;
     };
+
+    if (body.action === "unlock") {
+      await forceClearCommerceSyncLock();
+      return NextResponse.json({ ok: true, data: { unlocked: true as const } });
+    }
 
     if (body.action === "clear") {
       await forceClearCommerceSyncLock();
@@ -70,7 +75,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { ok: false, error: 'Expected action "clear" or "release".' },
+      { ok: false, error: 'Expected action "unlock", "clear", or "release".' },
       { status: 400 },
     );
   } catch (err) {

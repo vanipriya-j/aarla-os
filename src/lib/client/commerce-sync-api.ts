@@ -124,6 +124,15 @@ export async function clearCommerceSyncLockViaApi(): Promise<
   });
 }
 
+/** Clear lock only — keeps Shopify resume cursors for auto-retry. */
+export async function unlockCommerceSyncLockViaApi(): Promise<
+  ActionResult<{ unlocked: true }>
+> {
+  return postJson<{ unlocked: true }>("/api/commerce/sync/lock", {
+    action: "unlock",
+  });
+}
+
 export async function getCommerceSyncLockViaApi(): Promise<
   ActionResult<CommerceSyncLockStatus>
 > {

@@ -11,6 +11,7 @@ import {
   syncShopifyAbandonedChunkViaApi,
   syncShopifyChunkViaApi,
 } from "@/lib/client/commerce-sync-api";
+import { runChunkWithAutoRetry } from "@/lib/client/commerce-sync-auto-retry";
 import {
   emptyShopifyAbandonedSyncSummary,
   emptyShopifySyncSummary,
@@ -121,20 +122,34 @@ export function CommerceSyncBar() {
 
   async function handleSyncAll() {
     if (controlsBusy) return;
-    const token = beginSync("all");
-    if (!token) {
+    const started = beginSync("all");
+    if (!started) {
       setError("A sync is already in progress in this tab.");
       return;
     }
 
+    const lockTokenRef = { current: started };
     setError(null);
     setStatus("Click received — incremental Shopify sync (new orders only)…");
+
+    const retryOpts = {
+      getToken: () => lockTokenRef.current,
+      setToken: (t: string) => {
+        lockTokenRef.current = t;
+      },
+      onRetry: (attempt: number, maxAttempts: number) => {
+        setError(null);
+        setStatus(
+          `Chunk interrupted (Vercel timeout/lock) — unlocking and retrying ${attempt}/${maxAttempts}…`,
+        );
+      },
+    };
 
     try {
       let cursor: string | null = null;
       let shopifyTotal = emptyShopifySyncSummary();
       let guard = 0;
-      const maxChunks = 120;
+      const maxChunks = 400;
 
       while (guard < maxChunks) {
         guard += 1;
@@ -143,17 +158,13 @@ export function CommerceSyncBar() {
             ? `Working… Shopify chunk ${guard} (continuing)`
             : `Working… Shopify chunk ${guard}`,
         );
-        let res;
-        try {
-          res = await syncShopifyChunkViaApi(cursor, token, "incremental");
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setStatus("Stopped — clear the lock if needed, then try again.");
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          ...retryOpts,
+          attempt: (token) => syncShopifyChunkViaApi(cursor, token, "incremental"),
+        });
         if (!res.ok) {
           setError(res.error);
-          setStatus("Stopped — clear the lock if needed, then try again.");
+          setStatus("Stopped after automatic retries — use Clear stuck sync lock only if still locked.");
           return;
         }
         shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
@@ -166,7 +177,7 @@ export function CommerceSyncBar() {
         );
         if (res.data.errors.length && !res.data.complete) {
           setError(res.data.errors.slice(0, 3).join(" · "));
-          setStatus("Stopped — Shopify incomplete. Clear the lock, then Sync All or Full re-sync.");
+          setStatus("Stopped — Shopify reported errors. Check Diagnostics, then Sync All again.");
           return;
         }
         if (!res.data.hasMore) break;
@@ -176,8 +187,8 @@ export function CommerceSyncBar() {
 
       if (shopifyTotal.hasMore || !shopifyTotal.complete) {
         setStatus(
-          `Shopify paused after ${guard} chunks (${shopifyTotal.ordersRead} orders read). ` +
-            "Clear the lock if needed, then Sync All / Full re-sync — it resumes.",
+          `Shopify still has more after ${guard} chunks (${shopifyTotal.ordersRead} orders). ` +
+            "Click Sync All again — it resumes automatically.",
         );
         return;
       }
@@ -186,7 +197,7 @@ export function CommerceSyncBar() {
       let abandonedCursor: string | null = null;
       let abandonedTotal = emptyShopifyAbandonedSyncSummary();
       guard = 0;
-      const abandonedMaxChunks = 120;
+      const abandonedMaxChunks = 400;
 
       while (guard < abandonedMaxChunks) {
         guard += 1;
@@ -195,17 +206,14 @@ export function CommerceSyncBar() {
             ? `Working… abandoned-checkout chunk ${guard} (continuing)`
             : `Working… abandoned-checkout chunk ${guard}`,
         );
-        let res;
-        try {
-          res = await syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "incremental");
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          ...retryOpts,
+          attempt: (token) =>
+            syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "incremental"),
+        });
         if (!res.ok) {
           setError(res.error);
-          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          setStatus("Stopped during abandoned checkouts after automatic retries.");
           return;
         }
         abandonedTotal = mergeShopifyAbandonedSyncSummaries(abandonedTotal, res.data);
@@ -213,9 +221,6 @@ export function CommerceSyncBar() {
           `Abandoned-checkout chunk ${guard} saved · ${abandonedTotal.checkoutsRead} checkouts read` +
             (res.data.hasMore ? " · more remaining…" : " · abandoned checkouts done"),
         );
-        if (res.data.errors.length && !res.data.hasMore) {
-          setError(res.data.errors.slice(0, 3).join(" · "));
-        }
         if (!res.data.hasMore) break;
         abandonedCursor = res.data.nextCursor ?? null;
         if (!abandonedCursor) break;
@@ -225,8 +230,7 @@ export function CommerceSyncBar() {
       let offset: number | null = 0;
       let delhiveryTotal = emptyDelhiverySyncSummary();
       guard = 0;
-      // Separate budget from Shopify — full AWB backfill can need many chunks.
-      const delhiveryMaxChunks = 200;
+      const delhiveryMaxChunks = 400;
 
       while (guard < delhiveryMaxChunks) {
         guard += 1;
@@ -235,17 +239,13 @@ export function CommerceSyncBar() {
             ? `Working… Delhivery chunk ${guard} (AWB offset ${offset})`
             : `Working… Delhivery chunk ${guard}`,
         );
-        let res;
-        try {
-          res = await syncDelhiveryChunkViaApi(offset, token);
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setStatus("Stopped during Delhivery — clear the lock if needed, then try again.");
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          ...retryOpts,
+          attempt: (token) => syncDelhiveryChunkViaApi(offset, token),
+        });
         if (!res.ok) {
           setError(res.error);
-          setStatus("Stopped during Delhivery — clear the lock if needed, then try again.");
+          setStatus("Stopped during Delhivery after automatic retries.");
           return;
         }
         delhiveryTotal = mergeDelhiverySyncSummaries(delhiveryTotal, res.data);
@@ -282,29 +282,43 @@ export function CommerceSyncBar() {
       }
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
-      setStatus("Stopped — clear the lock if needed, then try again.");
+      setStatus("Stopped — Sync All will auto-retry timeouts; Clear lock only for a hard reset.");
     } finally {
-      await endSync(token);
+      await endSync(lockTokenRef.current);
       await refreshMeta();
     }
   }
 
   async function handleFullShopifyResync() {
     if (controlsBusy) return;
-    const token = beginSync("shopify");
-    if (!token) {
+    const started = beginSync("shopify");
+    if (!started) {
       setError("A sync is already in progress in this tab.");
       return;
     }
 
+    const lockTokenRef = { current: started };
     setError(null);
     setStatus("Click received — full Shopify re-sync (entire catalog)…");
+
+    const retryOpts = {
+      getToken: () => lockTokenRef.current,
+      setToken: (t: string) => {
+        lockTokenRef.current = t;
+      },
+      onRetry: (attempt: number, maxAttempts: number) => {
+        setError(null);
+        setStatus(
+          `Full re-sync chunk interrupted — unlocking and retrying ${attempt}/${maxAttempts}…`,
+        );
+      },
+    };
 
     try {
       let cursor: string | null = null;
       let shopifyTotal = emptyShopifySyncSummary();
       let guard = 0;
-      const maxChunks = 200;
+      const maxChunks = 600;
 
       while (guard < maxChunks) {
         guard += 1;
@@ -313,17 +327,13 @@ export function CommerceSyncBar() {
             ? `Full re-sync… Shopify chunk ${guard} (continuing)`
             : `Full re-sync… Shopify chunk ${guard}`,
         );
-        let res;
-        try {
-          res = await syncShopifyChunkViaApi(cursor, token, "full");
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setStatus("Stopped — clear the lock if needed, then try again.");
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          ...retryOpts,
+          attempt: (token) => syncShopifyChunkViaApi(cursor, token, "full"),
+        });
         if (!res.ok) {
           setError(res.error);
-          setStatus("Stopped — clear the lock if needed, then try again.");
+          setStatus("Stopped after automatic retries — Clear stuck sync lock only for a hard reset.");
           return;
         }
         shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
@@ -333,9 +343,7 @@ export function CommerceSyncBar() {
         );
         if (res.data.errors.length && !res.data.complete) {
           setError(res.data.errors.slice(0, 3).join(" · "));
-          setStatus(
-            "Stopped — full re-sync incomplete. Clear the lock, then Full re-sync again (resumes).",
-          );
+          setStatus("Stopped — Shopify reported errors during full re-sync.");
           return;
         }
         if (!res.data.hasMore) break;
@@ -345,22 +353,21 @@ export function CommerceSyncBar() {
 
       if (shopifyTotal.hasMore || !shopifyTotal.complete) {
         setStatus(
-          `Full re-sync paused after ${guard} chunks (${shopifyTotal.ordersRead} orders read). ` +
+          `Full re-sync still has more after ${guard} chunks (${shopifyTotal.ordersRead} orders). ` +
             "Click Full re-sync again — it resumes from the saved cursor.",
         );
         return;
       }
 
       setStatus(
-        `Full re-sync — Shopify orders finished (${shopifyTotal.ordersRead} orders read` +
-          `${shopifyTotal.complete ? ", complete" : ", more remain"}) · ` +
+        `Full re-sync — Shopify orders finished (${shopifyTotal.ordersRead} orders read, complete) · ` +
           "checking for abandoned checkouts…",
       );
 
       let abandonedCursor: string | null = null;
       let abandonedTotal = emptyShopifyAbandonedSyncSummary();
       guard = 0;
-      const abandonedMaxChunks = 200;
+      const abandonedMaxChunks = 600;
 
       while (guard < abandonedMaxChunks) {
         guard += 1;
@@ -369,17 +376,14 @@ export function CommerceSyncBar() {
             ? `Full re-sync… abandoned-checkout chunk ${guard} (continuing)`
             : `Full re-sync… abandoned-checkout chunk ${guard}`,
         );
-        let res;
-        try {
-          res = await syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "full");
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          ...retryOpts,
+          attempt: (token) =>
+            syncShopifyAbandonedChunkViaApi(abandonedCursor, token, "full"),
+        });
         if (!res.ok) {
           setError(res.error);
-          setStatus("Stopped during abandoned checkouts — clear the lock if needed, then try again.");
+          setStatus("Stopped during abandoned checkouts after automatic retries.");
           return;
         }
         abandonedTotal = mergeShopifyAbandonedSyncSummaries(abandonedTotal, res.data);
@@ -400,9 +404,9 @@ export function CommerceSyncBar() {
       );
     } catch (err) {
       setError(formatCommerceSyncFailure(err));
-      setStatus("Stopped — clear the lock if needed, then try again.");
+      setStatus("Stopped — Full re-sync auto-retries timeouts; Clear lock only for a hard reset.");
     } finally {
-      await endSync(token);
+      await endSync(lockTokenRef.current);
       await refreshMeta();
     }
   }
@@ -410,7 +414,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. Sync All pulls only new Shopify orders since last success, then tracks every Delhivery AWB already in the database (not just the last Shopify page). Use Full re-sync to walk history (small pages; click again if a chunk times out — it resumes). Clear stuck sync lock also resets the resume cursor if counts look frozen."
+      description="Nothing syncs on page load. One click runs until complete: Sync All (new Shopify → abandoned → Delhivery) or Full re-sync (whole catalog). If Vercel times out a chunk, the app unlocks and retries automatically. Use Clear stuck sync lock only for a hard reset (also clears resume cursors)."
     >
       {counts ? (
         <p
