@@ -134,14 +134,6 @@ export async function syncShopifyAbandonedCheckouts(
   summary.pagesFetched = page.pagesFetched;
   summary.complete = !page.hasMore;
 
-  if (deps.runId) {
-    await noteShopifyAbandonedSyncProgress({
-      runId: deps.runId,
-      maxActivityAt: maxActivityDateIso(page.checkouts),
-      nextCursor: page.hasMore ? page.nextCursor : null,
-    });
-  }
-
   for (const checkout of page.checkouts) {
     try {
       const result = await repo.upsertAbandonedCheckout({
@@ -169,6 +161,14 @@ export async function syncShopifyAbandonedCheckouts(
         }`,
       );
     }
+  }
+
+  if (deps.runId) {
+    await noteShopifyAbandonedSyncProgress({
+      runId: deps.runId,
+      maxActivityAt: maxActivityDateIso(page.checkouts),
+      nextCursor: page.hasMore ? page.nextCursor : null,
+    });
   }
 
   if (summary.complete && deps.runId) {

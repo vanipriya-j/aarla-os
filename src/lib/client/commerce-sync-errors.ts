@@ -10,8 +10,7 @@ export function formatCommerceSyncFailure(err: unknown): string {
   ) {
     return (
       "Sync chunk timed out or returned an unexpected response (Vercel cut the request). " +
-      "Already-saved rows are kept. Click “Clear stuck sync lock”, then Sync again — " +
-      "it continues filling gaps."
+      "Already-saved rows are kept. Sync will unlock and retry automatically."
     );
   }
   return msg;

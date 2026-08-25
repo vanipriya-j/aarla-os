@@ -149,13 +149,8 @@ export async function syncShopifyCustomerCallData(
   summary.pagesFetched = pagesFetched;
   summary.complete = !hasMore;
 
-  if (deps.runId) {
-    await noteShopifyOrdersSyncProgress({
-      runId: deps.runId,
-      maxOrderAt: maxOrderDateIso(payload.orders),
-      nextCursor: hasMore ? nextCursor : null,
-    });
-  }
+  // Do NOT advance resume cursor here — only after upserts succeed. Otherwise a
+  // Vercel timeout mid-upsert skips the rest of the page (customers saved, orders not).
 
   const customerExternalIds = new Set<string>();
 
@@ -306,6 +301,15 @@ export async function syncShopifyCustomerCallData(
         `Latest order ${externalId}: ${err instanceof Error ? err.message : "update failed"}`,
       );
     }
+  }
+
+  if (deps.runId) {
+    // Advance resume cursor only after this chunk’s upserts finished.
+    await noteShopifyOrdersSyncProgress({
+      runId: deps.runId,
+      maxOrderAt: maxOrderDateIso(payload.orders),
+      nextCursor: hasMore ? nextCursor : null,
+    });
   }
 
   if (summary.complete && deps.runId) {
