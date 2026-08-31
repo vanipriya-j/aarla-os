@@ -63,10 +63,10 @@ export const primaryTiles: NavItem[] = [
     description: "QC incoming stock and ready it for sale.",
   },
   {
-    label: "Dispatch Orders",
-    href: "/dispatch",
+    label: "Fulfil Orders",
+    href: "/fulfil",
     icon: Truck,
-    description: "Pack, label and send Shopify orders.",
+    description: "Stock check, pack, ship and today's handover.",
   },
   {
     label: "Launch Products",
