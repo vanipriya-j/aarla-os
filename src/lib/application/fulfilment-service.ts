@@ -231,11 +231,14 @@ export async function getFulfilmentDetail(id: string): Promise<FulfilmentOrderDe
   return detail;
 }
 
-export async function syncIncomingOrdersIntoFulfilment(limit = 40): Promise<{
+export async function syncIncomingOrdersIntoFulfilment(limit = 80): Promise<{
   created: number;
+  archived: number;
   ids: string[];
 }> {
   const r = repo();
+  // Clean up earlier pulls that imported already-shipped history.
+  const archived = await r.archiveAlreadyShippedStockChecks();
   const unlinked = await r.listUnlinkedValidExternalOrders(limit);
   const ids: string[] = [];
   for (const order of unlinked) {
@@ -261,7 +264,7 @@ export async function syncIncomingOrdersIntoFulfilment(limit = 40): Promise<{
     });
     ids.push(detail.id);
   }
-  return { created: ids.length, ids };
+  return { created: ids.length, archived, ids };
 }
 
 export async function setLinePhysicalCheck(input: {

@@ -105,7 +105,7 @@ export default function FulfilOrdersPage() {
     <>
       <Header
         title="Fulfil Orders"
-        subtitle="Stock check → pick → pack → ship → today's handover. Uses synced Shopify orders and the inventory ledger — not demo dispatch."
+        subtitle="Open Shopify orders only — stock check → pick → pack → ship → handover. Already fulfilled/delivered orders are skipped or archived."
       />
 
       <div className="px-6 py-6 space-y-5" data-testid="fulfil-orders-page">
@@ -121,14 +121,22 @@ export default function FulfilOrdersPage() {
                   setError(res.error);
                   return;
                 }
-                setStatus(`Pulled ${res.data.created} order(s) into fulfilment.`);
+                const parts = [
+                  `Pulled ${res.data.created} open order(s)`,
+                ];
+                if (res.data.archived > 0) {
+                  parts.push(
+                    `archived ${res.data.archived} already-shipped`,
+                  );
+                }
+                setStatus(`${parts.join("; ")}.`);
                 reloadList(tab);
               });
             }}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Pull new Shopify orders
+            Pull open orders
           </button>
           <StatusChip
             label={pastCutoff ? `Past cut-off (${cutoffLabel})` : `Before cut-off (${cutoffLabel})`}
@@ -164,7 +172,7 @@ export default function FulfilOrdersPage() {
           <div className="lg:col-span-2 space-y-2">
             {rows.length === 0 ? (
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
-                No orders in this view. Pull new Shopify orders, or switch tabs.
+                No orders in this view. Pull open orders, or switch tabs.
               </p>
             ) : (
               rows.map((row) => (

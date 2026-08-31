@@ -136,6 +136,8 @@ export interface FulfilmentRepository {
       fulfilmentStatus: string | null;
     }>
   >;
+  /** Move wrongly pulled stock-check rows that are already Shopify-fulfilled or Delhivery-delivered out of the active queue. */
+  archiveAlreadyShippedStockChecks(): Promise<number>;
   setStatus(fulfilmentOrderId: string, status: FulfilmentStatus): Promise<void>;
   setPhysicalStatus(
     lineId: string,

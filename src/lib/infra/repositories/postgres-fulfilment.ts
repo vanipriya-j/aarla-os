@@ -250,6 +250,7 @@ export function createFulfilmentRepository(): FulfilmentRepository {
     getDetail,
 
     async listUnlinkedValidExternalOrders(limit = 50) {
+      // Only orders that still need physical fulfilment — not the full Shopify history.
       const rows = await q(
         `select o.id, o.order_number, o.order_date, o.total_amount,
                 o.financial_status, o.fulfilment_status, c.name as customer_name
@@ -260,7 +261,29 @@ export function createFulfilmentRepository(): FulfilmentRepository {
          where o.organization_id = $1
            and o.is_valid = true
            and fo.id is null
-         order by o.order_date desc
+           and (
+             o.fulfilment_status is null
+             or lower(o.fulfilment_status) in (
+               'unfulfilled',
+               'partial',
+               'partially_fulfilled',
+               'partially fulfilled',
+               'in_progress',
+               'in progress',
+               'open',
+               'scheduled',
+               'on_hold',
+               'on hold',
+               'pending_fulfillment',
+               'pending fulfilment'
+             )
+           )
+           and not exists (
+             select 1 from shipments s
+             where s.external_order_id = o.id
+               and s.normalized_status = 'delivered'
+           )
+         order by o.order_date asc
          limit $2`,
         [ORG_ID, limit],
       );
@@ -276,6 +299,44 @@ export function createFulfilmentRepository(): FulfilmentRepository {
         financialStatus: r.financial_status == null ? null : String(r.financial_status),
         fulfilmentStatus: r.fulfilment_status == null ? null : String(r.fulfilment_status),
       }));
+    },
+
+    async archiveAlreadyShippedStockChecks() {
+      const rows = await q<{ id: string; order_number: string }>(
+        `select fo.id, o.order_number
+         from fulfilment_orders fo
+         join external_orders o on o.id = fo.external_order_id
+         where fo.organization_id = $1
+           and fo.status in ('received', 'stock-check')
+           and (
+             lower(coalesce(o.fulfilment_status, '')) in ('fulfilled', 'success')
+             or exists (
+               select 1 from shipments s
+               where s.external_order_id = o.id
+                 and s.normalized_status = 'delivered'
+             )
+           )`,
+        [ORG_ID],
+      );
+      for (const row of rows) {
+        await q(
+          `update fulfilment_orders
+           set status = 'dispatched',
+               notes = coalesce(notes || E'\\n', '') || 'Auto-archived: Shopify already fulfilled / delivered before fulfil pull.',
+               handed_over_at = coalesce(handed_over_at, now())
+           where id = $1`,
+          [row.id],
+        );
+        await q(
+          `insert into fulfilment_events (fulfilment_order_id, event_type, summary, actor)
+           values ($1, 'auto-archived', $2, 'system')`,
+          [
+            row.id,
+            `Auto-archived #${row.order_number}: already fulfilled/delivered — not an open fulfil job.`,
+          ],
+        );
+      }
+      return rows.length;
     },
 
     async ensureFromExternalOrder(input: UpsertFulfilmentFromExternalInput) {
