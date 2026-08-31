@@ -36,10 +36,12 @@ import { CheckCircle2, Loader2, Package, RefreshCw, Truck } from "lucide-react";
 export default function FulfilOrdersPage() {
   const [tab, setTab] = useState<FulfilmentTab>("stock-check");
   const [rows, setRows] = useState<FulfilmentOrderListItem[]>([]);
+  const [listLoaded, setListLoaded] = useState(false);
   const [pastCutoff, setPastCutoff] = useState(false);
   const [cutoffLabel, setCutoffLabel] = useState("12:30 PM Asia/Kolkata");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<FulfilmentOrderDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [packHint, setPackHint] = useState<{
     packing: { cover: string; materials: Array<{ label: string }>; notes: string[] };
     freebie: { label: string; estimatedCost: number | null } | null;
@@ -47,13 +49,19 @@ export default function FulfilOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [awbDraft, setAwbDraft] = useState("");
   const [courierDraft, setCourierDraft] = useState("");
   const [shipMethod, setShipMethod] = useState<FulfilmentShippingMethod>("delhivery-surface");
 
+  const selectedRow = rows.find((r) => r.id === selectedId) ?? null;
+
   const reloadList = useCallback((nextTab = tab) => {
     startTransition(async () => {
+      setBusyLabel("Loading orders…");
       const res = await listFulfilmentWorkbenchAction(nextTab);
+      setBusyLabel(null);
+      setListLoaded(true);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -67,11 +75,18 @@ export default function FulfilOrdersPage() {
 
   const openDetail = useCallback((id: string) => {
     setSelectedId(id);
+    setDetail(null);
+    setPackHint(null);
+    setDetailLoading(true);
+    setError(null);
     startTransition(async () => {
+      setBusyLabel("Opening order…");
       const [d, p] = await Promise.all([
         getFulfilmentDetailAction(id),
         getPackingSuggestionsAction(id),
       ]);
+      setBusyLabel(null);
+      setDetailLoading(false);
       if (!d.ok) {
         setError(d.error);
         return;
@@ -92,6 +107,7 @@ export default function FulfilOrdersPage() {
   }, []);
 
   useEffect(() => {
+    setListLoaded(false);
     reloadList(tab);
   }, [tab, reloadList]);
 
@@ -99,6 +115,18 @@ export default function FulfilOrdersPage() {
     if (!selectedId) return;
     openDetail(selectedId);
     reloadList(tab);
+  }
+
+  function runAction(label: string, fn: () => Promise<void>) {
+    startTransition(async () => {
+      setBusyLabel(label);
+      setError(null);
+      try {
+        await fn();
+      } finally {
+        setBusyLabel(null);
+      }
+    });
   }
 
   return (
@@ -115,33 +143,45 @@ export default function FulfilOrdersPage() {
             data-testid="fulfil-sync-incoming"
             disabled={pending}
             onClick={() => {
-              startTransition(async () => {
+              runAction("Pulling open Shopify orders…", async () => {
                 const res = await syncIncomingFulfilmentOrdersAction();
                 if (!res.ok) {
                   setError(res.error);
                   return;
                 }
-                const parts = [
-                  `Pulled ${res.data.created} open order(s)`,
-                ];
+                const parts = [`Pulled ${res.data.created} open order(s)`];
                 if (res.data.archived > 0) {
-                  parts.push(
-                    `cleared ${res.data.archived} already fulfilled`,
-                  );
+                  parts.push(`cleared ${res.data.archived} already fulfilled`);
                 }
                 setStatus(`${parts.join("; ")}.`);
-                reloadList(tab);
+                const list = await listFulfilmentWorkbenchAction(tab);
+                setListLoaded(true);
+                if (list.ok) {
+                  setRows(list.data.rows);
+                  setPastCutoff(list.data.pastCutoff);
+                  setCutoffLabel(list.data.cutoffLabel);
+                }
               });
             }}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
           >
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {pending && busyLabel?.startsWith("Pulling") ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
             Pull open orders
           </button>
           <StatusChip
             label={pastCutoff ? `Past cut-off (${cutoffLabel})` : `Before cut-off (${cutoffLabel})`}
             tone={pastCutoff ? "warning" : "info"}
           />
+          {busyLabel ? (
+            <p className="inline-flex items-center gap-2 text-sm text-deep-navy" data-testid="fulfil-busy">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {busyLabel}
+            </p>
+          ) : null}
           {status ? <p className="text-sm text-charcoal/70">{status}</p> : null}
           {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
         </div>
@@ -156,6 +196,8 @@ export default function FulfilOrdersPage() {
                 setTab(t);
                 setSelectedId(null);
                 setDetail(null);
+                setDetailLoading(false);
+                setPackHint(null);
               }}
               className={`text-sm px-3 py-1.5 rounded-full border ${
                 tab === t
@@ -169,45 +211,85 @@ export default function FulfilOrdersPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-          <div className="lg:col-span-2 space-y-2">
-            {rows.length === 0 ? (
+          <div className="lg:col-span-2 space-y-2" data-testid="fulfil-order-list">
+            {!listLoaded || (pending && rows.length === 0 && busyLabel === "Loading orders…") ? (
+              <p className="text-sm text-charcoal/60 card-surface p-6 text-center inline-flex w-full items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading orders…
+              </p>
+            ) : rows.length === 0 ? (
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
-                No orders in this view. Pull open orders, or switch tabs.
+                No orders in {fulfilmentTabLabel(tab)}.{" "}
+                {tab === "stock-check"
+                  ? "Pull open orders to load Unfulfilled / Partially fulfilled from Shopify."
+                  : "Switch tabs, or pull open orders."}
               </p>
             ) : (
-              rows.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  data-testid={`fulfil-row-${row.orderNumber}`}
-                  onClick={() => openDetail(row.id)}
-                  className={`w-full text-left card-surface px-4 py-3 border ${
-                    selectedId === row.id ? "border-deep-navy" : "border-transparent"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-deep-navy">#{row.orderNumber}</p>
-                      <p className="text-sm text-charcoal/70">{row.customerName ?? "—"}</p>
+              rows.map((row) => {
+                const selected = selectedId === row.id;
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    data-testid={`fulfil-row-${row.orderNumber}`}
+                    aria-pressed={selected}
+                    onClick={() => openDetail(row.id)}
+                    className={`w-full text-left card-surface px-4 py-3 border transition-colors ${
+                      selected
+                        ? "border-deep-navy bg-deep-navy/[0.06] shadow-[inset_3px_0_0_0_var(--deep-navy)]"
+                        : "border-transparent hover:border-border"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-deep-navy flex items-center gap-2">
+                          #{row.orderNumber}
+                          {selected ? (
+                            <span className="text-[10px] uppercase tracking-wide text-deep-navy/80 font-semibold">
+                              Selected
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-sm text-charcoal/70">{row.customerName ?? "—"}</p>
+                      </div>
+                      <StatusChip label={fulfilmentStatusLabel(row.status)} tone="neutral" />
                     </div>
-                    <StatusChip label={fulfilmentStatusLabel(row.status)} tone="neutral" />
-                  </div>
-                  <p className="text-xs text-charcoal/55 mt-1">
-                    {new Date(row.orderDate).toLocaleString()} · ₹{row.totalAmount.toFixed(0)}
-                    {row.openTaskCount > 0 ? ` · ${row.openTaskCount} open task(s)` : ""}
-                  </p>
-                </button>
-              ))
+                    <p className="text-xs text-charcoal/55 mt-1">
+                      {new Date(row.orderDate).toLocaleString()} · ₹{row.totalAmount.toFixed(0)}
+                      {row.openTaskCount > 0 ? ` · ${row.openTaskCount} open task(s)` : ""}
+                    </p>
+                  </button>
+                );
+              })
             )}
           </div>
 
           <div className="lg:col-span-3">
-            {!detail ? (
+            {!selectedId ? (
               <p className="text-sm text-charcoal/60 card-surface p-8 text-center">
-                Select an order to work the fulfilment flow.
+                Select an order on the left to start stock check.
               </p>
+            ) : detailLoading || !detail ? (
+              <div
+                className="card-surface p-8 text-center space-y-2"
+                data-testid="fulfil-detail-loading"
+              >
+                <p className="inline-flex items-center justify-center gap-2 text-sm text-deep-navy w-full">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Opening #{selectedRow?.orderNumber ?? "order"}…
+                </p>
+                <p className="text-xs text-charcoal/55">
+                  {selectedRow?.customerName ?? "Loading fulfilment detail"}
+                </p>
+              </div>
             ) : (
               <div className="space-y-4" data-testid="fulfil-detail">
+                {pending && busyLabel ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-deep-navy/20 bg-deep-navy/[0.04] px-3 py-2 text-sm text-deep-navy">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>{busyLabel}</span>
+                  </div>
+                ) : null}
                 <FormSection
                   title={`Order #${detail.orderNumber}`}
                   description={`${detail.customerName ?? "Customer"} · ${fulfilmentStatusLabel(detail.status)} · Shopify ${detail.financialStatus ?? "—"} / ${detail.shopifyFulfilmentStatus ?? "—"}`}
@@ -235,14 +317,19 @@ export default function FulfilOrdersPage() {
                           {line.resolution ? ` · Resolution: ${line.resolution}` : ""}
                           {line.physicalStatus !== "unchecked"
                             ? ` · Physical: ${line.physicalStatus}`
-                            : ""}
+                            : " · Physical: not checked yet"}
                         </p>
                         <div className="flex flex-wrap gap-2 mt-2">
                           <button
                             type="button"
-                            className="text-xs px-3 py-1.5 rounded-full border border-border"
+                            disabled={pending}
+                            className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-50 ${
+                              line.physicalStatus === "found"
+                                ? "border-deep-navy bg-deep-navy text-white"
+                                : "border-border"
+                            }`}
                             onClick={() => {
-                              startTransition(async () => {
+                              runAction(`Marking line found…`, async () => {
                                 const res = await setLinePhysicalCheckAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
@@ -250,17 +337,23 @@ export default function FulfilOrdersPage() {
                                 });
                                 if (res.ok) setDetail(res.data);
                                 else setError(res.error);
-                                reloadList(tab);
+                                const list = await listFulfilmentWorkbenchAction(tab);
+                                if (list.ok) setRows(list.data.rows);
                               });
                             }}
                           >
-                            Found physically
+                            {line.physicalStatus === "found" ? "✓ Found physically" : "Found physically"}
                           </button>
                           <button
                             type="button"
-                            className="text-xs px-3 py-1.5 rounded-full border border-border"
+                            disabled={pending}
+                            className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-50 ${
+                              line.physicalStatus === "not-found"
+                                ? "border-aarla-red bg-aarla-red/10 text-aarla-red"
+                                : "border-border"
+                            }`}
                             onClick={() => {
-                              startTransition(async () => {
+                              runAction(`Marking line not found…`, async () => {
                                 const res = await setLinePhysicalCheckAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
@@ -268,17 +361,19 @@ export default function FulfilOrdersPage() {
                                 });
                                 if (res.ok) setDetail(res.data);
                                 else setError(res.error);
-                                reloadList(tab);
+                                const list = await listFulfilmentWorkbenchAction(tab);
+                                if (list.ok) setRows(list.data.rows);
                               });
                             }}
                           >
-                            Not found
+                            {line.physicalStatus === "not-found" ? "✓ Not found" : "Not found"}
                           </button>
                           <button
                             type="button"
-                            className="text-xs px-3 py-1.5 rounded-full border border-border"
+                            disabled={pending}
+                            className="text-xs px-3 py-1.5 rounded-full border border-border disabled:opacity-50"
                             onClick={() => {
-                              startTransition(async () => {
+                              runAction("Escalating to Vani…", async () => {
                                 const res = await escalateFounderAvailabilityAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
@@ -286,7 +381,8 @@ export default function FulfilOrdersPage() {
                                 });
                                 if (res.ok) setDetail(res.data);
                                 else setError(res.error);
-                                reloadList(tab);
+                                const list = await listFulfilmentWorkbenchAction(tab);
+                                if (list.ok) setRows(list.data.rows);
                               });
                             }}
                           >
