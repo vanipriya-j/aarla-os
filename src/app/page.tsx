@@ -5,7 +5,7 @@ import { AskAarla } from "@/components/home/AskAarla";
 import { TaskTile } from "@/components/ui/TaskTile";
 import { SummaryCard } from "@/components/ui/SummaryCard";
 import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
-import { primaryTiles, networkNav } from "@/lib/navigation";
+import { operateNav, createNav, adminNav } from "@/lib/navigation";
 import { getHomeDashboardData } from "@/lib/application/services";
 import type { AttentionItem, ContentTask, DashboardMetrics, PriorityItem, Project, ShopifyOrder } from "@/lib/types";
 import type { PurchaseOrder } from "@/lib/domain/types";
@@ -83,12 +83,14 @@ export default async function HomePage() {
         <section>
           <div className="flex items-end justify-between gap-4 mb-4">
             <div>
-              <h2 className="font-display text-2xl text-deep-navy">Primary workflows</h2>
-              <p className="text-sm text-charcoal/60 mt-1">Ten doors into the work of Aarla.</p>
+              <h2 className="font-display text-2xl text-deep-navy">Operate</h2>
+              <p className="text-sm text-charcoal/60 mt-1">
+                This week’s loop — fulfil, calls, stock, make, campaigns.
+              </p>
             </div>
           </div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4">
-            {primaryTiles.map((tile, i) => (
+          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {operateNav.map((tile, i) => (
               <TaskTile
                 key={tile.href}
                 label={tile.label}
@@ -103,13 +105,34 @@ export default async function HomePage() {
 
         <section>
           <div className="mb-4">
-            <h2 className="font-display text-2xl text-deep-navy">Product network</h2>
+            <h2 className="font-display text-2xl text-deep-navy">Create</h2>
             <p className="text-sm text-charcoal/60 mt-1">
-              From idea to community — people, partners, inventory and registrations.
+              Ideas, stories, content, projects and launches.
             </p>
           </div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4">
-            {networkNav.map((tile, i) => (
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {createNav.map((tile, i) => (
+              <TaskTile
+                key={tile.href}
+                label={tile.label}
+                description={tile.description}
+                href={tile.href}
+                icon={tile.icon}
+                index={i}
+              />
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-4">
+            <h2 className="font-display text-2xl text-deep-navy">Admin</h2>
+            <p className="text-sm text-charcoal/60 mt-1">
+              Dashboard, GST, master data and system wiring.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {adminNav.map((tile, i) => (
               <TaskTile
                 key={tile.href}
                 label={tile.label}
@@ -230,8 +253,8 @@ export default async function HomePage() {
                 </li>
               ))}
             </ul>
-            <Link href="/dispatch" className="inline-block mt-3 text-sm text-aarla-red font-medium">
-              Open dispatch →
+            <Link href="/fulfil" className="inline-block mt-3 text-sm text-aarla-red font-medium">
+              Open fulfil →
             </Link>
           </div>
 

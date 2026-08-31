@@ -92,7 +92,7 @@ export function TraceabilityDiagram({
             <Node label="Community" href="/people?filter=community" accent />
           </div>
           <div className="flex flex-col items-center gap-1">
-            <Node label="Shopify" href="/dispatch" />
+            <Node label="Shopify" href="/fulfil" />
             <Arrow />
             <Node label="Customer" href="/people?filter=customers" />
             <Arrow />

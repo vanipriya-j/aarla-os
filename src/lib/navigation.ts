@@ -1,8 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  BookOpen,
   Boxes,
-  ClipboardCheck,
   ClipboardList,
   Compass,
   Factory,
@@ -22,6 +20,7 @@ import {
   Store,
   Truck,
   Users,
+  BookOpen,
 } from "lucide-react";
 
 export interface NavItem {
@@ -31,7 +30,56 @@ export interface NavItem {
   description: string;
 }
 
-export const primaryTiles: NavItem[] = [
+/**
+ * Daily operating loop — pack, call, stock, make, plan the week.
+ */
+export const operateNav: NavItem[] = [
+  {
+    label: "This Week",
+    href: "/weekly",
+    icon: CalendarRange,
+    description: "Weekly operating board — targets vs actuals.",
+  },
+  {
+    label: "Fulfil Orders",
+    href: "/fulfil",
+    icon: Truck,
+    description: "Stock check, pack, ship and today's handover.",
+  },
+  {
+    label: "Customer Calls",
+    href: "/customer-calls",
+    icon: Phone,
+    description: "Delivery follow-ups and re-engagement calls.",
+  },
+  {
+    label: "Inventory",
+    href: "/inventory",
+    icon: Package,
+    description: "Stock, replenishment, locations and movement ledger.",
+  },
+  {
+    label: "Manufacture / Reorder",
+    href: "/manufacture",
+    icon: Factory,
+    description: "Raise POs and vendor-specific orders.",
+  },
+  {
+    label: "Receive Stock",
+    href: "/receive",
+    icon: PackageCheck,
+    description: "QC incoming stock and ready it for sale.",
+  },
+  {
+    label: "Campaigns",
+    href: "/campaigns",
+    icon: Megaphone,
+    description: "Ops campaign planner — soft inventory holds and readiness.",
+  },
+];
+
+/** Brand, storytelling and product creation. */
+export const createNav: NavItem[] = [
   {
     label: "Need Advice",
     href: "/advice",
@@ -51,30 +99,6 @@ export const primaryTiles: NavItem[] = [
     description: "Design hampers and institutional gifts.",
   },
   {
-    label: "Manufacture / Reorder",
-    href: "/manufacture",
-    icon: Factory,
-    description: "Raise POs and vendor-specific orders.",
-  },
-  {
-    label: "Receive Stock",
-    href: "/receive",
-    icon: PackageCheck,
-    description: "QC incoming stock and ready it for sale.",
-  },
-  {
-    label: "Dispatch Orders",
-    href: "/dispatch",
-    icon: Truck,
-    description: "Pack, label and send Shopify orders.",
-  },
-  {
-    label: "Launch Products",
-    href: "/launch",
-    icon: Rocket,
-    description: "Checklist your way to a confident launch.",
-  },
-  {
     label: "Content Studio",
     href: "/content",
     icon: Palette,
@@ -87,36 +111,29 @@ export const primaryTiles: NavItem[] = [
     description: "Track Worlds, trips and client work.",
   },
   {
-    label: "This Week",
-    href: "/weekly",
-    icon: CalendarRange,
-    description: "Weekly operating board — targets vs actuals.",
+    label: "Launch Products",
+    href: "/launch",
+    icon: Rocket,
+    description: "Checklist your way to a confident launch.",
   },
-  {
-    label: "Campaigns",
-    href: "/campaigns",
-    icon: Megaphone,
-    description: "Ops campaign planner — soft inventory holds and readiness.",
-  },
+];
+
+/**
+ * Setup, master data, finance prep, wiring — not the daily packing loop.
+ */
+export const adminNav: NavItem[] = [
   {
     label: "Business Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
     description: "Revenue, capital and movement at a glance.",
   },
-];
-
-/** Finance — GST preparation only (not a general accounting module). */
-export const financeNav: NavItem[] = [
   {
     label: "GST Reconciliation",
     href: "/finance/gst",
     icon: Receipt,
     description: "Monthly sales & purchase capture for your accountant.",
   },
-];
-
-export const networkNav: NavItem[] = [
   {
     label: "People",
     href: "/people",
@@ -130,12 +147,6 @@ export const networkNav: NavItem[] = [
     description: "Retail, café and studio partners.",
   },
   {
-    label: "Inventory",
-    href: "/inventory",
-    icon: Package,
-    description: "Stock, replenishment, locations and movement ledger.",
-  },
-  {
     label: "Registrations",
     href: "/registrations",
     icon: ClipboardList,
@@ -147,16 +158,6 @@ export const networkNav: NavItem[] = [
     icon: ScanLine,
     description: "Tell us where your Aarla story reached.",
   },
-];
-
-/** Outreach links — rendered near the bottom of the sidebar. */
-export const outreachNav: NavItem[] = [
-  {
-    label: "Customer Calls",
-    href: "/customer-calls",
-    icon: Phone,
-    description: "Delivery follow-ups and re-engagement calls.",
-  },
   {
     label: "Diagnostics",
     href: "/diagnostics",
@@ -165,6 +166,25 @@ export const outreachNav: NavItem[] = [
   },
 ];
 
+/** @deprecated Prefer operateNav + createNav. Kept for home tile grids. */
+export const primaryTiles: NavItem[] = [...operateNav, ...createNav];
+
+/** @deprecated Prefer adminNav (People/Partners) + operateNav (Inventory). */
+export const networkNav: NavItem[] = adminNav.filter((item) =>
+  ["/people", "/partners", "/registrations", "/register"].includes(item.href),
+);
+
+/** @deprecated Prefer operateNav (calls) + adminNav (diagnostics). */
+export const outreachNav: NavItem[] = [
+  ...operateNav.filter((item) => item.href === "/customer-calls"),
+  ...adminNav.filter((item) => item.href === "/diagnostics"),
+];
+
+/** @deprecated Prefer adminNav. */
+export const financeNav: NavItem[] = adminNav.filter(
+  (item) => item.href === "/finance/gst",
+);
+
 export const sidebarNav: NavItem[] = [
   {
     label: "Home",
@@ -172,14 +192,7 @@ export const sidebarNav: NavItem[] = [
     icon: Boxes,
     description: "Today’s operating view",
   },
-  ...primaryTiles,
-  ...financeNav,
-  ...networkNav,
-  ...outreachNav,
-  {
-    label: "Checklists",
-    href: "/launch",
-    icon: ClipboardCheck,
-    description: "Launch readiness",
-  },
+  ...operateNav,
+  ...createNav,
+  ...adminNav,
 ];
