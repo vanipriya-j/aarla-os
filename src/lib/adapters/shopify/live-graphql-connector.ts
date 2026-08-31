@@ -21,7 +21,12 @@ import type {
   ShopifyFulfilmentRecord,
   ShopifyLineItemRecord,
   ShopifyOrderRecord,
+  ShopifyProductRecord,
+  ShopifyProductsPage,
+  ShopifyProductVariantRecord,
   ShopifyTaxLineRecord,
+  ShopifyVariantInventoryPage,
+  ShopifyVariantInventoryRecord,
 } from "./port";
 import { shopifyGidToExternalId } from "./normalize";
 import {
@@ -379,6 +384,126 @@ function mapAbandonedCheckout(
   };
 }
 
+const PRODUCTS_QUERY = `
+query SyncProducts($cursor: String, $query: String, $pageSize: Int!) {
+  products(first: $pageSize, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        title
+        handle
+        status
+        productType
+        vendor
+        tags
+        updatedAt
+        variants(first: 100) {
+          edges {
+            node {
+              id
+              title
+              sku
+              price
+              position
+              selectedOptions { name value }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+type RawProductNode = {
+  id: string;
+  title: string;
+  handle: string;
+  status: string;
+  productType: string | null;
+  vendor: string | null;
+  tags: string[];
+  updatedAt: string;
+  variants: {
+    edges: Array<{
+      node: {
+        id: string;
+        title: string;
+        sku: string | null;
+        price: string;
+        position: number;
+        selectedOptions: Array<{ name: string; value: string }>;
+      };
+    }>;
+  };
+};
+
+type ProductsQueryData = {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{ node: RawProductNode }>;
+  };
+};
+
+function mapProduct(node: RawProductNode): ShopifyProductRecord {
+  const externalProductId = shopifyGidToExternalId(node.id) ?? node.id;
+  const variants: ShopifyProductVariantRecord[] = node.variants.edges.map(({ node: v }) => {
+    const externalVariantId = shopifyGidToExternalId(v.id) ?? v.id;
+    const sku = (v.sku ?? "").trim() || `shopify-${externalVariantId}`;
+    return {
+      externalVariantId,
+      sku,
+      title: v.title || "Default Title",
+      price: Number(v.price ?? 0) || 0,
+      selectedOptions: (v.selectedOptions ?? []).map((o) => ({
+        name: o.name,
+        value: o.value,
+      })),
+      position: v.position ?? 0,
+    };
+  });
+  return {
+    externalProductId,
+    title: node.title,
+    handle: node.handle,
+    status: node.status,
+    productType: node.productType ?? "",
+    vendor: node.vendor ?? "",
+    tags: node.tags ?? [],
+    updatedAt: node.updatedAt,
+    variants,
+  };
+}
+
+const VARIANT_INVENTORY_QUERY = `
+query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
+  productVariants(first: $pageSize, after: $cursor, query: $query) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        sku
+        inventoryQuantity
+      }
+    }
+  }
+}
+`;
+
+type VariantInventoryQueryData = {
+  productVariants: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{
+      node: {
+        id: string;
+        sku: string | null;
+        inventoryQuantity: number | null;
+      };
+    }>;
+  };
+};
+
 function customerName(c: NonNullable<RawOrderNode["customer"]>): string {
   if (c.displayName?.trim()) return c.displayName.trim();
   const parts = [c.firstName, c.lastName].filter(Boolean);
@@ -639,6 +764,87 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     return {
       checkouts,
+      hasMore: hasNext,
+      nextCursor: hasNext ? cursor : null,
+      pagesFetched: pages,
+    };
+  }
+
+  async fetchProductsPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyProductsPage> {
+    assertServerOnly();
+    const products: ShopifyProductRecord[] = [];
+    let cursor: string | null = options.cursor ?? null;
+    let hasNext = true;
+    let pages = 0;
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 1, 10));
+
+    while (hasNext && pages < maxPages) {
+      pages += 1;
+      const pageSize = Math.max(3, Math.min(options.pageSize ?? 5, 25));
+      const variables: {
+        cursor: string | null;
+        query: string | null;
+        pageSize: number;
+      } = {
+        cursor,
+        query: options.query?.trim() ? options.query.trim() : null,
+        pageSize,
+      };
+      const data: ProductsQueryData = await this.graphql<ProductsQueryData>(
+        PRODUCTS_QUERY,
+        variables,
+      );
+      for (const edge of data.products.edges) {
+        products.push(mapProduct(edge.node));
+      }
+      hasNext = data.products.pageInfo.hasNextPage;
+      cursor = data.products.pageInfo.endCursor;
+    }
+
+    return {
+      products,
+      hasMore: hasNext,
+      nextCursor: hasNext ? cursor : null,
+      pagesFetched: pages,
+    };
+  }
+
+  async fetchVariantInventoryPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyVariantInventoryPage> {
+    assertServerOnly();
+    const variants: ShopifyVariantInventoryRecord[] = [];
+    let cursor: string | null = options.cursor ?? null;
+    let hasNext = true;
+    let pages = 0;
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 1, 10));
+
+    while (hasNext && pages < maxPages) {
+      pages += 1;
+      const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
+      const data: VariantInventoryQueryData = await this.graphql<VariantInventoryQueryData>(
+        VARIANT_INVENTORY_QUERY,
+        {
+          cursor,
+          pageSize,
+          query: options.query?.trim() ? options.query.trim() : null,
+        },
+      );
+      for (const edge of data.productVariants.edges) {
+        const externalVariantId = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
+        const sku =
+          (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
+        const available = Math.max(0, Math.floor(Number(edge.node.inventoryQuantity ?? 0)));
+        variants.push({ externalVariantId, sku, available });
+      }
+      hasNext = data.productVariants.pageInfo.hasNextPage;
+      cursor = data.productVariants.pageInfo.endCursor;
+    }
+
+    return {
+      variants,
       hasMore: hasNext,
       nextCursor: hasNext ? cursor : null,
       pagesFetched: pages,

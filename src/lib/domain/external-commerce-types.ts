@@ -164,6 +164,61 @@ export function emptyShopifyAbandonedSyncSummary(): ShopifyAbandonedSyncSummary 
   };
 }
 
+export interface ShopifyCatalogSyncSummary {
+  productsRead: number;
+  productsAdded: number;
+  productsUpdated: number;
+  variantsAdded: number;
+  variantsUpdated: number;
+  recordsSkipped: number;
+  errors: string[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  pagesFetched?: number;
+  complete?: boolean;
+  mode?: "incremental" | "full";
+  incrementalFrom?: string | null;
+}
+
+export function emptyShopifyCatalogSyncSummary(): ShopifyCatalogSyncSummary {
+  return {
+    productsRead: 0,
+    productsAdded: 0,
+    productsUpdated: 0,
+    variantsAdded: 0,
+    variantsUpdated: 0,
+    recordsSkipped: 0,
+    errors: [],
+    hasMore: false,
+    nextCursor: null,
+    pagesFetched: 0,
+    complete: true,
+    mode: "incremental",
+    incrementalFrom: null,
+  };
+}
+
+export function mergeShopifyCatalogSyncSummaries(
+  a: ShopifyCatalogSyncSummary,
+  b: ShopifyCatalogSyncSummary,
+): ShopifyCatalogSyncSummary {
+  return {
+    productsRead: a.productsRead + b.productsRead,
+    productsAdded: a.productsAdded + b.productsAdded,
+    productsUpdated: a.productsUpdated + b.productsUpdated,
+    variantsAdded: a.variantsAdded + b.variantsAdded,
+    variantsUpdated: a.variantsUpdated + b.variantsUpdated,
+    recordsSkipped: a.recordsSkipped + b.recordsSkipped,
+    errors: [...a.errors, ...b.errors].slice(0, 20),
+    hasMore: b.hasMore ?? a.hasMore,
+    nextCursor: b.nextCursor ?? a.nextCursor,
+    pagesFetched: (a.pagesFetched ?? 0) + (b.pagesFetched ?? 0),
+    complete: b.complete ?? a.complete,
+    mode: b.mode ?? a.mode,
+    incrementalFrom: b.incrementalFrom ?? a.incrementalFrom,
+  };
+}
+
 export function mergeShopifyAbandonedSyncSummaries(
   a: ShopifyAbandonedSyncSummary,
   b: ShopifyAbandonedSyncSummary,

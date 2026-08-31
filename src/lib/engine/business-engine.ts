@@ -384,6 +384,56 @@ export class BusinessEngine {
     });
   }
 
+  /**
+   * One-time legacy opening balances: Purchase Receipt External → Studio.
+   * Idempotent via stable OPEN-LEGACY-* references. Skips variants that already
+   * have Studio qty > 0. Not continuous Shopify inventory sync.
+   */
+  async establishOpeningBalances(
+    rows: Array<{
+      productId: string;
+      variantId: string;
+      quantity: number;
+      notes?: string;
+    }>,
+  ): Promise<{ written: StockMovement[]; skipped: number }> {
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const movements = await tx.movements.list();
+      const balances = deriveBalances(movements);
+      const studioQty = (productId: string, variantId: string) =>
+        Math.max(balanceAt(balances, productId, LOC_CODES.studio, variantId), 0);
+
+      const planned: AppendMovementInput[] = [];
+      let skipped = 0;
+      for (const row of rows) {
+        const qty = Math.floor(row.quantity);
+        if (qty <= 0) {
+          skipped += 1;
+          continue;
+        }
+        if (studioQty(row.productId, row.variantId) > 0) {
+          skipped += 1;
+          continue;
+        }
+        planned.push({
+          productId: row.productId,
+          variantId: row.variantId,
+          quantity: qty,
+          fromLocationId: LOC_CODES.external,
+          toLocationId: LOC_CODES.studio,
+          movementType: "Purchase Receipt",
+          reference: `OPEN-LEGACY-${row.variantId}`,
+          notes: row.notes ?? "Legacy opening balance",
+        });
+      }
+
+      const written = await this.appendMovementsTx(tx, planned);
+      skipped += planned.length - written.length;
+      return { written, skipped };
+    });
+  }
+
   async registerProduct(
     input: RegisterProductInput,
   ): Promise<{ user: Person; registration: ProductRegistration }> {

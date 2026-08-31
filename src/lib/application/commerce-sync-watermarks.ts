@@ -4,6 +4,14 @@ import { query } from "@/lib/infra/db/pool";
 const CHANNEL = "shopify_orders" as const;
 export const CHANNEL_ABANDONED = "shopify_abandoned_checkouts" as const;
 export const CHANNEL_DELHIVERY = "delhivery_awbs" as const;
+export const CHANNEL_PRODUCTS = "shopify_products" as const;
+
+const ALL_CHANNELS = [
+  "shopify_orders",
+  "shopify_abandoned_checkouts",
+  "delhivery_awbs",
+  "shopify_products",
+] as const;
 
 let ensured = false;
 
@@ -14,7 +22,8 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
       channel text primary key check (channel in (
         'shopify_orders',
         'shopify_abandoned_checkouts',
-        'delhivery_awbs'
+        'delhivery_awbs',
+        'shopify_products'
       )),
       organization_id uuid not null references organizations(id) on delete cascade,
       watermark_at timestamptz,
@@ -34,13 +43,15 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
       check (channel in (
         'shopify_orders',
         'shopify_abandoned_checkouts',
-        'delhivery_awbs'
+        'delhivery_awbs',
+        'shopify_products'
       ))
   `);
   await query(`
     alter table commerce_sync_watermarks
       add column if not exists run_next_cursor text
   `);
+  void ALL_CHANNELS;
   ensured = true;
 }
 
@@ -353,4 +364,102 @@ export async function saveDelhiveryResumeOffset(
        updated_at = now()`,
     [CHANNEL_DELHIVERY, ORG_ID, value],
   );
+}
+
+/** ---- Shopify product catalog watermarks ---- */
+
+export async function getShopifyProductsWatermark(): Promise<string | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const rows = await query<{ watermark_at: Date | string | null }>(
+    `select watermark_at from commerce_sync_watermarks
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_PRODUCTS, ORG_ID],
+  );
+  return toIso(rows[0]?.watermark_at ?? null);
+}
+
+export async function getShopifyProductsResumeCursor(): Promise<string | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const rows = await query<{ run_next_cursor: string | null }>(
+    `select run_next_cursor from commerce_sync_watermarks
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_PRODUCTS, ORG_ID],
+  );
+  const c = rows[0]?.run_next_cursor?.trim();
+  return c || null;
+}
+
+export async function clearShopifyProductsWatermark(): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  await query(
+    `update commerce_sync_watermarks
+     set watermark_at = null, updated_at = now()
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_PRODUCTS, ORG_ID],
+  );
+}
+
+export async function noteShopifyProductsSyncProgress(input: {
+  runId: string;
+  maxUpdatedAt: string | null;
+  nextCursor?: string | null;
+}): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  const runId = input.runId.trim();
+  if (!runId) return;
+  const maxUpdatedAt = toIso(input.maxUpdatedAt);
+  const hasCursorUpdate = input.nextCursor !== undefined;
+  const nextCursor = hasCursorUpdate ? input.nextCursor?.trim() || null : null;
+  if (!maxUpdatedAt && !hasCursorUpdate) return;
+
+  await query(
+    `insert into commerce_sync_watermarks as w (
+       channel, organization_id, run_id, run_high_water_at, run_next_cursor, updated_at
+     ) values ($1, $2, $3, $4::timestamptz, $5, now())
+     on conflict (channel) do update set
+       run_id = excluded.run_id,
+       run_high_water_at = case
+         when excluded.run_high_water_at is null then w.run_high_water_at
+         when w.run_id is distinct from excluded.run_id then excluded.run_high_water_at
+         when w.run_high_water_at is null then excluded.run_high_water_at
+         when excluded.run_high_water_at > w.run_high_water_at then excluded.run_high_water_at
+         else w.run_high_water_at
+       end,
+       run_next_cursor = case
+         when $6::boolean then excluded.run_next_cursor
+         else w.run_next_cursor
+       end,
+       updated_at = now()`,
+    [CHANNEL_PRODUCTS, ORG_ID, runId, maxUpdatedAt, nextCursor, hasCursorUpdate],
+  );
+}
+
+export async function commitShopifyProductsWatermark(runId: string): Promise<string | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const token = runId.trim();
+  if (!token) return null;
+  const rows = await query<{ watermark_at: Date | string | null }>(
+    `update commerce_sync_watermarks as w
+     set
+       watermark_at = case
+         when w.run_id = $3 and w.run_high_water_at is not null
+           and (w.watermark_at is null or w.run_high_water_at > w.watermark_at)
+         then w.run_high_water_at
+         else coalesce(w.watermark_at, w.run_high_water_at)
+       end,
+       run_id = null,
+       run_high_water_at = null,
+       run_next_cursor = null,
+       updated_at = now()
+     where w.channel = $1 and w.organization_id = $2 and w.run_id = $3
+     returning watermark_at`,
+    [CHANNEL_PRODUCTS, ORG_ID, token],
+  );
+  return toIso(rows[0]?.watermark_at ?? null);
+}
+
+export function shopifyProductsUpdatedAfterQuery(watermarkIso: string): string {
+  const ms = new Date(watermarkIso).getTime();
+  const overlap = new Date(Math.max(0, ms - 120_000)).toISOString();
+  return `updated_at:>'${overlap}'`;
 }

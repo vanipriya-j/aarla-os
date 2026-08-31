@@ -106,6 +106,30 @@ export async function syncShopifyAbandonedChunkViaApi(
   });
 }
 
+export async function syncShopifyProductsChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+  mode: "incremental" | "full" = "incremental",
+): Promise<ActionResult<import("@/lib/domain/external-commerce-types").ShopifyCatalogSyncSummary>> {
+  return postJson("/api/commerce/sync/shopify-products", {
+    cursor,
+    lockToken,
+    mode,
+  });
+}
+
+export async function syncShopifyOpeningInventoryChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+): Promise<
+  ActionResult<import("@/lib/application/shopify-opening-inventory-service").OpeningInventorySyncSummary>
+> {
+  return postJson("/api/commerce/sync/shopify-opening-inventory", {
+    cursor,
+    lockToken,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

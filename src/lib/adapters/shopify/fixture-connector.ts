@@ -7,6 +7,9 @@ import type {
   ShopifyCustomerRecord,
   ShopifyFetchOptions,
   ShopifyOrderRecord,
+  ShopifyProductRecord,
+  ShopifyProductsPage,
+  ShopifyVariantInventoryPage,
 } from "./port";
 
 const FIXTURE_CUSTOMERS: ShopifyCustomerRecord[] = [
@@ -244,6 +247,63 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
   },
 ];
 
+const FIXTURE_PRODUCTS: ShopifyProductRecord[] = [
+  {
+    externalProductId: "8001",
+    title: "Fixture Kolam Bottle",
+    handle: "fixture-kolam-bottle",
+    status: "ACTIVE",
+    productType: "Home",
+    vendor: "Aarla",
+    tags: ["fixture"],
+    updatedAt: "2026-08-20T10:00:00.000Z",
+    variants: [
+      {
+        externalVariantId: "9001",
+        sku: "FIX-KOLAM-01",
+        title: "Default Title",
+        price: 1890,
+        selectedOptions: [{ name: "Title", value: "Default Title" }],
+        position: 1,
+      },
+    ],
+  },
+  {
+    externalProductId: "8002",
+    title: "Fixture Tee",
+    handle: "fixture-tee",
+    status: "ACTIVE",
+    productType: "Apparel",
+    vendor: "Aarla",
+    tags: ["fixture", "tee"],
+    updatedAt: "2026-08-21T10:00:00.000Z",
+    variants: [
+      {
+        externalVariantId: "9002",
+        sku: "FIX-TEE-M",
+        title: "M",
+        price: 1200,
+        selectedOptions: [
+          { name: "Size", value: "M" },
+          { name: "Colour", value: "Indigo" },
+        ],
+        position: 1,
+      },
+      {
+        externalVariantId: "9003",
+        sku: "FIX-TEE-L",
+        title: "L",
+        price: 1200,
+        selectedOptions: [
+          { name: "Size", value: "L" },
+          { name: "Colour", value: "Indigo" },
+        ],
+        position: 2,
+      },
+    ],
+  },
+];
+
 const FIXTURE_ABANDONED_CHECKOUTS: ShopifyAbandonedCheckoutRecord[] = [
   {
     externalId: "9001",
@@ -423,6 +483,42 @@ export class FixtureShopifyConnector implements ShopifyConnector {
 
     return {
       checkouts,
+      hasMore: false,
+      nextCursor: null,
+      pagesFetched: 1,
+    };
+  }
+
+  async fetchProductsPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyProductsPage> {
+    if (this.options.failHard) {
+      throw new Error(this.options.partialError || "Shopify Admin API unavailable");
+    }
+    void options;
+    return {
+      products: structuredClone(FIXTURE_PRODUCTS),
+      hasMore: false,
+      nextCursor: null,
+      pagesFetched: 1,
+    };
+  }
+
+  async fetchVariantInventoryPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyVariantInventoryPage> {
+    if (this.options.failHard) {
+      throw new Error(this.options.partialError || "Shopify Admin API unavailable");
+    }
+    void options;
+    return {
+      variants: FIXTURE_PRODUCTS.flatMap((p) =>
+        p.variants.map((v, i) => ({
+          externalVariantId: v.externalVariantId,
+          sku: v.sku,
+          available: i === 0 ? 12 : 5,
+        })),
+      ),
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,

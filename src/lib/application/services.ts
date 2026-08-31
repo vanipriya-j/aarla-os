@@ -145,6 +145,17 @@ export async function adjustStock(input: {
   return engine().adjustStock(input);
 }
 
+export async function establishOpeningBalances(
+  rows: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    notes?: string;
+  }>,
+) {
+  return engine().establishOpeningBalances(rows);
+}
+
 export async function listReorderRules(): Promise<ReorderRule[]> {
   return engine().listReorderRules();
 }
