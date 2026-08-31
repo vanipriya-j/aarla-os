@@ -21,9 +21,8 @@ type CommerceCounts = {
 type LocalAction = "idle" | "refreshing" | "clearing";
 
 /**
- * Serial Shopify → Delhivery sync controls.
- * The long-running job lives in CommerceSyncProvider (app shell) so navigating
- * away from this page does not stop the sync.
+ * One Sync button: Shopify → abandoned → Delhivery → queues.
+ * Job lives in CommerceSyncProvider so navigating away does not stop it.
  */
 export function CommerceSyncBar() {
   const {
@@ -32,11 +31,10 @@ export function CommerceSyncBar() {
     status,
     error,
     startSyncAll,
-    startFullShopifyResync,
     setStatus,
     setError,
   } = useCommerceSync();
-  const syncingAll = busy && activeSync === "all";
+  const syncing = busy && activeSync === "all";
   const [counts, setCounts] = useState<CommerceCounts | null>(null);
   const [serverLocked, setServerLocked] = useState(false);
   const [localAction, setLocalAction] = useState<LocalAction>("idle");
@@ -59,7 +57,6 @@ export function CommerceSyncBar() {
     }
   }, []);
 
-  // Lightweight counts only — not a sync.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -111,7 +108,7 @@ export function CommerceSyncBar() {
         return;
       }
       setServerLocked(false);
-      setStatus("Stuck sync lock + sync cursor cleared. Full re-sync starts from the top.");
+      setStatus("Stuck sync lock + sync cursor cleared. Sync starts fresh from the top.");
       await refreshMeta();
     } finally {
       setLocalAction("idle");
@@ -121,7 +118,7 @@ export function CommerceSyncBar() {
   return (
     <FormSection
       title="Commerce sync"
-      description="Nothing syncs on page load. One click runs until complete: Sync All (new Shopify → abandoned → Delhivery) or Full re-sync (whole catalog). Progress survives navigating to other pages in this tab. Closing the tab still stops the browser loop — click Sync All again to resume from the saved cursor."
+      description="One Sync: new Shopify orders → abandoned checkouts → Delhivery tracking → call queues. Progress survives navigating to other pages in this tab. Closing the tab still stops the browser loop — click Sync again to resume. Nothing runs on page load."
     >
       {counts ? (
         <p
@@ -133,7 +130,10 @@ export function CommerceSyncBar() {
           {counts.fulfilmentsWithAwb} AWBs · {counts.shipments} shipments
         </p>
       ) : (
-        <p className="text-sm text-charcoal/55 mb-3 inline-flex items-center gap-2" data-testid="commerce-sync-counts-loading">
+        <p
+          className="text-sm text-charcoal/55 mb-3 inline-flex items-center gap-2"
+          data-testid="commerce-sync-counts-loading"
+        >
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           Loading saved commerce counts…
         </p>
@@ -145,30 +145,15 @@ export function CommerceSyncBar() {
           data-testid="sync-all-commerce"
           onClick={() => void startSyncAll()}
           disabled={controlsBusy}
-          aria-busy={syncingAll}
+          aria-busy={syncing}
           className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
         >
-          {syncingAll ? (
+          {syncing ? (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           ) : (
             <Layers className="h-4 w-4" aria-hidden />
           )}
-          {syncingAll ? "Syncing…" : "Sync All (new only → Delhivery)"}
-        </button>
-        <button
-          type="button"
-          data-testid="full-shopify-resync"
-          onClick={() => void startFullShopifyResync()}
-          disabled={controlsBusy}
-          aria-busy={busy && activeSync === "shopify"}
-          className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
-        >
-          {busy && activeSync === "shopify" ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          ) : (
-            <RefreshCw className="h-4 w-4" aria-hidden />
-          )}
-          {busy && activeSync === "shopify" ? "Full re-sync…" : "Full Shopify re-sync"}
+          {syncing ? "Syncing…" : "Sync"}
         </button>
         <button
           type="button"
@@ -182,7 +167,7 @@ export function CommerceSyncBar() {
             className={`h-4 w-4 ${localAction === "refreshing" ? "animate-spin" : ""}`}
             aria-hidden
           />
-          {localAction === "refreshing" ? "Refreshing…" : "Refresh DB counts"}
+          {localAction === "refreshing" ? "Refreshing…" : "Refresh counts"}
         </button>
         <button
           type="button"
@@ -197,11 +182,8 @@ export function CommerceSyncBar() {
           ) : (
             <Unlock className="h-4 w-4" aria-hidden />
           )}
-          {localAction === "clearing" ? "Clearing lock…" : "Clear stuck sync lock"}
+          {localAction === "clearing" ? "Clearing lock…" : "Clear stuck lock"}
         </button>
-        {busy && activeSync !== "all" ? (
-          <StatusChip label={`Busy: ${activeSync}`} tone="neutral" />
-        ) : null}
         {!busy && serverLocked ? (
           <StatusChip label="Server lock held" tone="danger" />
         ) : null}
@@ -210,22 +192,20 @@ export function CommerceSyncBar() {
         ) : null}
       </div>
 
-      {syncingAll || (busy && activeSync === "shopify") || localAction !== "idle" || status ? (
+      {syncing || localAction !== "idle" || status ? (
         <div
           className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-soft-beige/60 px-3 py-2.5"
           data-testid="commerce-sync-progress"
           role="status"
           aria-live="polite"
         >
-          {syncingAll || (busy && activeSync === "shopify") || localAction !== "idle" ? (
+          {syncing || localAction !== "idle" ? (
             <Hourglass className="h-4 w-4 mt-0.5 shrink-0 text-deep-navy animate-pulse" aria-hidden />
           ) : null}
           <div className="min-w-0">
             <p className="text-sm font-medium text-deep-navy">
-              {syncingAll
+              {syncing
                 ? "Sync in progress"
-                : busy && activeSync === "shopify"
-                  ? "Full Shopify re-sync"
                 : localAction === "clearing"
                   ? "Clearing lock"
                   : localAction === "refreshing"
@@ -240,7 +220,7 @@ export function CommerceSyncBar() {
               <p className="text-sm text-charcoal/55 mt-0.5">Working — please wait…</p>
             )}
           </div>
-          {syncingAll || (busy && activeSync === "shopify") ? (
+          {syncing ? (
             <Loader2 className="h-4 w-4 mt-0.5 ml-auto shrink-0 animate-spin text-deep-navy" aria-hidden />
           ) : null}
         </div>
