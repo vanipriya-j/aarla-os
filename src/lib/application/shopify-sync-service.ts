@@ -105,8 +105,9 @@ export async function syncShopifyCustomerCallData(
     }
   }
 
-  // Best-effort store total for “Loaded X of Y” UI — does not gate the sync.
-  if (typeof connector.fetchOrdersCount === "function") {
+  // Best-effort store total for “Loaded X of Y” — only on the first page of a walk.
+  // Resume chunks skip this; the client keeps ordersTotal from the first success.
+  if (!resumeCursor && typeof connector.fetchOrdersCount === "function") {
     try {
       summary.ordersTotal = await connector.fetchOrdersCount(query);
     } catch {
@@ -273,6 +274,7 @@ export async function syncShopifyCustomerCallData(
             provider: "shopify",
             externalId: ful.externalId,
             orderExternalId: order.externalId,
+            orderId: result.id,
             trackingCompany: ful.trackingCompany,
             trackingNumber: ful.trackingNumber,
             trackingUrl: ful.trackingUrl,
@@ -298,13 +300,8 @@ export async function syncShopifyCustomerCallData(
   const latest = computeLatestValidOrderDates(classified);
   for (const [externalId, latestAt] of latest) {
     try {
-      const existing = await repo.findCustomerByExternalId("shopify", externalId);
-      if (
-        !existing?.latestValidOrderAt ||
-        latestAt > existing.latestValidOrderAt
-      ) {
-        await repo.setLatestValidOrderAt("shopify", externalId, latestAt);
-      }
+      // Single conditional UPDATE — no pre-read round-trip.
+      await repo.setLatestValidOrderAt("shopify", externalId, latestAt);
     } catch (err) {
       summary.errors.push(
         `Latest order ${externalId}: ${err instanceof Error ? err.message : "update failed"}`,

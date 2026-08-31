@@ -62,6 +62,8 @@ export type UpsertFulfilmentInput = {
   provider: CommerceProvider;
   externalId: string;
   orderExternalId: string;
+  /** When known from a prior upsertOrder, skips the order lookup round-trip. */
+  orderId?: string;
   trackingCompany: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;

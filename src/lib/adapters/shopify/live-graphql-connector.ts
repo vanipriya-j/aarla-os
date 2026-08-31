@@ -574,7 +574,9 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       // Keep pages small so sequential upserts finish inside Vercel’s ~60s limit.
       // Advancing the resume cursor only after upserts (service layer) + this size
       // avoids skipping half a page when a chunk times out mid-write.
-      const pageSize = Math.max(10, Math.min(options.pageSize ?? 25, 50));
+      // 15 (was 25): each order is many DB round-trips to remote Supabase; 25 often
+      // hits Vercel’s wall clock even for a ~500-order store.
+      const pageSize = Math.max(5, Math.min(options.pageSize ?? 15, 50));
       const variables: {
         cursor: string | null;
         query: string | null;
