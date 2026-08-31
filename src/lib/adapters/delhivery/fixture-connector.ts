@@ -5,6 +5,7 @@ type FixtureCase = {
   providerStatus: string;
   providerStatusType: string;
   deliveredAt?: string | null;
+  promisedDeliveryAt?: string | null;
   latestScanAt?: string | null;
   latestScanLocation?: string | null;
   pickedUpDate?: string | null;
@@ -20,6 +21,7 @@ const CASES: Record<string, FixtureCase> = {
     providerStatus: "Delivered",
     providerStatusType: "DL",
     deliveredAt: "2026-07-22T12:18:25.000Z",
+    promisedDeliveryAt: "2026-07-21T23:59:59.000Z",
     latestScanAt: "2026-07-22T12:18:25.000Z",
     latestScanLocation: "Chennai_Guindy_C (Tamil Nadu)",
     pickedUpDate: "2026-07-20T10:00:00.000Z",
@@ -47,6 +49,7 @@ const CASES: Record<string, FixtureCase> = {
     providerStatus: "In Transit",
     providerStatusType: "UD",
     deliveredAt: null,
+    promisedDeliveryAt: "2026-07-31T23:59:59.000Z",
     latestScanAt: "2026-07-29T09:00:00.000Z",
     latestScanLocation: "Bangalore_Whitefield_C (Karnataka)",
     pickedUpDate: "2026-07-28T15:00:00.000Z",
@@ -132,6 +135,7 @@ function toResult(awb: string, c: FixtureCase): TrackedShipmentResult {
     providerStatusType: c.providerStatusType,
     normalizedStatus,
     deliveredAt: c.deliveredAt ?? null,
+    promisedDeliveryAt: c.promisedDeliveryAt ?? null,
     latestScanAt: c.latestScanAt ?? null,
     latestScanLocation: c.latestScanLocation ?? null,
     syncStatus: "ok",
@@ -148,6 +152,7 @@ function toResult(awb: string, c: FixtureCase): TrackedShipmentResult {
         },
         DeliveryDate: c.deliveredAt,
         PickedupDate: c.pickedUpDate,
+        PromisedDeliveryDate: c.promisedDeliveryAt,
       },
     },
   };

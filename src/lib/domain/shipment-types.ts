@@ -34,6 +34,8 @@ export interface Shipment {
   providerStatusType: string | null;
   normalizedStatus: NormalizedShipmentStatus;
   deliveredAt: string | null;
+  /** Delhivery PromisedDeliveryDate, else ExpectedDeliveryDate */
+  promisedDeliveryAt: string | null;
   latestScanAt: string | null;
   latestScanLocation: string | null;
   lastSyncedAt: string;
@@ -42,6 +44,17 @@ export interface Shipment {
   createdAt: string;
   updatedAt: string;
 }
+
+export const SHIPMENT_DIAGNOSTIC_SORTS = [
+  "last-synced",
+  "ordered",
+  "promised",
+  "delivered",
+  "status",
+  "customer",
+  "order",
+] as const;
+export type ShipmentDiagnosticSort = (typeof SHIPMENT_DIAGNOSTIC_SORTS)[number];
 
 export interface ShipmentStatusEvent {
   id: string;
@@ -66,11 +79,53 @@ export interface ShipmentDiagnosticRow {
   normalizedStatus: NormalizedShipmentStatus;
   providerStatus: string | null;
   deliveredAt: string | null;
+  promisedDeliveryAt: string | null;
   latestScanAt: string | null;
   latestScanLocation: string | null;
   lastSyncedAt: string;
   syncError: string | null;
   syncStatus: ShipmentSyncStatus;
+  /** Shopify fulfilment tracking URL, or Delhivery public track link from AWB */
+  trackingUrl: string | null;
+}
+
+/** Public Delhivery package page for an AWB (safe for clipboard / customer share). */
+export function delhiveryPublicTrackingUrl(awb: string): string | null {
+  const trimmed = awb.trim();
+  if (!trimmed) return null;
+  return `https://www.delhivery.com/track/package/${encodeURIComponent(trimmed)}`;
+}
+
+export function resolveShipmentTrackingUrl(
+  awb: string,
+  carrier: ShipmentCarrier,
+  fulfilmentTrackingUrl?: string | null,
+): string | null {
+  const fromFulfilment = fulfilmentTrackingUrl?.trim();
+  if (fromFulfilment) return fromFulfilment;
+  if (carrier === "delhivery") return delhiveryPublicTrackingUrl(awb);
+  return null;
+}
+
+export function formatShipmentStatusLabel(
+  status: NormalizedShipmentStatus,
+  providerStatus?: string | null,
+): string {
+  const labels: Record<NormalizedShipmentStatus, string> = {
+    unknown: "Unknown",
+    manifested: "Manifested",
+    "picked-up": "Picked up",
+    "in-transit": "In transit",
+    "out-for-delivery": "Out for delivery",
+    delivered: "Delivered",
+    "delivery-failed": "Delivery failed",
+    returned: "Returned",
+    cancelled: "Cancelled",
+  };
+  const base = labels[status] ?? status;
+  const provider = providerStatus?.trim();
+  if (!provider || provider.toLowerCase() === base.toLowerCase()) return base;
+  return `${base} · ${provider}`;
 }
 
 export type ShipmentDiagnosticsPage = {
