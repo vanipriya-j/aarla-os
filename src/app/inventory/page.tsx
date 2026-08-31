@@ -395,6 +395,11 @@ function InventoryInner() {
 
         {tab === "stock" ? (
           <div className="space-y-8">
+            {hydrated && !products.length ? (
+              <p className="text-sm text-charcoal/55">
+                No products in the catalog yet. Run /setup if this environment is empty.
+              </p>
+            ) : null}
             {productsByCategory.map(([category, categoryProducts]) => (
               <section key={category} className="space-y-4">
                 <h2 className="font-display text-xl text-deep-navy">{category}</h2>
@@ -412,12 +417,17 @@ function InventoryInner() {
                 </div>
               </section>
             ))}
-            <div className="card-surface-pale p-4 text-sm text-charcoal/65">
-              Open a product for By Size drill-down, pace, and DO_NOT_REPLENISH — e.g.{" "}
-              <Link href="/inventory/products/prod-kolam-bottle" className="text-aarla-red font-medium">
-                Kolam Bottle →
-              </Link>
-            </div>
+            {products.length ? (
+              <div className="card-surface-pale p-4 text-sm text-charcoal/65">
+                Open a product for By Size drill-down, pace, and DO_NOT_REPLENISH — e.g.{" "}
+                <Link
+                  href="/inventory/products/prod-kolam-bottle"
+                  className="text-aarla-red font-medium"
+                >
+                  Kolam Bottle →
+                </Link>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

@@ -77,7 +77,7 @@ async function codesByUuids(
 function createProductRepo(q: QueryFn): ProductRepository {
   return {
     async list(): Promise<Product[]> {
-      type ProductRow = {
+      const products = await q<{
         code: string;
         sku: string;
         title: string;
@@ -91,31 +91,13 @@ function createProductRepo(q: QueryFn): ProductRepository {
         idea_origin: string | null;
         designed_date: string | Date | null;
         inventory_presentation: string;
-        is_seasonal?: boolean;
-        season_label?: string | null;
-        season_active_months?: number[] | null;
         id: string;
-      };
-
-      let products: ProductRow[];
-      try {
-        products = await q<ProductRow>(
-          `select id, code, sku, title, category, world, story, selling_price, cost,
-                  velocity, status, idea_origin, designed_date, inventory_presentation,
-                  coalesce(is_seasonal, false) as is_seasonal,
-                  season_label,
-                  coalesce(season_active_months, '{}'::integer[]) as season_active_months
-           from products where organization_id = $1 order by title`,
-          [ORG_ID],
-        );
-      } catch {
-        products = await q<ProductRow>(
-          `select id, code, sku, title, category, world, story, selling_price, cost,
-                  velocity, status, idea_origin, designed_date, inventory_presentation
-           from products where organization_id = $1 order by title`,
-          [ORG_ID],
-        );
-      }
+      }>(
+        `select id, code, sku, title, category, world, story, selling_price, cost,
+                velocity, status, idea_origin, designed_date, inventory_presentation
+         from products where organization_id = $1 order by title`,
+        [ORG_ID],
+      );
       if (!products.length) return [];
       const variants = await q<{
         product_id: string;
@@ -138,28 +120,62 @@ function createProductRepo(q: QueryFn): ProductRepository {
         list.push({ id: v.code, label: v.label, sku: v.sku, options });
         byProduct.set(v.product_id, list);
       }
-      return products.map((p) => ({
-        id: p.code,
-        sku: p.sku,
-        title: p.title,
-        category: p.category,
-        world: p.world,
-        story: p.story,
-        variants: byProduct.get(p.id) ?? [],
-        sellingPrice: num(p.selling_price),
-        cost: num(p.cost),
-        velocity: p.velocity as Product["velocity"],
-        status: p.status,
-        ideaOrigin: p.idea_origin ?? undefined,
-        designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
-        inventoryPresentation: (p.inventory_presentation ??
-          "auto") as Product["inventoryPresentation"],
-        isSeasonal: Boolean(p.is_seasonal),
-        seasonLabel: p.season_label ?? null,
-        seasonActiveMonths: Array.isArray(p.season_active_months)
-          ? p.season_active_months.map(Number)
-          : [],
-      }));
+
+      // Seasonal flags are optional (post-migration). Never fail the catalog on them.
+      const seasonalByCode = new Map<
+        string,
+        { isSeasonal: boolean; seasonLabel: string | null; seasonActiveMonths: number[] }
+      >();
+      try {
+        const seasonal = await q<{
+          code: string;
+          is_seasonal: boolean;
+          season_label: string | null;
+          season_active_months: number[] | null;
+        }>(
+          `select code,
+                  coalesce(is_seasonal, false) as is_seasonal,
+                  season_label,
+                  coalesce(season_active_months, '{}'::integer[]) as season_active_months
+           from products where organization_id = $1`,
+          [ORG_ID],
+        );
+        for (const row of seasonal) {
+          seasonalByCode.set(row.code, {
+            isSeasonal: Boolean(row.is_seasonal),
+            seasonLabel: row.season_label,
+            seasonActiveMonths: Array.isArray(row.season_active_months)
+              ? row.season_active_months.map(Number)
+              : [],
+          });
+        }
+      } catch {
+        /* migration not applied yet */
+      }
+
+      return products.map((p) => {
+        const season = seasonalByCode.get(p.code);
+        return {
+          id: p.code,
+          sku: p.sku,
+          title: p.title,
+          category: p.category,
+          world: p.world,
+          story: p.story,
+          variants: byProduct.get(p.id) ?? [],
+          sellingPrice: num(p.selling_price),
+          cost: num(p.cost),
+          velocity: p.velocity as Product["velocity"],
+          status: p.status,
+          ideaOrigin: p.idea_origin ?? undefined,
+          designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
+          inventoryPresentation: (p.inventory_presentation ??
+            "auto") as Product["inventoryPresentation"],
+          isSeasonal: season?.isSeasonal ?? false,
+          seasonLabel: season?.seasonLabel ?? null,
+          seasonActiveMonths: season?.seasonActiveMonths ?? [],
+        };
+      });
     },
     async getByCode(code: string): Promise<Product | null> {
       const all = await this.list();
