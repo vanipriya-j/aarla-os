@@ -25,6 +25,10 @@ type Q = <T extends QueryResultRow = QueryResultRow>(
   params?: unknown[],
 ) => Promise<T[]>;
 
+/** Process-local: schema ensures run once per serverless isolate, not every chunk. */
+let taxSchemaReady: Promise<void> | null = null;
+let contactPhoneSchemaReady: Promise<void> | null = null;
+
 function iso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   return new Date(String(value)).toISOString();
@@ -129,40 +133,30 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
     },
 
     async upsertCustomer(input: UpsertCustomerInput) {
-      const existing = await q<{ id: string; phone: string | null; name: string }>(
-        `select id, phone, name from external_customers
-         where organization_id = $1 and provider = $2 and external_id = $3`,
-        [ORG_ID, input.provider, input.externalId],
-      );
-      if (existing[0]) {
-        const nextPhone = input.phone?.trim() ? input.phone.trim() : existing[0].phone;
-        const stubName = /^Shopify customer\b/i.test(input.name.trim());
-        const nextName =
-          stubName && existing[0].name?.trim() ? existing[0].name : input.name;
-        await q(
-          `update external_customers
-           set name = $4, phone = $5, email = coalesce($6, email),
-               marketing_consent_status = coalesce($7, marketing_consent_status),
-               last_synced_at = now()
-           where organization_id = $1 and provider = $2 and external_id = $3`,
-          [
-            ORG_ID,
-            input.provider,
-            input.externalId,
-            nextName,
-            nextPhone,
-            input.email,
-            input.marketingConsentStatus,
-          ],
-        );
-        return { id: existing[0].id, created: false };
-      }
-      const rows = await q<{ id: string }>(
+      // One round-trip (insert or update) — was select + write.
+      const rows = await q<{ id: string; inserted: boolean }>(
         `insert into external_customers (
            organization_id, provider, external_id, name, phone, email,
            marketing_consent_status, last_synced_at
          ) values ($1,$2,$3,$4,$5,$6,$7, now())
-         returning id`,
+         on conflict (organization_id, provider, external_id) do update set
+           name = case
+             when excluded.name ~* '^Shopify customer\\b'
+               and nullif(btrim(external_customers.name), '') is not null
+             then external_customers.name
+             else excluded.name
+           end,
+           phone = case
+             when nullif(btrim(excluded.phone), '') is not null then excluded.phone
+             else external_customers.phone
+           end,
+           email = coalesce(excluded.email, external_customers.email),
+           marketing_consent_status = coalesce(
+             excluded.marketing_consent_status,
+             external_customers.marketing_consent_status
+           ),
+           last_synced_at = now()
+         returning id, (xmax = 0) as inserted`,
         [
           ORG_ID,
           input.provider,
@@ -173,14 +167,19 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
           input.marketingConsentStatus,
         ],
       );
-      return { id: rows[0]!.id, created: true };
+      return { id: rows[0]!.id, created: Boolean(rows[0]!.inserted) };
     },
 
     async setLatestValidOrderAt(provider, externalId, latestValidOrderAt) {
       await q(
         `update external_customers
          set latest_valid_order_at = $4
-         where organization_id = $1 and provider = $2 and external_id = $3`,
+         where organization_id = $1 and provider = $2 and external_id = $3
+           and (
+             $4::timestamptz is null
+             or latest_valid_order_at is null
+             or latest_valid_order_at < $4::timestamptz
+           )`,
         [ORG_ID, provider, externalId, latestValidOrderAt],
       );
     },
@@ -355,33 +354,68 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
     },
 
     async ensureOrderContactPhoneSchema() {
-      await q(`
-        alter table external_orders
-          add column if not exists contact_phone text
-      `);
+      if (contactPhoneSchemaReady) {
+        await contactPhoneSchemaReady;
+        return;
+      }
+      contactPhoneSchemaReady = (async () => {
+        const cols = await q<{ column_name: string }>(
+          `select column_name from information_schema.columns
+           where table_schema = 'public'
+             and table_name = 'external_orders'
+             and column_name = 'contact_phone'`,
+        );
+        if (cols[0]) return;
+        await q(`
+          alter table external_orders
+            add column if not exists contact_phone text
+        `);
+      })().catch((err) => {
+        contactPhoneSchemaReady = null;
+        throw err;
+      });
+      await contactPhoneSchemaReady;
     },
 
     async ensureOrderTaxSchema() {
-      const alters = [
-        `alter table external_orders add column if not exists taxes_included boolean`,
-        `alter table external_orders add column if not exists subtotal_amount numeric(12,2)`,
-        `alter table external_orders add column if not exists total_discounts numeric(12,2)`,
-        `alter table external_orders add column if not exists shipping_amount numeric(12,2)`,
-        `alter table external_orders add column if not exists shipping_tax numeric(12,2)`,
-        `alter table external_orders add column if not exists total_tax numeric(12,2)`,
-        `alter table external_orders add column if not exists cgst numeric(12,2)`,
-        `alter table external_orders add column if not exists sgst numeric(12,2)`,
-        `alter table external_orders add column if not exists igst numeric(12,2)`,
-        `alter table external_orders add column if not exists taxable_amount numeric(12,2)`,
-        `alter table external_orders add column if not exists total_refunded numeric(12,2)`,
-        `alter table external_orders add column if not exists shipping_province text`,
-        `alter table external_orders add column if not exists shipping_country text`,
-        `alter table external_orders add column if not exists customer_gstin text`,
-        `alter table external_orders add column if not exists tax_lines_json jsonb not null default '[]'::jsonb`,
-      ];
-      for (const sql of alters) {
-        await q(sql);
+      // Cold path only — never re-run 15 ALTER TABLE statements on every sync chunk.
+      if (taxSchemaReady) {
+        await taxSchemaReady;
+        return;
       }
+      taxSchemaReady = (async () => {
+        const cols = await q<{ column_name: string }>(
+          `select column_name from information_schema.columns
+           where table_schema = 'public'
+             and table_name = 'external_orders'
+             and column_name = 'tax_lines_json'`,
+        );
+        if (cols[0]) return;
+        const alters = [
+          `alter table external_orders add column if not exists taxes_included boolean`,
+          `alter table external_orders add column if not exists subtotal_amount numeric(12,2)`,
+          `alter table external_orders add column if not exists total_discounts numeric(12,2)`,
+          `alter table external_orders add column if not exists shipping_amount numeric(12,2)`,
+          `alter table external_orders add column if not exists shipping_tax numeric(12,2)`,
+          `alter table external_orders add column if not exists total_tax numeric(12,2)`,
+          `alter table external_orders add column if not exists cgst numeric(12,2)`,
+          `alter table external_orders add column if not exists sgst numeric(12,2)`,
+          `alter table external_orders add column if not exists igst numeric(12,2)`,
+          `alter table external_orders add column if not exists taxable_amount numeric(12,2)`,
+          `alter table external_orders add column if not exists total_refunded numeric(12,2)`,
+          `alter table external_orders add column if not exists shipping_province text`,
+          `alter table external_orders add column if not exists shipping_country text`,
+          `alter table external_orders add column if not exists customer_gstin text`,
+          `alter table external_orders add column if not exists tax_lines_json jsonb not null default '[]'::jsonb`,
+        ];
+        for (const sql of alters) {
+          await q(sql);
+        }
+      })().catch((err) => {
+        taxSchemaReady = null;
+        throw err;
+      });
+      await taxSchemaReady;
     },
 
     async listDeliveredOrdersMissingPhone(limit = 40) {
@@ -447,58 +481,43 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
     },
 
     async upsertFulfilment(input: UpsertFulfilmentInput) {
-      const order = await q<{ id: string }>(
-        `select id from external_orders
-         where organization_id = $1 and provider = $2 and external_id = $3`,
-        [ORG_ID, input.provider, input.orderExternalId],
-      );
-      if (!order[0]) {
+      let orderId = input.orderId?.trim() || null;
+      if (!orderId) {
+        const order = await q<{ id: string }>(
+          `select id from external_orders
+           where organization_id = $1 and provider = $2 and external_id = $3`,
+          [ORG_ID, input.provider, input.orderExternalId],
+        );
+        orderId = order[0]?.id ?? null;
+      }
+      if (!orderId) {
         throw new Error(`Order ${input.orderExternalId} not found for fulfilment upsert`);
       }
-      const existing = await q<{ id: string }>(
-        `select id from external_fulfilments
-         where organization_id = $1 and provider = $2 and external_id = $3`,
-        [ORG_ID, input.provider, input.externalId],
-      );
-      if (existing[0]) {
-        await q(
-          `update external_fulfilments set
-             external_order_id = $2,
-             tracking_company = $3,
-             tracking_number = $4,
-             tracking_url = $5,
-             fulfilment_status = $6,
-             last_synced_at = now()
-           where id = $1`,
-          [
-            existing[0].id,
-            order[0].id,
-            input.trackingCompany,
-            input.trackingNumber,
-            input.trackingUrl,
-            input.fulfilmentStatus,
-          ],
-        );
-        return { id: existing[0].id, created: false };
-      }
-      const rows = await q<{ id: string }>(
+      const rows = await q<{ id: string; inserted: boolean }>(
         `insert into external_fulfilments (
            organization_id, provider, external_id, external_order_id,
            tracking_company, tracking_number, tracking_url, fulfilment_status, last_synced_at
          ) values ($1,$2,$3,$4,$5,$6,$7,$8, now())
-         returning id`,
+         on conflict (organization_id, provider, external_id) do update set
+           external_order_id = excluded.external_order_id,
+           tracking_company = excluded.tracking_company,
+           tracking_number = excluded.tracking_number,
+           tracking_url = excluded.tracking_url,
+           fulfilment_status = excluded.fulfilment_status,
+           last_synced_at = now()
+         returning id, (xmax = 0) as inserted`,
         [
           ORG_ID,
           input.provider,
           input.externalId,
-          order[0].id,
+          orderId,
           input.trackingCompany,
           input.trackingNumber,
           input.trackingUrl,
           input.fulfilmentStatus,
         ],
       );
-      return { id: rows[0]!.id, created: true };
+      return { id: rows[0]!.id, created: Boolean(rows[0]!.inserted) };
     },
 
     async listCustomers() {

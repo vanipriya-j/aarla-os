@@ -145,7 +145,7 @@ export function CommerceSyncBar() {
       onRetry: (attempt: number, maxAttempts: number) => {
         setError(null);
         setStatus(
-          `Sync interrupted — unlocking and retrying ${attempt}/${maxAttempts}…`,
+          `Server timed out on this batch — unlocking and retrying ${attempt}/${maxAttempts}…`,
         );
       },
     };
