@@ -105,6 +105,15 @@ export async function syncShopifyCustomerCallData(
     }
   }
 
+  // Best-effort store total for “Loaded X of Y” UI — does not gate the sync.
+  if (typeof connector.fetchOrdersCount === "function") {
+    try {
+      summary.ordersTotal = await connector.fetchOrdersCount(query);
+    } catch {
+      summary.ordersTotal = null;
+    }
+  }
+
   let payload;
   let hasMore = false;
   let nextCursor: string | null = null;

@@ -138,4 +138,9 @@ export interface ShopifyConnector {
   fetchAbandonedCheckoutsPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyAbandonedCheckoutPage>;
+  /**
+   * Total orders matching an optional search query (for “Loaded X of Y” progress).
+   * Optional — UI falls back to Loaded X orders when missing.
+   */
+  fetchOrdersCount?(query?: string | null): Promise<number | null>;
 }

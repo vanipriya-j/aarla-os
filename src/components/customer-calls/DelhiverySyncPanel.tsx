@@ -15,6 +15,7 @@ import {
 } from "@/lib/domain/shipment-types";
 import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
+import { formatAwbsTracked } from "@/lib/client/commerce-sync-progress";
 import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
 import { Hourglass, Loader2, Truck } from "lucide-react";
 
@@ -97,7 +98,7 @@ export function DelhiverySyncPanel() {
     }
 
     setError(null);
-    setStatus("Click received — tracking every AWB in the database…");
+    setStatus("Counting AWBs to track…");
     let offset: number | null = 0;
     let total = emptyDelhiverySyncSummary();
     let guard = 0;
@@ -108,9 +109,7 @@ export function DelhiverySyncPanel() {
       while (guard < maxChunks) {
         guard += 1;
         setStatus(
-          offset
-            ? `Syncing chunk ${guard} (AWB offset ${offset})…`
-            : `Syncing chunk ${guard}…`,
+          `${formatAwbsTracked(total.awbsProcessed ?? 0, total.uniqueAwbsTracked || null)}…`,
         );
         let res;
         try {
@@ -133,11 +132,9 @@ export function DelhiverySyncPanel() {
         }
         total = mergeDelhiverySyncSummaries(total, res.data);
         setSummary({ ...total });
-        const done = total.awbsProcessed ?? 0;
-        const of = total.uniqueAwbsTracked || "?";
         setStatus(
-          `Tracked ${done} / ${of} unique AWBs` +
-            (res.data.hasMore ? " · continuing…" : " · done"),
+          `${formatAwbsTracked(total.awbsProcessed ?? 0, total.uniqueAwbsTracked || null)}` +
+            (res.data.hasMore ? "…" : " — done"),
         );
 
         if (res.data.errors.length && !res.data.hasMore) {
@@ -153,8 +150,8 @@ export function DelhiverySyncPanel() {
       const unique = total.uniqueAwbsTracked;
       setStatus(
         total.complete
-          ? `Delhivery sync complete — ${processed} / ${unique} unique AWBs tracked.`
-          : `Delhivery sync paused at ${processed} / ${unique} AWBs — click Sync again to continue.`,
+          ? `Delhivery sync complete — ${formatAwbsTracked(processed, unique)}.`
+          : `Delhivery sync paused — ${formatAwbsTracked(processed, unique)}. Click Sync again to continue.`,
       );
       const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
@@ -176,7 +173,7 @@ export function DelhiverySyncPanel() {
     <div className="space-y-4" data-testid="delhivery-sync-panel">
       <FormSection
         title="Delhivery shipment sync"
-        description="Tracks every fulfilment AWB already saved from Shopify — not just the last page of 25 orders. Runs in chunks so Vercel does not time out. Does not create call queue items."
+        description="Tracks every fulfilment AWB already saved from Shopify. Progress shows Tracked X of Y. Does not create call queue items."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button

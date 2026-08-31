@@ -48,6 +48,18 @@ export function readLiveShopifyConfigFromEnv(
   return readShopifyAuthConfigFromEnv(env);
 }
 
+const ORDERS_COUNT_QUERY = `
+query SyncOrdersCount($query: String) {
+  ordersCount(query: $query) {
+    count
+  }
+}
+`;
+
+type OrdersCountQueryData = {
+  ordersCount: { count: number };
+};
+
 const ORDERS_QUERY = `
 query SyncOrders($cursor: String, $query: String, $pageSize: Int!) {
   orders(first: $pageSize, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: true) {
@@ -529,6 +541,20 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       throw new Error("Shopify GraphQL returned empty data");
     }
     return body.data;
+  }
+
+  async fetchOrdersCount(query?: string | null): Promise<number | null> {
+    assertServerOnly();
+    try {
+      const data = await this.graphql<OrdersCountQueryData>(ORDERS_COUNT_QUERY, {
+        query: query?.trim() ? query.trim() : null,
+      });
+      const count = data.ordersCount?.count;
+      return typeof count === "number" && Number.isFinite(count) ? count : null;
+    } catch {
+      // Progress total is best-effort — never block sync on count failures.
+      return null;
+    }
   }
 
   async fetchCustomerCallPage(
