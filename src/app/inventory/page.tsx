@@ -15,6 +15,7 @@ import {
 } from "@/components/inventory/TransferStockModal";
 import { AdjustStockModal, type AdjustStockSubmitInput } from "@/components/inventory/AdjustStockModal";
 import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
+import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogSyncButton";
 import {
   DEFAULT_INVENTORY_LOC,
   buildApparelMatrix,
@@ -183,6 +184,11 @@ function InventoryInner() {
     adjustStock,
   } = useAppLedger();
 
+  // Re-load ledger after catalog sync by soft refresh.
+  const reload = () => {
+    if (typeof window !== "undefined") window.location.reload();
+  };
+
   const [selection, setSelection] = useState<StockSelection | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [transferCtx, setTransferCtx] = useState<TransferContext | null>(null);
@@ -317,6 +323,7 @@ function InventoryInner() {
       <Header
         title="Inventory"
         subtitle="Balances are derived from the Stock Movement Ledger — the single source of truth."
+        actions={<ShopifyCatalogSyncButton onDone={reload} />}
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <div className="flex flex-wrap gap-2">
@@ -346,6 +353,16 @@ function InventoryInner() {
 
         {tab === "stock" ? (
           <div className="space-y-8">
+            {hydrated && !products.length ? (
+              <div className="rounded-xl border border-border bg-pale-cream p-5 space-y-3 text-sm text-charcoal/70">
+                <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
+                <p>
+                  Pull titles, SKUs, and variants from Shopify (catalog only — no inventory
+                  quantities). Then Receive or Transfer to create ledger balances.
+                </p>
+                <ShopifyCatalogSyncButton onDone={reload} />
+              </div>
+            ) : null}
             {productsByCategory.map(([category, categoryProducts]) => (
               <section key={category} className="space-y-4">
                 <h2 className="font-display text-xl text-deep-navy">{category}</h2>

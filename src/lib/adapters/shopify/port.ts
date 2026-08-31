@@ -128,6 +128,34 @@ export type ShopifyAbandonedCheckoutPage = {
   pagesFetched: number;
 };
 
+export interface ShopifyProductVariantRecord {
+  externalVariantId: string;
+  sku: string;
+  title: string;
+  price: number;
+  selectedOptions: Array<{ name: string; value: string }>;
+  position: number;
+}
+
+export interface ShopifyProductRecord {
+  externalProductId: string;
+  title: string;
+  handle: string;
+  status: string;
+  productType: string;
+  vendor: string;
+  tags: string[];
+  updatedAt: string;
+  variants: ShopifyProductVariantRecord[];
+}
+
+export type ShopifyProductsPage = {
+  products: ShopifyProductRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  pagesFetched: number;
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
   /** Full fetch (fixtures / small stores). Live connector may still page internally. */
@@ -138,6 +166,8 @@ export interface ShopifyConnector {
   fetchAbandonedCheckoutsPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyAbandonedCheckoutPage>;
+  /** Chunked catalog products — optional; skipped when unimplemented. */
+  fetchProductsPage?(options?: ShopifyFetchOptions): Promise<ShopifyProductsPage>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.

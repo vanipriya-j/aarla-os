@@ -21,6 +21,9 @@ import type {
   ShopifyFulfilmentRecord,
   ShopifyLineItemRecord,
   ShopifyOrderRecord,
+  ShopifyProductRecord,
+  ShopifyProductsPage,
+  ShopifyProductVariantRecord,
   ShopifyTaxLineRecord,
 } from "./port";
 import { shopifyGidToExternalId } from "./normalize";
@@ -379,6 +382,98 @@ function mapAbandonedCheckout(
   };
 }
 
+const PRODUCTS_QUERY = `
+query SyncProducts($cursor: String, $query: String, $pageSize: Int!) {
+  products(first: $pageSize, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        title
+        handle
+        status
+        productType
+        vendor
+        tags
+        updatedAt
+        variants(first: 100) {
+          edges {
+            node {
+              id
+              title
+              sku
+              price
+              position
+              selectedOptions { name value }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+type RawProductNode = {
+  id: string;
+  title: string;
+  handle: string;
+  status: string;
+  productType: string | null;
+  vendor: string | null;
+  tags: string[];
+  updatedAt: string;
+  variants: {
+    edges: Array<{
+      node: {
+        id: string;
+        title: string;
+        sku: string | null;
+        price: string;
+        position: number;
+        selectedOptions: Array<{ name: string; value: string }>;
+      };
+    }>;
+  };
+};
+
+type ProductsQueryData = {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{ node: RawProductNode }>;
+  };
+};
+
+function mapProduct(node: RawProductNode): ShopifyProductRecord {
+  const externalProductId = shopifyGidToExternalId(node.id) ?? node.id;
+  const variants: ShopifyProductVariantRecord[] = node.variants.edges.map(({ node: v }) => {
+    const externalVariantId = shopifyGidToExternalId(v.id) ?? v.id;
+    const sku = (v.sku ?? "").trim() || `shopify-${externalVariantId}`;
+    return {
+      externalVariantId,
+      sku,
+      title: v.title || "Default Title",
+      price: Number(v.price ?? 0) || 0,
+      selectedOptions: (v.selectedOptions ?? []).map((o) => ({
+        name: o.name,
+        value: o.value,
+      })),
+      position: v.position ?? 0,
+    };
+  });
+  return {
+    externalProductId,
+    title: node.title,
+    handle: node.handle,
+    status: node.status,
+    productType: node.productType ?? "",
+    vendor: node.vendor ?? "",
+    tags: node.tags ?? [],
+    updatedAt: node.updatedAt,
+    variants,
+  };
+}
+
 function customerName(c: NonNullable<RawOrderNode["customer"]>): string {
   if (c.displayName?.trim()) return c.displayName.trim();
   const parts = [c.firstName, c.lastName].filter(Boolean);
@@ -639,6 +734,47 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     return {
       checkouts,
+      hasMore: hasNext,
+      nextCursor: hasNext ? cursor : null,
+      pagesFetched: pages,
+    };
+  }
+
+  async fetchProductsPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyProductsPage> {
+    assertServerOnly();
+    const products: ShopifyProductRecord[] = [];
+    let cursor: string | null = options.cursor ?? null;
+    let hasNext = true;
+    let pages = 0;
+    const maxPages = Math.max(1, Math.min(options.maxPages ?? 1, 10));
+
+    while (hasNext && pages < maxPages) {
+      pages += 1;
+      const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
+      const variables: {
+        cursor: string | null;
+        query: string | null;
+        pageSize: number;
+      } = {
+        cursor,
+        query: options.query?.trim() ? options.query.trim() : null,
+        pageSize,
+      };
+      const data: ProductsQueryData = await this.graphql<ProductsQueryData>(
+        PRODUCTS_QUERY,
+        variables,
+      );
+      for (const edge of data.products.edges) {
+        products.push(mapProduct(edge.node));
+      }
+      hasNext = data.products.pageInfo.hasNextPage;
+      cursor = data.products.pageInfo.endCursor;
+    }
+
+    return {
+      products,
       hasMore: hasNext,
       nextCursor: hasNext ? cursor : null,
       pagesFetched: pages,

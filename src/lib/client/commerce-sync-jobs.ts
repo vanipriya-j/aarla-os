@@ -7,6 +7,7 @@ import {
   syncDelhiveryChunkViaApi,
   syncShopifyAbandonedChunkViaApi,
   syncShopifyChunkViaApi,
+  syncShopifyProductsChunkViaApi,
 } from "@/lib/client/commerce-sync-api";
 import { runChunkWithAutoRetry } from "@/lib/client/commerce-sync-auto-retry";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
@@ -17,8 +18,10 @@ import {
 } from "@/lib/client/commerce-sync-progress";
 import {
   emptyShopifyAbandonedSyncSummary,
+  emptyShopifyCatalogSyncSummary,
   emptyShopifySyncSummary,
   mergeShopifyAbandonedSyncSummaries,
+  mergeShopifyCatalogSyncSummaries,
   mergeShopifySyncSummaries,
 } from "@/lib/domain/external-commerce-types";
 import {
@@ -49,9 +52,38 @@ export async function runCommerceSyncAllJob(
   };
 
   cb.setError(null);
-  cb.setStatus("Click received — incremental Shopify sync (new orders only)…");
+  cb.setStatus("Click received — syncing Shopify catalog, then orders…");
 
   try {
+    // 0) Product catalog (metadata only — no stock movements)
+    let catalogCursor: string | null = null;
+    let catalogTotal = emptyShopifyCatalogSyncSummary();
+    let catalogGuard = 0;
+    while (catalogGuard < 200) {
+      catalogGuard += 1;
+      cb.setStatus(
+        catalogTotal.productsRead > 0
+          ? `Shopify catalog: ${catalogTotal.productsAdded} added, ${catalogTotal.productsUpdated} updated…`
+          : "Loading Shopify products into Aarla catalog…",
+      );
+      const catalogRes = await runChunkWithAutoRetry({
+        ...retryOpts,
+        attempt: (token) =>
+          syncShopifyProductsChunkViaApi(catalogCursor, token, "incremental"),
+      });
+      if (!catalogRes.ok) {
+        cb.setError(catalogRes.error);
+        cb.setStatus(
+          "Stopped on catalog sync — grant read_products on the Shopify app if needed, then Sync All again.",
+        );
+        return;
+      }
+      catalogTotal = mergeShopifyCatalogSyncSummaries(catalogTotal, catalogRes.data);
+      if (!catalogRes.data.hasMore) break;
+      catalogCursor = catalogRes.data.nextCursor ?? null;
+      if (!catalogCursor) break;
+    }
+
     let cursor: string | null = null;
     let shopifyTotal = emptyShopifySyncSummary();
     let guard = 0;
