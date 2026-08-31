@@ -102,78 +102,47 @@ export function createShipmentRepository(): ShipmentRepository {
     },
 
     async upsertShipment(input: UpsertShipmentInput) {
-      const existing = await q(
-        `select * from shipments
-         where organization_id = $1 and carrier = $2 and awb = $3`,
-        [ORG_ID, input.carrier, input.awb],
-      );
+      const payloadJson =
+        input.rawProviderPayload == null
+          ? null
+          : JSON.stringify(input.rawProviderPayload);
 
-      if (existing[0]) {
-        if (!input.applyTrackingUpdate) {
-          const rows = await q(
-            `update shipments
-             set sync_status = $4,
-                 sync_error = $5,
-                 last_synced_at = now()
-             where organization_id = $1 and carrier = $2 and awb = $3
-             returning *`,
-            [ORG_ID, input.carrier, input.awb, input.syncStatus, input.syncError],
-          );
-          return {
-            id: String(rows[0]!.id),
-            created: false,
-            shipment: mapShipment(rows[0]!),
-          };
-        }
-
-        // Never downgrade delivered → unknown solely because of a bad later payload
-        // (caller also sets applyTrackingUpdate=false on hard failures).
-        const prev = mapShipment(existing[0]);
-        let normalized = input.normalizedStatus;
-        let deliveredAt = input.deliveredAt;
-        if (prev.normalizedStatus === "delivered" && normalized === "unknown") {
-          normalized = "delivered";
-          deliveredAt = prev.deliveredAt;
-        }
-
+      if (!input.applyTrackingUpdate) {
+        // Failure / not_found: one round-trip — only touch sync metadata.
         const rows = await q(
-          `update shipments set
-             external_order_id = coalesce($4, external_order_id),
-             external_fulfilment_id = coalesce($5, external_fulfilment_id),
-             provider_status = $6,
-             provider_status_type = $7,
-             normalized_status = $8,
-             delivered_at = coalesce($9, delivered_at),
-             latest_scan_at = $10,
-             latest_scan_location = $11,
-             sync_status = $12,
-             sync_error = $13,
-             raw_provider_payload = $14,
+          `insert into shipments (
+             organization_id, external_order_id, external_fulfilment_id, carrier, awb,
+             provider_status, provider_status_type, normalized_status,
+             delivered_at, latest_scan_at, latest_scan_location,
+             sync_status, sync_error, raw_provider_payload, last_synced_at
+           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+           on conflict (organization_id, carrier, awb) do update set
+             sync_status = excluded.sync_status,
+             sync_error = excluded.sync_error,
+             external_order_id = coalesce(excluded.external_order_id, shipments.external_order_id),
+             external_fulfilment_id = coalesce(excluded.external_fulfilment_id, shipments.external_fulfilment_id),
              last_synced_at = now()
-           where organization_id = $1 and carrier = $2 and awb = $3
-           returning *`,
+           returning *, (xmax = 0) as inserted`,
           [
             ORG_ID,
-            input.carrier,
-            input.awb,
             input.externalOrderId,
             input.externalFulfilmentId,
+            input.carrier,
+            input.awb,
             input.providerStatus,
             input.providerStatusType,
-            normalized,
-            deliveredAt,
+            input.normalizedStatus,
+            input.deliveredAt,
             input.latestScanAt,
             input.latestScanLocation,
             input.syncStatus,
             input.syncError,
-            input.rawProviderPayload == null
-              ? null
-              : JSON.stringify(input.rawProviderPayload),
+            payloadJson,
           ],
         );
         return {
           id: String(rows[0]!.id),
-          created: false,
+          created: Boolean((rows[0] as { inserted?: boolean }).inserted),
           shipment: mapShipment(rows[0]!),
         };
       }
@@ -185,7 +154,30 @@ export function createShipmentRepository(): ShipmentRepository {
            delivered_at, latest_scan_at, latest_scan_location,
            sync_status, sync_error, raw_provider_payload, last_synced_at
          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
-         returning *`,
+         on conflict (organization_id, carrier, awb) do update set
+           external_order_id = coalesce(excluded.external_order_id, shipments.external_order_id),
+           external_fulfilment_id = coalesce(excluded.external_fulfilment_id, shipments.external_fulfilment_id),
+           provider_status = excluded.provider_status,
+           provider_status_type = excluded.provider_status_type,
+           normalized_status = case
+             when shipments.normalized_status = 'delivered'
+               and excluded.normalized_status = 'unknown'
+             then shipments.normalized_status
+             else excluded.normalized_status
+           end,
+           delivered_at = case
+             when shipments.normalized_status = 'delivered'
+               and excluded.normalized_status = 'unknown'
+             then shipments.delivered_at
+             else coalesce(excluded.delivered_at, shipments.delivered_at)
+           end,
+           latest_scan_at = excluded.latest_scan_at,
+           latest_scan_location = excluded.latest_scan_location,
+           sync_status = excluded.sync_status,
+           sync_error = excluded.sync_error,
+           raw_provider_payload = excluded.raw_provider_payload,
+           last_synced_at = now()
+         returning *, (xmax = 0) as inserted`,
         [
           ORG_ID,
           input.externalOrderId,
@@ -200,14 +192,12 @@ export function createShipmentRepository(): ShipmentRepository {
           input.latestScanLocation,
           input.syncStatus,
           input.syncError,
-          input.rawProviderPayload == null
-            ? null
-            : JSON.stringify(input.rawProviderPayload),
+          payloadJson,
         ],
       );
       return {
         id: String(rows[0]!.id),
-        created: true,
+        created: Boolean((rows[0] as { inserted?: boolean }).inserted),
         shipment: mapShipment(rows[0]!),
       };
     },

@@ -46,11 +46,11 @@ function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
 
 function defaultMaxAwbs(): number {
   const raw = process.env.DELHIVERY_SYNC_MAX_AWBS?.trim();
-  // Default 25 AWBs/chunk — matches Shopify page size and finishes full
-  // backfills with fewer Vercel round-trips (was 10).
-  const n = raw ? Number(raw) : 25;
-  if (!Number.isFinite(n) || n < 1) return 25;
-  return Math.min(Math.floor(n), 40);
+  // Default 10 AWBs/chunk — list+track+upsert must finish inside Vercel ~60s
+  // (remote Supabase RTT; was 25 and still timed out on ~300 AWBs).
+  const n = raw ? Number(raw) : 10;
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.min(Math.floor(n), 25);
 }
 
 type AwbLink = {
@@ -145,7 +145,10 @@ export async function syncDelhiveryShipments(
 
   try {
     tracked = [];
-    for (const batch of chunkAwbs(slice, 30)) {
+    // Small API batches: Delhivery often returns a batch-level "does not exist"
+    // error with no ShipmentData — keep batches tight so one bad group can't
+    // burn a whole chunk's wall clock.
+    for (const batch of chunkAwbs(slice, 10)) {
       tracked.push(...(await connector.trackShipments(batch)));
     }
   } catch (err) {
@@ -176,7 +179,6 @@ export async function syncDelhiveryShipments(
     }
 
     try {
-      const existing = await repo.findByCarrierAwb("delhivery", result.awb);
       const upsert = await repo.upsertShipment({
         carrier: "delhivery",
         awb: result.awb,
@@ -197,10 +199,7 @@ export async function syncDelhiveryShipments(
       if (upsert.created) summary.shipmentsCreated += 1;
       else summary.shipmentsUpdated += 1;
 
-      const statusForTally = ok
-        ? upsert.shipment.normalizedStatus
-        : existing?.normalizedStatus ?? upsert.shipment.normalizedStatus;
-      if (ok) tallyNormalizedStatus(summary, statusForTally);
+      if (ok) tallyNormalizedStatus(summary, upsert.shipment.normalizedStatus);
 
       if (ok && result.scans?.length) {
         await repo.appendStatusEvents({
