@@ -65,6 +65,9 @@ export type CustomerFulfilmentOutcome =
 /** Asia/Kolkata operational cut-off (minutes from midnight). */
 export const FULFILMENT_CUTOFF_MINUTES_IST = 12 * 60 + 30; // 12:30
 
+/** Only pull Shopify orders this recent into the fulfil workbench (daily packing, not full history). */
+export const FULFILMENT_OPEN_ORDER_LOOKBACK_DAYS = 14;
+
 export function fulfilmentStatusLabel(status: FulfilmentStatus): string {
   const labels: Record<FulfilmentStatus, string> = {
     received: "Received",
