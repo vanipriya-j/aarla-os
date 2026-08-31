@@ -11,7 +11,6 @@ import {
   CallWorkspaceModal,
   type CallFormState,
 } from "@/components/customer-calls/CallWorkspaceModal";
-import { CommerceSyncProvider } from "@/components/customer-calls/CommerceSyncProvider";
 import { CommerceSyncBar } from "@/components/customer-calls/CommerceSyncBar";
 import { ShopifySyncPanel } from "@/components/customer-calls/ShopifySyncPanel";
 import { DelhiverySyncPanel } from "@/components/customer-calls/DelhiverySyncPanel";
@@ -213,8 +212,7 @@ export default function CustomerCallsPage() {
         className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl"
         data-testid="customer-calls-page"
       >
-        <CommerceSyncProvider>
-          <div className="space-y-3" data-testid="customer-calls-stages">
+        <div className="space-y-3" data-testid="customer-calls-stages">
             <div className="flex flex-wrap gap-2" data-testid="calls-tabs" role="tablist">
               {STAGES.map((s) => {
                 const active = stage === s.id;
@@ -419,7 +417,6 @@ export default function CustomerCallsPage() {
               </FormSection>
             </div>
           ) : null}
-        </CommerceSyncProvider>
       </main>
 
       <CallWorkspaceModal
