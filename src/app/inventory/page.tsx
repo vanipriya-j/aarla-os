@@ -357,8 +357,8 @@ function InventoryInner() {
               <div className="rounded-xl border border-border bg-pale-cream p-5 space-y-3 text-sm text-charcoal/70">
                 <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
                 <p>
-                  Pull titles, SKUs, and variants from Shopify (catalog only — no inventory
-                  quantities). Then Receive or Transfer to create ledger balances.
+                  1) Sync catalog from Shopify. 2) Import base inventory once (Shopify available →
+                  Studio opening receipts). After that manage with Receive / Transfer.
                 </p>
                 <ShopifyCatalogSyncButton onDone={reload} />
               </div>

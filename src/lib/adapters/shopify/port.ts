@@ -156,6 +156,20 @@ export type ShopifyProductsPage = {
   pagesFetched: number;
 };
 
+export interface ShopifyVariantInventoryRecord {
+  externalVariantId: string;
+  sku: string;
+  /** Total sellable qty across Shopify locations (Admin inventoryQuantity). */
+  available: number;
+}
+
+export type ShopifyVariantInventoryPage = {
+  variants: ShopifyVariantInventoryRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  pagesFetched: number;
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
   /** Full fetch (fixtures / small stores). Live connector may still page internally. */
@@ -168,6 +182,13 @@ export interface ShopifyConnector {
   ): Promise<ShopifyAbandonedCheckoutPage>;
   /** Chunked catalog products — optional; skipped when unimplemented. */
   fetchProductsPage?(options?: ShopifyFetchOptions): Promise<ShopifyProductsPage>;
+  /**
+   * Chunked variant inventory quantities (Shopify Admin inventoryQuantity).
+   * Used only for one-time legacy opening balances — not continuous sync.
+   */
+  fetchVariantInventoryPage?(
+    options?: ShopifyFetchOptions,
+  ): Promise<ShopifyVariantInventoryPage>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.

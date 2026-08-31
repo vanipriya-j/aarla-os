@@ -15,6 +15,13 @@ describe("Shopify catalog sync fixtures", () => {
     expect(page.hasMore).toBe(false);
   });
 
+  it("fixture connector returns variant inventory for opening balances", async () => {
+    const connector = new FixtureShopifyConnector();
+    const page = await connector.fetchVariantInventoryPage!();
+    expect(page.variants.length).toBeGreaterThan(0);
+    expect(page.variants.every((v) => v.available >= 0)).toBe(true);
+  });
+
   it("merges catalog sync summaries", () => {
     const a = emptyShopifyCatalogSyncSummary();
     a.productsRead = 2;

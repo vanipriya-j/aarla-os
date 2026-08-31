@@ -9,6 +9,7 @@ import type {
   ShopifyOrderRecord,
   ShopifyProductRecord,
   ShopifyProductsPage,
+  ShopifyVariantInventoryPage,
 } from "./port";
 
 const FIXTURE_CUSTOMERS: ShopifyCustomerRecord[] = [
@@ -489,13 +490,35 @@ export class FixtureShopifyConnector implements ShopifyConnector {
   }
 
   async fetchProductsPage(
-    _options: ShopifyFetchOptions = {},
+    options: ShopifyFetchOptions = {},
   ): Promise<ShopifyProductsPage> {
     if (this.options.failHard) {
       throw new Error(this.options.partialError || "Shopify Admin API unavailable");
     }
+    void options;
     return {
       products: structuredClone(FIXTURE_PRODUCTS),
+      hasMore: false,
+      nextCursor: null,
+      pagesFetched: 1,
+    };
+  }
+
+  async fetchVariantInventoryPage(
+    options: ShopifyFetchOptions = {},
+  ): Promise<ShopifyVariantInventoryPage> {
+    if (this.options.failHard) {
+      throw new Error(this.options.partialError || "Shopify Admin API unavailable");
+    }
+    void options;
+    return {
+      variants: FIXTURE_PRODUCTS.flatMap((p) =>
+        p.variants.map((v, i) => ({
+          externalVariantId: v.externalVariantId,
+          sku: v.sku,
+          available: i === 0 ? 12 : 5,
+        })),
+      ),
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,

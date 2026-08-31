@@ -118,6 +118,18 @@ export async function syncShopifyProductsChunkViaApi(
   });
 }
 
+export async function syncShopifyOpeningInventoryChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+): Promise<
+  ActionResult<import("@/lib/application/shopify-opening-inventory-service").OpeningInventorySyncSummary>
+> {
+  return postJson("/api/commerce/sync/shopify-opening-inventory", {
+    cursor,
+    lockToken,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,
