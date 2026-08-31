@@ -8,19 +8,62 @@ import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvide
 import type {
   DelhiverySyncSummary,
   ShipmentDiagnosticRow,
+  ShipmentDiagnosticSort,
 } from "@/lib/domain/shipment-types";
 import {
   emptyDelhiverySyncSummary,
+  formatShipmentStatusLabel,
   mergeDelhiverySyncSummaries,
+  SHIPMENT_DIAGNOSTIC_SORTS,
 } from "@/lib/domain/shipment-types";
 import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { runChunkWithAutoRetry } from "@/lib/client/commerce-sync-auto-retry";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { formatAwbsTracked } from "@/lib/client/commerce-sync-progress";
 import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
-import { Hourglass, Loader2, Truck } from "lucide-react";
+import { Hourglass, Loader2, Link2, Truck } from "lucide-react";
 
 const PAGE_SIZE = 50;
+
+const SORT_OPTIONS: Array<{ value: ShipmentDiagnosticSort; label: string }> = [
+  { value: "last-synced", label: "Last synced" },
+  { value: "ordered", label: "Ordered date" },
+  { value: "promised", label: "Promised delivery" },
+  { value: "delivered", label: "Actual delivery" },
+  { value: "status", label: "Status" },
+  { value: "customer", label: "Customer" },
+  { value: "order", label: "Order number" },
+];
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Calendar-day delta: positive = late vs promised, negative = early. */
+function deliveryVarianceLabel(
+  promisedAt: string | null,
+  deliveredAt: string | null,
+): string | null {
+  if (!promisedAt || !deliveredAt) return null;
+  const promised = new Date(promisedAt);
+  const delivered = new Date(deliveredAt);
+  if (Number.isNaN(promised.getTime()) || Number.isNaN(delivered.getTime())) return null;
+  const promisedDay = Date.UTC(
+    promised.getFullYear(),
+    promised.getMonth(),
+    promised.getDate(),
+  );
+  const deliveredDay = Date.UTC(
+    delivered.getFullYear(),
+    delivered.getMonth(),
+    delivered.getDate(),
+  );
+  const days = Math.round((deliveredDay - promisedDay) / 86_400_000);
+  if (days === 0) return "On time";
+  if (days > 0) return `${days}d late`;
+  return `${Math.abs(days)}d early`;
+}
 
 function SummaryGrid({ summary }: { summary: DelhiverySyncSummary }) {
   const items: Array<[string, number | string]> = [
@@ -65,13 +108,16 @@ export function DelhiverySyncPanel() {
   const [diagPage, setDiagPage] = useState(1);
   const [diagTotal, setDiagTotal] = useState(0);
   const [diagTotalPages, setDiagTotalPages] = useState(1);
+  const [diagSort, setDiagSort] = useState<ShipmentDiagnosticSort>("last-synced");
+  const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
 
-  const loadDiagnostics = useCallback((page = 1) => {
+  const loadDiagnostics = useCallback((page = 1, sort: ShipmentDiagnosticSort = diagSort) => {
     startDiagTransition(async () => {
-      const res = await getDelhiveryShipmentDiagnosticsAction(page, PAGE_SIZE);
+      const safeSort = SHIPMENT_DIAGNOSTIC_SORTS.includes(sort) ? sort : "last-synced";
+      const res = await getDelhiveryShipmentDiagnosticsAction(page, PAGE_SIZE, safeSort);
       setDiagnosticsLoaded(true);
       if (!res.ok) {
         setError(res.error);
@@ -83,13 +129,34 @@ export function DelhiverySyncPanel() {
       setDiagPage(res.data.page);
       setDiagTotal(res.data.total);
       setDiagTotalPages(res.data.totalPages);
+      setDiagSort(safeSort);
     });
-  }, []);
+  }, [diagSort]);
 
   // Read-only table load — not a Delhivery API sync.
   useEffect(() => {
-    loadDiagnostics(1);
-  }, [loadDiagnostics]);
+    loadDiagnostics(1, "last-synced");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only
+  }, []);
+
+  function handleSortChange(next: ShipmentDiagnosticSort) {
+    setDiagSort(next);
+    loadDiagnostics(1, next);
+  }
+
+  async function copyTrackingUrl(awb: string, url: string) {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setCopiedAwb(awb);
+        window.setTimeout(() => {
+          setCopiedAwb((current) => (current === awb ? null : current));
+        }, 2000);
+      }
+    } catch {
+      // Clipboard denied — URL still available via browser share if needed.
+    }
+  }
 
   async function handleSync() {
     const token = beginSync("delhivery");
@@ -160,7 +227,7 @@ export function DelhiverySyncPanel() {
           ? `Delhivery sync complete — ${formatAwbsTracked(through, unique)}.`
           : `Delhivery sync paused — ${formatAwbsTracked(through, unique)}. Click Update tracking only again.`,
       );
-      const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE);
+      const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE, diagSort);
       setDiagnosticsLoaded(true);
       if (diag.ok) {
         setRows(diag.data.rows);
@@ -241,13 +308,31 @@ export function DelhiverySyncPanel() {
 
       <FormSection
         title="Shipment details"
-        description="Order, customer, location, and dates — 50 rows per page. Empty until Delhivery sync completes."
+        description="Order, customer, last known status, and promised vs actual delivery — 50 rows per page. Empty until Delhivery sync completes."
       >
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          <label className="flex flex-col gap-1 text-xs text-charcoal/60">
+            Sort by
+            <select
+              data-testid="delhivery-diagnostics-sort"
+              value={diagSort}
+              disabled={diagPending || busy}
+              onChange={(e) =>
+                handleSortChange(e.target.value as ShipmentDiagnosticSort)
+              }
+              className="min-w-[11rem] rounded-md border border-border bg-white px-3 py-2 text-sm text-deep-navy disabled:opacity-60"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             data-testid="load-delhivery-diagnostics"
-            onClick={() => loadDiagnostics(diagPage)}
+            onClick={() => loadDiagnostics(diagPage, diagSort)}
             disabled={diagPending || busy}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 border border-border text-deep-navy hover:border-aarla-red/40 disabled:opacity-60"
           >
@@ -273,42 +358,79 @@ export function DelhiverySyncPanel() {
                     <th className="py-2 pr-4 font-medium">Order No</th>
                     <th className="py-2 pr-4 font-medium">Customer Name</th>
                     <th className="py-2 pr-4 font-medium">Location</th>
-                    <th className="py-2 pr-4 font-medium">Delivered</th>
-                    <th className="py-2 font-medium">Ordered</th>
+                    <th className="py-2 pr-4 font-medium">Last known status</th>
+                    <th className="py-2 pr-4 font-medium">Promised</th>
+                    <th className="py-2 pr-4 font-medium">Actual</th>
+                    <th className="py-2 pr-4 font-medium">Ordered</th>
+                    <th className="py-2 font-medium">Track</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-border/70"
-                      data-testid={`shipment-row-${row.awb}`}
-                      data-status={row.normalizedStatus}
-                    >
-                      <td className="py-2.5 pr-4 text-deep-navy font-medium">
-                        {row.orderNumber ?? "—"}
-                      </td>
-                      <td className="py-2.5 pr-4">
-                        <span>{row.customerName ?? "—"}</span>
-                        {row.syncError ? (
-                          <span className="block text-xs text-aarla-red/90 mt-0.5">
-                            {row.syncError}
+                  {rows.map((row) => {
+                    const variance = deliveryVarianceLabel(
+                      row.promisedDeliveryAt,
+                      row.deliveredAt,
+                    );
+                    const trackingUrl = row.trackingUrl;
+                    const copied = copiedAwb === row.awb;
+                    return (
+                      <tr
+                        key={row.id}
+                        className="border-b border-border/70"
+                        data-testid={`shipment-row-${row.awb}`}
+                        data-status={row.normalizedStatus}
+                      >
+                        <td className="py-2.5 pr-4 text-deep-navy font-medium">
+                          {row.orderNumber ?? "—"}
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          <span>{row.customerName ?? "—"}</span>
+                          {row.syncError ? (
+                            <span className="block text-xs text-aarla-red/90 mt-0.5">
+                              {row.syncError}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2.5 pr-4">{row.latestScanLocation ?? "—"}</td>
+                        <td className="py-2.5 pr-4">
+                          <span data-testid={`shipment-status-${row.awb}`}>
+                            {formatShipmentStatusLabel(
+                              row.normalizedStatus,
+                              row.providerStatus,
+                            )}
                           </span>
-                        ) : null}
-                      </td>
-                      <td className="py-2.5 pr-4">{row.latestScanLocation ?? "—"}</td>
-                      <td className="py-2.5 pr-4">
-                        {row.deliveredAt
-                          ? new Date(row.deliveredAt).toLocaleDateString()
-                          : "—"}
-                      </td>
-                      <td className="py-2.5">
-                        {row.orderedAt
-                          ? new Date(row.orderedAt).toLocaleDateString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-2.5 pr-4 whitespace-nowrap">
+                          {formatDate(row.promisedDeliveryAt)}
+                        </td>
+                        <td className="py-2.5 pr-4 whitespace-nowrap">
+                          <span>{formatDate(row.deliveredAt)}</span>
+                          {variance ? (
+                            <span className="block text-xs text-charcoal/55 mt-0.5">
+                              {variance}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2.5 pr-4">{formatDate(row.orderedAt)}</td>
+                        <td className="py-2.5">
+                          {trackingUrl ? (
+                            <button
+                              type="button"
+                              data-testid={`copy-tracking-${row.awb}`}
+                              onClick={() => void copyTrackingUrl(row.awb, trackingUrl)}
+                              className="inline-flex items-center gap-1.5 text-xs text-deep-navy hover:text-aarla-red"
+                              title={trackingUrl}
+                            >
+                              <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              {copied ? "Copied" : "Copy URL"}
+                            </button>
+                          ) : (
+                            <span className="text-charcoal/40">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -318,7 +440,7 @@ export function DelhiverySyncPanel() {
               total={diagTotal}
               pageSize={PAGE_SIZE}
               pending={diagPending}
-              onPageChange={(next) => loadDiagnostics(next)}
+              onPageChange={(next) => loadDiagnostics(next, diagSort)}
               testId="delhivery-diagnostics-pagination"
             />
           </>

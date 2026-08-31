@@ -16,6 +16,7 @@ import {
   emptyDelhiverySyncSummary,
   tallyNormalizedStatus,
   type DelhiverySyncSummary,
+  type ShipmentDiagnosticSort,
   type ShipmentDiagnosticsPage,
 } from "@/lib/domain/shipment-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
@@ -208,6 +209,7 @@ export async function syncDelhiveryShipments(
         providerStatusType: result.providerStatusType ?? null,
         normalizedStatus: result.normalizedStatus,
         deliveredAt: result.deliveredAt ?? null,
+        promisedDeliveryAt: result.promisedDeliveryAt ?? null,
         latestScanAt: result.latestScanAt ?? null,
         latestScanLocation: result.latestScanLocation ?? null,
         syncStatus: result.syncStatus,
@@ -247,8 +249,13 @@ export async function getDelhiveryShipmentDiagnostics(
     repo?: ShipmentRepository;
     page?: number;
     pageSize?: number;
+    sort?: ShipmentDiagnosticSort;
   } = {},
 ): Promise<ShipmentDiagnosticsPage> {
   const repo = deps.repo ?? createShipmentRepository();
-  return repo.listDiagnostics({ page: deps.page, pageSize: deps.pageSize });
+  return repo.listDiagnostics({
+    page: deps.page,
+    pageSize: deps.pageSize,
+    sort: deps.sort,
+  });
 }

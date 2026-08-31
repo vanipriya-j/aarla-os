@@ -14,6 +14,10 @@ import {
 import type {
   DelhiverySyncSummary,
   ShipmentDiagnosticsPage,
+  ShipmentDiagnosticSort,
+} from "@/lib/domain/shipment-types";
+import {
+  SHIPMENT_DIAGNOSTIC_SORTS,
 } from "@/lib/domain/shipment-types";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -52,6 +56,10 @@ export async function syncDelhiveryShipmentsAction(
 export async function getDelhiveryShipmentDiagnosticsAction(
   page = 1,
   pageSize = 50,
+  sort: ShipmentDiagnosticSort = "last-synced",
 ): Promise<ActionResult<ShipmentDiagnosticsPage>> {
-  return wrap(() => getDelhiveryShipmentDiagnostics({ page, pageSize }));
+  const safeSort = SHIPMENT_DIAGNOSTIC_SORTS.includes(sort) ? sort : "last-synced";
+  return wrap(() =>
+    getDelhiveryShipmentDiagnostics({ page, pageSize, sort: safeSort }),
+  );
 }
