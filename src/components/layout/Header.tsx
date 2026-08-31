@@ -8,11 +8,47 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { navForRole } from "@/lib/auth/nav";
 import { homePathForRole } from "@/lib/auth/roles";
+import type { NavItem } from "@/lib/navigation";
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
+}
+
+function MobileSection({
+  title,
+  items,
+  pathname,
+  onNavigate,
+}: {
+  title: string;
+  items: NavItem[];
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+        {title}
+      </p>
+      {items.map((item) => (
+        <Link
+          key={`${title}-${item.href}`}
+          href={item.href}
+          onClick={onNavigate}
+          className={`block rounded-xl px-3 py-2.5 text-sm ${
+            pathname === item.href || pathname.startsWith(`${item.href}/`)
+              ? "bg-aarla-red text-white"
+              : "text-deep-navy hover:bg-pale-cream"
+          }`}
+        >
+          {item.label}
+        </Link>
+      ))}
+    </>
+  );
 }
 
 export function Header({ title, subtitle, actions }: HeaderProps) {
@@ -82,69 +118,24 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
                   Home
                 </Link>
               ) : null}
-              {nav.workflows.length > 0 ? (
-                <>
-                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-                    Workflows
-                  </p>
-                  {nav.workflows.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setOpen(false)}
-                      className={`block rounded-xl px-3 py-2.5 text-sm ${
-                        pathname === item.href || pathname.startsWith(`${item.href}/`)
-                          ? "bg-aarla-red text-white"
-                          : "text-deep-navy hover:bg-pale-cream"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </>
-              ) : null}
-              {nav.network.length > 0 ? (
-                <>
-                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-                    Network
-                  </p>
-                  {nav.network.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setOpen(false)}
-                      className={`block rounded-xl px-3 py-2.5 text-sm ${
-                        pathname === item.href || pathname.startsWith(`${item.href}/`)
-                          ? "bg-aarla-red text-white"
-                          : "text-deep-navy hover:bg-pale-cream"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </>
-              ) : null}
-              {nav.outreach.length > 0 ? (
-                <>
-                  <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-                    Outreach
-                  </p>
-                  {nav.outreach.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setOpen(false)}
-                      className={`block rounded-xl px-3 py-2.5 text-sm ${
-                        pathname === item.href || pathname.startsWith(`${item.href}/`)
-                          ? "bg-aarla-red text-white"
-                          : "text-deep-navy hover:bg-pale-cream"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </>
-              ) : null}
+              <MobileSection
+                title="Operate"
+                items={nav.operate}
+                pathname={pathname}
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileSection
+                title="Create"
+                items={nav.create}
+                pathname={pathname}
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileSection
+                title="Admin"
+                items={nav.admin}
+                pathname={pathname}
+                onNavigate={() => setOpen(false)}
+              />
               {authEnabled ? (
                 <div className="mt-4 px-3 pt-3 border-t border-border">
                   <LogoutButton />
