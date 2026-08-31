@@ -75,6 +75,10 @@ export interface Product {
   designedDate?: string;
   /** Optional override for how Inventory renders this product's variants. */
   inventoryPresentation?: InventoryPresentation;
+  /** Shopify product id (numeric or GID) when synced from catalog. */
+  shopifyProductId?: string | null;
+  /** Deep link to edit this product in Shopify Admin (set when listing catalog). */
+  shopifyAdminUrl?: string | null;
 }
 
 /** Canonical supply-side vendor. */

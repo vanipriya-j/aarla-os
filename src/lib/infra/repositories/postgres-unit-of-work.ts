@@ -77,6 +77,7 @@ async function codesByUuids(
 function createProductRepo(q: QueryFn): ProductRepository {
   return {
     async list(): Promise<Product[]> {
+      const { shopifyAdminProductUrl } = await import("@/lib/adapters/shopify/admin-urls");
       const products = await q<{
         code: string;
         sku: string;
@@ -91,10 +92,12 @@ function createProductRepo(q: QueryFn): ProductRepository {
         idea_origin: string | null;
         designed_date: string | Date | null;
         inventory_presentation: string;
+        shopify_product_id: string | null;
         id: string;
       }>(
         `select id, code, sku, title, category, world, story, selling_price, cost,
-                velocity, status, idea_origin, designed_date, inventory_presentation
+                velocity, status, idea_origin, designed_date, inventory_presentation,
+                shopify_product_id
          from products where organization_id = $1 order by title`,
         [ORG_ID],
       );
@@ -120,23 +123,28 @@ function createProductRepo(q: QueryFn): ProductRepository {
         list.push({ id: v.code, label: v.label, sku: v.sku, options });
         byProduct.set(v.product_id, list);
       }
-      return products.map((p) => ({
-        id: p.code,
-        sku: p.sku,
-        title: p.title,
-        category: p.category,
-        world: p.world,
-        story: p.story,
-        variants: byProduct.get(p.id) ?? [],
-        sellingPrice: num(p.selling_price),
-        cost: num(p.cost),
-        velocity: p.velocity as Product["velocity"],
-        status: p.status,
-        ideaOrigin: p.idea_origin ?? undefined,
-        designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
-        inventoryPresentation: (p.inventory_presentation ??
-          "auto") as Product["inventoryPresentation"],
-      }));
+      return products.map((p) => {
+        const shopifyProductId = p.shopify_product_id ?? null;
+        return {
+          id: p.code,
+          sku: p.sku,
+          title: p.title,
+          category: p.category,
+          world: p.world,
+          story: p.story,
+          variants: byProduct.get(p.id) ?? [],
+          sellingPrice: num(p.selling_price),
+          cost: num(p.cost),
+          velocity: p.velocity as Product["velocity"],
+          status: p.status,
+          ideaOrigin: p.idea_origin ?? undefined,
+          designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
+          inventoryPresentation: (p.inventory_presentation ??
+            "auto") as Product["inventoryPresentation"],
+          shopifyProductId,
+          shopifyAdminUrl: shopifyAdminProductUrl(shopifyProductId),
+        };
+      });
     },
     async getByCode(code: string): Promise<Product | null> {
       const all = await this.list();

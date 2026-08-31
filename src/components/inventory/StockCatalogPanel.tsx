@@ -19,6 +19,7 @@ import {
 } from "@/lib/domain/inventory-stock-table";
 import type { Location, Product, ReorderRule, StockMovement } from "@/lib/domain/types";
 import { Search } from "lucide-react";
+import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
 
 export type StockCatalogSelection = {
   product: Product;
@@ -219,14 +220,32 @@ export function StockCatalogPanel({
             header: "Product",
             render: (r) => (
               <div className="min-w-[10rem]">
-                <Link
-                  href={`/products/${r.productId}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="font-medium text-deep-navy hover:text-aarla-red"
-                >
-                  {r.productTitle}
-                </Link>
-                <p className="text-xs text-charcoal/50">{r.productSku}</p>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/products/${r.productId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-medium text-deep-navy hover:text-aarla-red"
+                    >
+                      {r.productTitle}
+                    </Link>
+                    <p className="text-xs text-charcoal/50">{r.productSku}</p>
+                  </div>
+                  {r.shopifyAdminUrl ? (
+                    <a
+                      href={r.shopifyAdminUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Edit in Shopify Admin"
+                      aria-label={`Edit ${r.productTitle} in Shopify Admin`}
+                      data-testid="stock-shopify-admin-link"
+                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#96bf48] hover:bg-[#96bf48]/15 hover:text-[#5e8e3e]"
+                    >
+                      <ShopifyIcon className="h-4 w-4" />
+                    </a>
+                  ) : null}
+                </div>
               </div>
             ),
           },
@@ -289,7 +308,7 @@ export function StockCatalogPanel({
 
       <p className="text-xs text-charcoal/50">
         One row per variant. Click a row for location breakdown, transfer, or adjust. Open the
-        product name for the full product page.
+        product name for the Aarla product page, or the Shopify icon to edit in Admin.
       </p>
     </div>
   );
