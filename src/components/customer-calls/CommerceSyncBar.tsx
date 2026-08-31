@@ -118,7 +118,7 @@ export function CommerceSyncBar() {
         return;
       }
       setServerLocked(false);
-      setStatus("Stuck sync lock + sync cursor cleared. Sync starts fresh from the top.");
+      setStatus("Stuck sync lock + sync cursors cleared. Sync starts fresh from the top.");
       await refreshMeta();
     } finally {
       setLocalAction("idle");
@@ -232,18 +232,13 @@ export function CommerceSyncBar() {
       }
 
       setStatus("Abandoned checkouts done — tracking Delhivery AWBs…");
-      let offset: number | null = 0;
+      // null = load saved resume offset (do not restart at 0).
+      let offset: number | null = null;
       let delhiveryTotal = emptyDelhiverySyncSummary();
       guard = 0;
 
       while (guard < 400) {
         guard += 1;
-        setStatus(
-          `${formatAwbsTracked(
-            delhiveryTotal.awbsProcessed ?? 0,
-            delhiveryTotal.uniqueAwbsTracked || null,
-          )}…`,
-        );
         const res = await runChunkWithAutoRetry({
           ...retryOpts,
           attempt: (token) => syncDelhiveryChunkViaApi(offset, token),
@@ -254,11 +249,12 @@ export function CommerceSyncBar() {
           return;
         }
         delhiveryTotal = mergeDelhiverySyncSummaries(delhiveryTotal, res.data);
+        const through = res.data.complete
+          ? (res.data.uniqueAwbsTracked || delhiveryTotal.awbsProcessed || 0)
+          : (res.data.nextOffset ?? delhiveryTotal.awbsProcessed ?? 0);
         setStatus(
-          `${formatAwbsTracked(
-            delhiveryTotal.awbsProcessed ?? 0,
-            delhiveryTotal.uniqueAwbsTracked || null,
-          )}` + (res.data.hasMore ? "…" : " — Delhivery done"),
+          `${formatAwbsTracked(through, delhiveryTotal.uniqueAwbsTracked || null)}` +
+            (res.data.hasMore ? "…" : " — Delhivery done"),
         );
         if (!res.data.hasMore) break;
         offset = res.data.nextOffset ?? null;

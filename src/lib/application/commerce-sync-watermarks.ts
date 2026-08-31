@@ -3,6 +3,7 @@ import { query } from "@/lib/infra/db/pool";
 
 const CHANNEL = "shopify_orders" as const;
 export const CHANNEL_ABANDONED = "shopify_abandoned_checkouts" as const;
+export const CHANNEL_DELHIVERY = "delhivery_awbs" as const;
 
 let ensured = false;
 
@@ -10,7 +11,11 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
   if (ensured) return;
   await query(`
     create table if not exists commerce_sync_watermarks (
-      channel text primary key check (channel in ('shopify_orders', 'shopify_abandoned_checkouts')),
+      channel text primary key check (channel in (
+        'shopify_orders',
+        'shopify_abandoned_checkouts',
+        'delhivery_awbs'
+      )),
       organization_id uuid not null references organizations(id) on delete cascade,
       watermark_at timestamptz,
       run_id text,
@@ -26,7 +31,11 @@ export async function ensureCommerceSyncWatermarksTable(): Promise<void> {
   await query(`
     alter table commerce_sync_watermarks
       add constraint commerce_sync_watermarks_channel_check
-      check (channel in ('shopify_orders', 'shopify_abandoned_checkouts'))
+      check (channel in (
+        'shopify_orders',
+        'shopify_abandoned_checkouts',
+        'delhivery_awbs'
+      ))
   `);
   await query(`
     alter table commerce_sync_watermarks
@@ -307,4 +316,41 @@ export function shopifyAbandonedCreatedAfterQuery(watermarkIso: string): string 
   // 2-minute overlap so clock skew / same-second checkouts are not missed; upserts dedupe.
   const overlap = new Date(Math.max(0, ms - 120_000)).toISOString();
   return `recovery_state:not_recovered created_at:>'${overlap}'`;
+}
+
+/**
+ * Resume offset into the sorted unique AWB list (survives timeouts / leaving the page).
+ * Stored in run_next_cursor as a decimal string.
+ */
+export async function getDelhiveryResumeOffset(): Promise<number | null> {
+  await ensureCommerceSyncWatermarksTable();
+  const rows = await query<{ run_next_cursor: string | null }>(
+    `select run_next_cursor from commerce_sync_watermarks
+     where channel = $1 and organization_id = $2`,
+    [CHANNEL_DELHIVERY, ORG_ID],
+  );
+  const raw = rows[0]?.run_next_cursor?.trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.floor(n);
+}
+
+export async function saveDelhiveryResumeOffset(
+  offset: number | null,
+): Promise<void> {
+  await ensureCommerceSyncWatermarksTable();
+  const value =
+    offset == null || !Number.isFinite(offset) || offset <= 0
+      ? null
+      : String(Math.floor(offset));
+  await query(
+    `insert into commerce_sync_watermarks as w (
+       channel, organization_id, run_next_cursor, updated_at
+     ) values ($1, $2, $3, now())
+     on conflict (channel) do update set
+       run_next_cursor = excluded.run_next_cursor,
+       updated_at = now()`,
+    [CHANNEL_DELHIVERY, ORG_ID, value],
+  );
 }

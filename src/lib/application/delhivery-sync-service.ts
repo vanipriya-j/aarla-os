@@ -19,13 +19,21 @@ import {
   type ShipmentDiagnosticsPage,
 } from "@/lib/domain/shipment-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
+import {
+  getDelhiveryResumeOffset,
+  saveDelhiveryResumeOffset,
+} from "@/lib/application/commerce-sync-watermarks";
 
 export type SyncDelhiveryDeps = {
   connector?: DelhiveryConnector;
   repo?: ShipmentRepository;
-  /** Resume offset into the deduped AWB list */
-  offset?: number;
-  /** Max AWBs to track per invocation (default 25) */
+  /**
+   * Resume offset into the deduped AWB list.
+   * Pass null/undefined to load the saved resume offset (or start at 0).
+   * Pass an explicit number to continue a multi-chunk client loop.
+   */
+  offset?: number | null;
+  /** Max AWBs to track per invocation (default 10) */
   maxAwbs?: number;
 };
 
@@ -107,8 +115,14 @@ export async function syncDelhiveryShipments(
   const summary = emptyDelhiverySyncSummary();
   const repo = deps.repo ?? createShipmentRepository();
   const connector = resolveConnector(deps);
-  const offset = Math.max(0, Math.floor(deps.offset ?? 0));
   const maxAwbs = deps.maxAwbs ?? defaultMaxAwbs();
+
+  let offset: number;
+  if (deps.offset == null) {
+    offset = (await getDelhiveryResumeOffset()) ?? 0;
+  } else {
+    offset = Math.max(0, Math.floor(deps.offset));
+  }
 
   const fulfilments = await repo.listFulfilmentsWithOrders();
   const { evaluated, delhiveryFound, skipped, links } = buildAwbLinks(fulfilments);
@@ -120,11 +134,15 @@ export async function syncDelhiveryShipments(
   const awbs = dedupeAwbs(links.map((l) => l.awb)).sort();
   summary.uniqueAwbsTracked = awbs.length;
 
+  // If the AWB list shrank (fulfilments removed), clamp resume past the end.
+  if (offset > awbs.length) offset = 0;
+
   if (!awbs.length) {
     summary.awbsProcessed = 0;
     summary.hasMore = false;
     summary.nextOffset = null;
     summary.complete = true;
+    await saveDelhiveryResumeOffset(null);
     return summary;
   }
 
@@ -137,6 +155,7 @@ export async function syncDelhiveryShipments(
   summary.complete = !hasMore;
 
   if (!slice.length) {
+    await saveDelhiveryResumeOffset(null);
     return summary;
   }
 
@@ -158,6 +177,7 @@ export async function syncDelhiveryShipments(
     for (const awb of slice) {
       await repo.markSyncFailure("delhivery", awb, "error", message);
     }
+    await saveDelhiveryResumeOffset(hasMore ? nextOffset : null);
     return summary;
   }
 
@@ -215,6 +235,9 @@ export async function syncDelhiveryShipments(
       );
     }
   }
+
+  // Persist resume so the next click continues instead of restarting at 0.
+  await saveDelhiveryResumeOffset(hasMore ? nextOffset : null);
 
   return summary;
 }

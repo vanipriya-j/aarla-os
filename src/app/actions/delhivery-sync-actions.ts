@@ -45,7 +45,7 @@ export async function syncDelhiveryShipmentsAction(
     }
     const lock = await acquireOrRenewCommerceSyncLock(lockToken, "delhivery");
     if (!lock.ok) throw new Error(lock.error);
-    return syncDelhiveryShipments({ offset: offset ?? 0 });
+    return syncDelhiveryShipments({ offset: offset ?? null });
   });
 }
 
