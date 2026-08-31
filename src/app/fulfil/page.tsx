@@ -129,6 +129,25 @@ export default function FulfilOrdersPage() {
     });
   }
 
+  async function applyDetailResult(
+    res: { ok: true; data: FulfilmentOrderDetail | null } | { ok: false; error: string },
+    successStatus?: string,
+  ) {
+    if (!res.ok) {
+      setError(res.error);
+    } else {
+      setDetail(res.data);
+      if (successStatus) setStatus(successStatus);
+    }
+    const list = await listFulfilmentWorkbenchAction(tab);
+    setListLoaded(true);
+    if (list.ok) {
+      setRows(list.data.rows);
+      setPastCutoff(list.data.pastCutoff);
+      setCutoffLabel(list.data.cutoffLabel);
+    }
+  }
+
   return (
     <>
       <Header
@@ -335,10 +354,7 @@ export default function FulfilOrdersPage() {
                                   lineId: line.id,
                                   physicalStatus: "found",
                                 });
-                                if (res.ok) setDetail(res.data);
-                                else setError(res.error);
-                                const list = await listFulfilmentWorkbenchAction(tab);
-                                if (list.ok) setRows(list.data.rows);
+                                await applyDetailResult(res);
                               });
                             }}
                           >
@@ -359,10 +375,7 @@ export default function FulfilOrdersPage() {
                                   lineId: line.id,
                                   physicalStatus: "not-found",
                                 });
-                                if (res.ok) setDetail(res.data);
-                                else setError(res.error);
-                                const list = await listFulfilmentWorkbenchAction(tab);
-                                if (list.ok) setRows(list.data.rows);
+                                await applyDetailResult(res);
                               });
                             }}
                           >
@@ -379,10 +392,7 @@ export default function FulfilOrdersPage() {
                                   lineId: line.id,
                                   note: "No studio or partner stock confirmed",
                                 });
-                                if (res.ok) setDetail(res.data);
-                                else setError(res.error);
-                                const list = await listFulfilmentWorkbenchAction(tab);
-                                if (list.ok) setRows(list.data.rows);
+                                await applyDetailResult(res);
                               });
                             }}
                           >
@@ -399,9 +409,10 @@ export default function FulfilOrdersPage() {
                                 </span>
                                 <button
                                   type="button"
-                                  className="underline"
+                                  disabled={pending}
+                                  className="underline disabled:opacity-50"
                                   onClick={() => {
-                                    startTransition(async () => {
+                                    runAction(`Arranging stock from ${p.partnerName}…`, async () => {
                                       const res = await requestPartnerRecallAction({
                                         fulfilmentOrderId: detail.id,
                                         lineId: line.id,
@@ -409,9 +420,7 @@ export default function FulfilOrdersPage() {
                                         partnerLocationCode: p.locationCode,
                                         quantity: Math.min(line.requiredQuantity, p.qty),
                                       });
-                                      if (res.ok) setDetail(res.data);
-                                      else setError(res.error);
-                                      reloadList(tab);
+                                      await applyDetailResult(res);
                                     });
                                   }}
                                 >
@@ -438,23 +447,22 @@ export default function FulfilOrdersPage() {
                           {task.taskType === "partner-stock-recall" && task.status !== "received" ? (
                             <button
                               type="button"
-                              className="mt-2 text-xs underline"
+                              disabled={pending}
+                              className="mt-2 text-xs underline disabled:opacity-50"
                               onClick={() => {
                                 const line = detail.lines.find((l) => l.id === task.fulfilmentLineId);
                                 if (!line?.catalogProductCode) {
                                   setError("Link catalog product on the line before receiving recall.");
                                   return;
                                 }
-                                startTransition(async () => {
+                                runAction("Recording partner stock received…", async () => {
                                   const res = await receivePartnerRecallAction({
                                     fulfilmentOrderId: detail.id,
                                     taskId: task.id,
                                     productId: line.catalogProductCode!,
                                     variantId: line.catalogVariantCode ?? undefined,
                                   });
-                                  if (res.ok) setDetail(res.data);
-                                  else setError(res.error);
-                                  reloadList(tab);
+                                  await applyDetailResult(res);
                                 });
                               }}
                             >
@@ -467,9 +475,10 @@ export default function FulfilOrdersPage() {
                                 <button
                                   key={d}
                                   type="button"
-                                  className="text-xs px-2 py-1 border border-border rounded-full"
+                                  disabled={pending}
+                                  className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
                                   onClick={() => {
-                                    startTransition(async () => {
+                                    runAction(`Saving founder decision (${d})…`, async () => {
                                       const res = await recordFounderDecisionAction({
                                         fulfilmentOrderId: detail.id,
                                         taskId: task.id,
@@ -479,9 +488,7 @@ export default function FulfilOrdersPage() {
                                             ? new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
                                             : null,
                                       });
-                                      if (res.ok) setDetail(res.data);
-                                      else setError(res.error);
-                                      reloadList(tab);
+                                      await applyDetailResult(res);
                                     });
                                   }}
                                 >
@@ -503,17 +510,16 @@ export default function FulfilOrdersPage() {
                                 <button
                                   key={o}
                                   type="button"
-                                  className="text-xs px-2 py-1 border border-border rounded-full"
+                                  disabled={pending}
+                                  className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
                                   onClick={() => {
-                                    startTransition(async () => {
+                                    runAction(`Saving customer outcome (${o})…`, async () => {
                                       const res = await recordCustomerOutcomeAction({
                                         fulfilmentOrderId: detail.id,
                                         taskId: task.id,
                                         outcome: o,
                                       });
-                                      if (res.ok) setDetail(res.data);
-                                      else setError(res.error);
-                                      reloadList(tab);
+                                      await applyDetailResult(res);
                                     });
                                   }}
                                 >
@@ -541,17 +547,21 @@ export default function FulfilOrdersPage() {
                     <button
                       type="button"
                       data-testid="fulfil-confirm-picked"
-                      className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white"
+                      disabled={pending}
+                      className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
                       onClick={() => {
-                        startTransition(async () => {
+                        runAction("Confirming all items picked…", async () => {
                           const res = await confirmPickingAction({ fulfilmentOrderId: detail.id });
-                          if (res.ok) setDetail(res.data);
-                          else setError(res.error);
-                          reloadList(tab);
+                          await applyDetailResult(res);
                         });
                       }}
                     >
-                      <Package className="h-4 w-4" /> Confirm all items picked
+                      {pending && busyLabel?.includes("picked") ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Package className="h-4 w-4" />
+                      )}
+                      Confirm all items picked
                     </button>
                   </FormSection>
                 )}
@@ -570,18 +580,17 @@ export default function FulfilOrdersPage() {
                     <div className="flex flex-wrap gap-2 mt-3">
                       <button
                         type="button"
-                        className="text-sm rounded-full px-4 py-2 border border-border"
+                        disabled={pending}
+                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Saving packing suggestion…", async () => {
                             const res = await decidePackingAction({
                               fulfilmentOrderId: detail.id,
                               useSuggestion: true,
                               freebieChoice: packHint.freebie ? "add" : "none",
                               freebieProductCode: null,
                             });
-                            if (res.ok) setDetail(res.data);
-                            else setError(res.error);
-                            reloadList(tab);
+                            await applyDetailResult(res);
                           });
                         }}
                       >
@@ -589,18 +598,17 @@ export default function FulfilOrdersPage() {
                       </button>
                       <button
                         type="button"
-                        className="text-sm rounded-full px-4 py-2 border border-border"
+                        disabled={pending}
+                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Saving packing override…", async () => {
                             const res = await decidePackingAction({
                               fulfilmentOrderId: detail.id,
                               useSuggestion: false,
                               overrideNote: "Operator changed packing",
                               freebieChoice: "none",
                             });
-                            if (res.ok) setDetail(res.data);
-                            else setError(res.error);
-                            reloadList(tab);
+                            await applyDetailResult(res);
                           });
                         }}
                       >
@@ -616,8 +624,9 @@ export default function FulfilOrdersPage() {
                 >
                   <div className="flex flex-wrap gap-2 mb-3">
                     <select
-                      className="text-sm border border-border rounded-md px-3 py-2"
+                      className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                       value={shipMethod}
+                      disabled={pending}
                       onChange={(e) => setShipMethod(e.target.value as FulfilmentShippingMethod)}
                     >
                       {FULFILMENT_SHIPPING_METHODS.map((m) => (
@@ -628,16 +637,15 @@ export default function FulfilOrdersPage() {
                     </select>
                     <button
                       type="button"
-                      className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white"
+                      disabled={pending}
+                      className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
                       onClick={() => {
-                        startTransition(async () => {
+                        runAction("Saving shipping method…", async () => {
                           const res = await decideShippingAction({
                             fulfilmentOrderId: detail.id,
                             method: shipMethod,
                           });
-                          if (res.ok) setDetail(res.data);
-                          else setError(res.error);
-                          reloadList(tab);
+                          await applyDetailResult(res);
                         });
                       }}
                     >
@@ -649,15 +657,15 @@ export default function FulfilOrdersPage() {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        className="text-sm border border-border rounded-full px-3 py-1.5"
+                        disabled={pending}
+                        className="text-sm border border-border rounded-full px-3 py-1.5 disabled:opacity-50"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Marking customer informed…", async () => {
                             const res = await markStorePickupProgressAction({
                               fulfilmentOrderId: detail.id,
                               step: "informed",
                             });
-                            if (res.ok) setDetail(res.data);
-                            reloadList(tab);
+                            await applyDetailResult(res);
                           });
                         }}
                       >
@@ -665,15 +673,15 @@ export default function FulfilOrdersPage() {
                       </button>
                       <button
                         type="button"
-                        className="text-sm border border-border rounded-full px-3 py-1.5"
+                        disabled={pending}
+                        className="text-sm border border-border rounded-full px-3 py-1.5 disabled:opacity-50"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Marking picked up…", async () => {
                             const res = await markStorePickupProgressAction({
                               fulfilmentOrderId: detail.id,
                               step: "picked-up",
                             });
-                            if (res.ok) setDetail(res.data);
-                            reloadList(tab);
+                            await applyDetailResult(res);
                           });
                         }}
                       >
@@ -683,22 +691,25 @@ export default function FulfilOrdersPage() {
                   ) : (
                     <div className="flex flex-wrap gap-2 items-center">
                       <input
-                        className="text-sm border border-border rounded-md px-3 py-2"
+                        className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                         placeholder="AWB / reference"
                         value={awbDraft}
+                        disabled={pending}
                         onChange={(e) => setAwbDraft(e.target.value)}
                       />
                       <input
-                        className="text-sm border border-border rounded-md px-3 py-2"
+                        className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                         placeholder="Courier / Porter"
                         value={courierDraft}
+                        disabled={pending}
                         onChange={(e) => setCourierDraft(e.target.value)}
                       />
                       <button
                         type="button"
-                        className="text-sm rounded-full px-4 py-2 border border-border"
+                        disabled={pending}
+                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Saving courier details…", async () => {
                             const res = await saveManualCourierAction({
                               fulfilmentOrderId: detail.id,
                               awb: awbDraft || null,
@@ -707,9 +718,7 @@ export default function FulfilOrdersPage() {
                               alternateAwaitingAwbCost:
                                 shipMethod === "alternate-courier" && !awbDraft,
                             });
-                            if (res.ok) setDetail(res.data);
-                            else setError(res.error);
-                            reloadList(tab);
+                            await applyDetailResult(res);
                           });
                         }}
                       >
@@ -718,21 +727,23 @@ export default function FulfilOrdersPage() {
                       <button
                         type="button"
                         data-testid="fulfil-confirm-handover"
-                        className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white"
+                        disabled={pending}
+                        className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
                         onClick={() => {
-                          startTransition(async () => {
+                          runAction("Confirming handover…", async () => {
                             const res = await confirmHandoverAction({
                               fulfilmentOrderId: detail.id,
                             });
-                            if (res.ok) {
-                              setDetail(res.data);
-                              setStatus("Handed over — marked dispatched.");
-                            } else setError(res.error);
-                            reloadList(tab);
+                            await applyDetailResult(res, "Handed over — marked dispatched.");
                           });
                         }}
                       >
-                        <Truck className="h-4 w-4" /> Confirm handover
+                        {pending && busyLabel?.includes("handover") ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Truck className="h-4 w-4" />
+                        )}
+                        Confirm handover
                       </button>
                     </div>
                   )}
@@ -754,8 +765,41 @@ export default function FulfilOrdersPage() {
                   </ul>
                   <button
                     type="button"
-                    className="mt-3 text-xs underline text-charcoal/60"
-                    onClick={() => void refreshDetail()}
+                    disabled={pending}
+                    className="mt-3 text-xs underline text-charcoal/60 disabled:opacity-50"
+                    onClick={() => {
+                      if (!selectedId) return;
+                      runAction("Refreshing order…", async () => {
+                        setDetailLoading(true);
+                        const [d, p] = await Promise.all([
+                          getFulfilmentDetailAction(selectedId),
+                          getPackingSuggestionsAction(selectedId),
+                        ]);
+                        setDetailLoading(false);
+                        if (!d.ok) {
+                          setError(d.error);
+                          return;
+                        }
+                        setDetail(d.data);
+                        if (p.ok) {
+                          setPackHint({
+                            packing: p.data.packing,
+                            freebie: p.data.freebie
+                              ? {
+                                  label: p.data.freebie.label,
+                                  estimatedCost: p.data.freebie.estimatedCost,
+                                }
+                              : null,
+                          });
+                        }
+                        const list = await listFulfilmentWorkbenchAction(tab);
+                        if (list.ok) {
+                          setRows(list.data.rows);
+                          setPastCutoff(list.data.pastCutoff);
+                          setCutoffLabel(list.data.cutoffLabel);
+                        }
+                      });
+                    }}
                   >
                     Refresh detail
                   </button>
