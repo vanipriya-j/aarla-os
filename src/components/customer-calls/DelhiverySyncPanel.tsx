@@ -172,8 +172,8 @@ export function DelhiverySyncPanel() {
   return (
     <div className="space-y-4" data-testid="delhivery-sync-panel">
       <FormSection
-        title="Delhivery shipment sync"
-        description="Tracks every fulfilment AWB already saved from Shopify. Progress shows Tracked X of Y. Does not create call queue items."
+        title="Delhivery tracking"
+        description="Optional: refresh Delhivery tracking only (no Shopify pull). Prefer Sync on the Shopify stage for the full pipeline."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
@@ -189,7 +189,7 @@ export function DelhiverySyncPanel() {
             ) : (
               <Truck className="h-4 w-4" aria-hidden />
             )}
-            {syncingHere ? "Syncing Delhivery…" : "Sync Delhivery Shipments"}
+            {syncingHere ? "Updating tracking…" : "Update tracking only"}
           </button>
           {busy ? (
             <StatusChip
@@ -255,7 +255,7 @@ export function DelhiverySyncPanel() {
           <p className="text-sm text-charcoal/60" data-testid="delhivery-diagnostics-empty">
             {error
               ? error
-              : "No shipment records yet. Sync after Shopify fulfilments with AWBs exist."}
+              : "No shipment records yet. Use Sync on the Shopify stage, or Update tracking only here."}
           </p>
         ) : (
           <>
