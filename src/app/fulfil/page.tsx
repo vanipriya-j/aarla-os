@@ -111,12 +111,6 @@ export default function FulfilOrdersPage() {
     reloadList(tab);
   }, [tab, reloadList]);
 
-  async function refreshDetail() {
-    if (!selectedId) return;
-    openDetail(selectedId);
-    reloadList(tab);
-  }
-
   function runAction(label: string, fn: () => Promise<void>) {
     startTransition(async () => {
       setBusyLabel(label);
@@ -138,6 +132,17 @@ export default function FulfilOrdersPage() {
     } else {
       setDetail(res.data);
       if (successStatus) setStatus(successStatus);
+      if (res.data) {
+        const p = await getPackingSuggestionsAction(res.data.id);
+        if (p.ok) {
+          setPackHint({
+            packing: p.data.packing,
+            freebie: p.data.freebie
+              ? { label: p.data.freebie.label, estimatedCost: p.data.freebie.estimatedCost }
+              : null,
+          });
+        }
+      }
     }
     const list = await listFulfilmentWorkbenchAction(tab);
     setListLoaded(true);
@@ -534,63 +539,104 @@ export default function FulfilOrdersPage() {
                   </FormSection>
                 ) : null}
 
-                {(detail.status === "ready-to-pick" || detail.status === "ready-to-pack") && (
-                  <FormSection title="Picking" description="Confirm physical pick checklist.">
+                {(detail.status === "ready-to-pick" ||
+                  detail.status === "ready-to-pack" ||
+                  detail.pickedAt) && (
+                  <FormSection
+                    title="Picking"
+                    description={
+                      detail.pickedAt || detail.status === "ready-to-pack"
+                        ? "Physical pick confirmed."
+                        : "Confirm physical pick checklist."
+                    }
+                  >
                     <ul className="text-sm space-y-1 mb-3">
                       {detail.lines.map((l) => (
                         <li key={l.id}>
-                          [{l.picked ? "x" : " "}] {l.title}
+                          [{l.picked || detail.pickedAt ? "x" : " "}] {l.title}
                           {l.variantTitle ? ` — ${l.variantTitle}` : ""} × {l.requiredQuantity}
                         </li>
                       ))}
                     </ul>
-                    <button
-                      type="button"
-                      data-testid="fulfil-confirm-picked"
-                      disabled={pending}
-                      className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
-                      onClick={() => {
-                        runAction("Confirming all items picked…", async () => {
-                          const res = await confirmPickingAction({ fulfilmentOrderId: detail.id });
-                          await applyDetailResult(res);
-                        });
-                      }}
-                    >
-                      {pending && busyLabel?.includes("picked") ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Package className="h-4 w-4" />
-                      )}
-                      Confirm all items picked
-                    </button>
+                    {detail.pickedAt || detail.status === "ready-to-pack" || detail.status === "ready-to-ship" ? (
+                      <p
+                        className="inline-flex items-center gap-2 text-sm text-deep-navy"
+                        data-testid="fulfil-picked-done"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        All items picked — continue with packing below.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="fulfil-confirm-picked"
+                        disabled={pending}
+                        className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
+                        onClick={() => {
+                          runAction("Confirming all items picked…", async () => {
+                            const res = await confirmPickingAction({
+                              fulfilmentOrderId: detail.id,
+                            });
+                            await applyDetailResult(
+                              res,
+                              "All items picked — packing is next.",
+                            );
+                          });
+                        }}
+                      >
+                        {pending && busyLabel?.includes("picked") ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Package className="h-4 w-4" />
+                        )}
+                        Confirm all items picked
+                      </button>
+                    )}
                   </FormSection>
                 )}
 
-                {(detail.status === "ready-to-pack" || detail.pickedAt) && packHint ? (
-                  <FormSection title="Packing & freebie" description="Deterministic suggestion — overrides are stored.">
-                    <p className="text-sm font-medium text-deep-navy">{packHint.packing.cover}</p>
-                    <ul className="text-sm text-charcoal/70 list-disc pl-5 mt-1">
-                      {packHint.packing.materials.map((m) => (
-                        <li key={m.label}>{m.label}</li>
-                      ))}
-                    </ul>
-                    <p className="text-sm mt-2">
-                      Freebie: {packHint.freebie ? packHint.freebie.label : "None configured / in stock"}
-                    </p>
+                {(detail.status === "ready-to-pack" ||
+                  detail.status === "ready-to-ship" ||
+                  Boolean(detail.pickedAt)) && (
+                  <FormSection
+                    title="Packing & freebie"
+                    description="Deterministic suggestion — overrides are stored."
+                  >
+                    {packHint ? (
+                      <>
+                        <p className="text-sm font-medium text-deep-navy">{packHint.packing.cover}</p>
+                        <ul className="text-sm text-charcoal/70 list-disc pl-5 mt-1">
+                          {packHint.packing.materials.map((m) => (
+                            <li key={m.label}>{m.label}</li>
+                          ))}
+                        </ul>
+                        <p className="text-sm mt-2">
+                          Freebie:{" "}
+                          {packHint.freebie
+                            ? packHint.freebie.label
+                            : "None configured / in stock"}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-charcoal/60 inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading packing suggestion…
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2 mt-3">
                       <button
                         type="button"
-                        disabled={pending}
+                        disabled={pending || !packHint}
                         className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
                         onClick={() => {
                           runAction("Saving packing suggestion…", async () => {
                             const res = await decidePackingAction({
                               fulfilmentOrderId: detail.id,
                               useSuggestion: true,
-                              freebieChoice: packHint.freebie ? "add" : "none",
+                              freebieChoice: packHint?.freebie ? "add" : "none",
                               freebieProductCode: null,
                             });
-                            await applyDetailResult(res);
+                            await applyDetailResult(res, "Packing saved — choose shipping next.");
                           });
                         }}
                       >
@@ -608,7 +654,7 @@ export default function FulfilOrdersPage() {
                               overrideNote: "Operator changed packing",
                               freebieChoice: "none",
                             });
-                            await applyDetailResult(res);
+                            await applyDetailResult(res, "Packing saved — choose shipping next.");
                           });
                         }}
                       >
@@ -616,7 +662,7 @@ export default function FulfilOrdersPage() {
                       </button>
                     </div>
                   </FormSection>
-                ) : null}
+                )}
 
                 <FormSection
                   title="Shipping"
