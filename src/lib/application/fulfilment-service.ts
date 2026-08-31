@@ -500,6 +500,22 @@ export async function confirmPicking(input: {
   actor?: string | null;
 }): Promise<FulfilmentOrderDetail> {
   const r = repo();
+  const existing = await r.getDetail(input.fulfilmentOrderId);
+  if (!existing) throw new Error("Not found");
+  // Idempotent — repeated clicks must not spam the activity timeline.
+  if (
+    existing.pickedAt ||
+    existing.status === "ready-to-pack" ||
+    existing.status === "ready-to-ship" ||
+    existing.status === "ready-for-handover" ||
+    existing.status === "ready-for-pickup" ||
+    existing.status === "dispatched"
+  ) {
+    if (existing.status === "ready-to-pick" || existing.status === "stock-check") {
+      await r.confirmAllPicked(input.fulfilmentOrderId, input.actor ?? null);
+    }
+    return (await getFulfilmentDetail(input.fulfilmentOrderId))!;
+  }
   await r.confirmAllPicked(input.fulfilmentOrderId, input.actor ?? null);
   await r.appendEvent({
     fulfilmentOrderId: input.fulfilmentOrderId,
