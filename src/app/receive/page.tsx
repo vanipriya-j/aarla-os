@@ -1,7 +1,8 @@
 "use client";
 
 import { useAppLedger } from "@/lib/client/use-app-data";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
@@ -18,7 +19,9 @@ const steps = [
   { id: "shelf", label: "Shelf & Shopify" },
 ];
 
-export default function ReceivePage() {
+function ReceivePageInner() {
+  const searchParams = useSearchParams();
+  const poFromQuery = searchParams.get("po");
   const { purchaseOrders, receive, products, vendors, error } = useAppLedger();
   const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
   const getVendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
@@ -31,8 +34,11 @@ export default function ReceivePage() {
   );
 
   const [step, setStep] = useState(0);
-  const [poId, setPoId] = useState(receivable[0]?.id ?? "");
-  const po = purchaseOrders.find((p) => p.id === poId) ?? receivable[0];
+  const [poId, setPoId] = useState(poFromQuery ?? receivable[0]?.id ?? "");
+  const po =
+    purchaseOrders.find((p) => p.id === poId) ??
+    (poFromQuery ? purchaseOrders.find((p) => p.id === poFromQuery) : undefined) ??
+    receivable[0];
 
   const [ordered, setOrdered] = useState(po?.quantityOrdered ?? 0);
   const [received, setReceived] = useState(po?.quantityOrdered ?? 0);
@@ -60,6 +66,13 @@ export default function ReceivePage() {
       setDone(false);
     }
   };
+
+  useEffect(() => {
+    if (poFromQuery && purchaseOrders.some((p) => p.id === poFromQuery)) {
+      selectPo(poFromQuery);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate from manufacture deep-link once POs load
+  }, [poFromQuery, purchaseOrders]);
 
   const postToLedger = async () => {
     if (!po) return;
@@ -295,5 +308,20 @@ export default function ReceivePage() {
         ) : null}
       </main>
     </>
+  );
+}
+
+export default function ReceivePage() {
+  return (
+    <Suspense
+      fallback={
+        <>
+          <Header title="Receive Stock" subtitle="Loading…" />
+          <main className="px-8 py-6 text-sm text-charcoal/50">Loading…</main>
+        </>
+      }
+    >
+      <ReceivePageInner />
+    </Suspense>
   );
 }
