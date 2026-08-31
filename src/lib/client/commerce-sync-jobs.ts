@@ -136,16 +136,19 @@ export async function runCommerceSyncAllJob(
     }
 
     cb.setStatus("Abandoned checkouts done — tracking Delhivery AWBs…");
-    let offset: number | null = 0;
+    // null = server loads saved Delhivery resume offset (does not restart at 0).
+    let offset: number | null = null;
     let delhiveryTotal = emptyDelhiverySyncSummary();
     guard = 0;
     const delhiveryMaxChunks = 400;
 
     while (guard < delhiveryMaxChunks) {
       guard += 1;
-      const of = delhiveryTotal.uniqueAwbsTracked || null;
+      const through = delhiveryTotal.complete
+        ? (delhiveryTotal.uniqueAwbsTracked || delhiveryTotal.awbsProcessed || 0)
+        : (delhiveryTotal.nextOffset ?? delhiveryTotal.awbsProcessed ?? 0);
       cb.setStatus(
-        `${formatAwbsTracked(delhiveryTotal.awbsProcessed ?? 0, of || null)}…`,
+        `${formatAwbsTracked(through, delhiveryTotal.uniqueAwbsTracked || null)}…`,
       );
       const res = await runChunkWithAutoRetry({
         ...retryOpts,
@@ -157,9 +160,12 @@ export async function runCommerceSyncAllJob(
         return;
       }
       delhiveryTotal = mergeDelhiverySyncSummaries(delhiveryTotal, res.data);
+      const progressThrough = res.data.complete
+        ? (res.data.uniqueAwbsTracked || delhiveryTotal.awbsProcessed || 0)
+        : (res.data.nextOffset ?? delhiveryTotal.awbsProcessed ?? 0);
       cb.setStatus(
         `${formatAwbsTracked(
-          delhiveryTotal.awbsProcessed ?? 0,
+          progressThrough,
           delhiveryTotal.uniqueAwbsTracked || null,
         )}` + (res.data.hasMore ? "…" : " — Delhivery done"),
       );
