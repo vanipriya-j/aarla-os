@@ -59,6 +59,11 @@ async function ensureCatalogColumns(): Promise<void> {
   }
 }
 
+/** Call once per sync run — avoid ALTER on every product upsert. */
+export async function ensureShopifyCatalogSchema(): Promise<void> {
+  await ensureCatalogColumns();
+}
+
 /**
  * Upsert one Shopify product + variants into the Aarla catalog.
  * Matching order: shopify_product_id → existing SKU on first variant → insert new.
@@ -66,8 +71,11 @@ async function ensureCatalogColumns(): Promise<void> {
  */
 export async function upsertShopifyCatalogProduct(
   product: ShopifyProductRecord,
+  options?: { skipSchemaEnsure?: boolean },
 ): Promise<CatalogUpsertResult> {
-  await ensureCatalogColumns();
+  if (!options?.skipSchemaEnsure) {
+    await ensureCatalogColumns();
+  }
 
   if (!product.variants.length) {
     return {

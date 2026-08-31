@@ -109,6 +109,8 @@ export async function syncShopifyOpeningInventory(
     page = await connector.fetchVariantInventoryPage({
       cursor: deps.cursor ?? null,
       maxPages: deps.maxPages ?? 1,
+      // Small pages: each variant can do matching queries + receipt write.
+      pageSize: 15,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify inventory fetch failed";

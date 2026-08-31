@@ -3,10 +3,14 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import {
-  clearCommerceSyncLockViaApi,
+  unlockCommerceSyncLockViaApi,
   syncShopifyOpeningInventoryChunkViaApi,
   syncShopifyProductsChunkViaApi,
 } from "@/lib/client/commerce-sync-api";
+import {
+  newCommerceSyncLockToken,
+  runChunkWithAutoRetry,
+} from "@/lib/client/commerce-sync-auto-retry";
 import { PackagePlus, RefreshCw } from "lucide-react";
 
 /**
@@ -22,7 +26,7 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
     startTransition(async () => {
       setError(null);
       setStatus("Syncing products from Shopify…");
-      const lockToken = `catalog-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const lockTokenRef = { current: newCommerceSyncLockToken() };
       let cursor: string | null = null;
       let added = 0;
       let updated = 0;
@@ -31,11 +35,24 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
       try {
         while (guard < 200) {
           guard += 1;
-          const res = await syncShopifyProductsChunkViaApi(cursor, lockToken, "full");
+          const res = await runChunkWithAutoRetry({
+            getToken: () => lockTokenRef.current,
+            setToken: (t) => {
+              lockTokenRef.current = t;
+            },
+            onRetry: (attempt, maxAttempts) => {
+              setError(null);
+              setStatus(
+                `Server timed out — unlocking and retrying ${attempt}/${maxAttempts} (saved rows kept)…`,
+              );
+            },
+            attempt: (token) => syncShopifyProductsChunkViaApi(cursor, token, "full"),
+          });
           if (!res.ok) {
             setError(res.error);
-            setStatus(null);
-            await clearCommerceSyncLockViaApi().catch(() => undefined);
+            setStatus(
+              "Stopped after automatic retries — click Sync products again to resume from the saved cursor.",
+            );
             return;
           }
           added += res.data.productsAdded;
@@ -60,7 +77,8 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
         setError(err instanceof Error ? err.message : String(err));
         setStatus(null);
       } finally {
-        await clearCommerceSyncLockViaApi().catch(() => undefined);
+        // Unlock only — keep resume cursors so a later click can continue.
+        await unlockCommerceSyncLockViaApi().catch(() => undefined);
       }
     });
   };
@@ -69,7 +87,7 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
     startTransition(async () => {
       setError(null);
       setStatus("Importing legacy base inventory from Shopify…");
-      const lockToken = `open-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const lockTokenRef = { current: newCommerceSyncLockToken() };
       let cursor: string | null = null;
       let written = 0;
       let units = 0;
@@ -78,11 +96,24 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
       try {
         while (guard < 200) {
           guard += 1;
-          const res = await syncShopifyOpeningInventoryChunkViaApi(cursor, lockToken);
+          const res = await runChunkWithAutoRetry({
+            getToken: () => lockTokenRef.current,
+            setToken: (t) => {
+              lockTokenRef.current = t;
+            },
+            onRetry: (attempt, maxAttempts) => {
+              setError(null);
+              setStatus(
+                `Server timed out — unlocking and retrying ${attempt}/${maxAttempts} (saved receipts kept)…`,
+              );
+            },
+            attempt: (token) => syncShopifyOpeningInventoryChunkViaApi(cursor, token),
+          });
           if (!res.ok) {
             setError(res.error);
-            setStatus(null);
-            await clearCommerceSyncLockViaApi().catch(() => undefined);
+            setStatus(
+              "Stopped after automatic retries — click Import base inventory again to resume.",
+            );
             return;
           }
           written += res.data.receiptsWritten;
@@ -110,7 +141,7 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
         setError(err instanceof Error ? err.message : String(err));
         setStatus(null);
       } finally {
-        await clearCommerceSyncLockViaApi().catch(() => undefined);
+        await unlockCommerceSyncLockViaApi().catch(() => undefined);
       }
     });
   };
@@ -133,7 +164,7 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
         1) Catalog = titles/SKUs/variants. 2) Base inventory = one-time Shopify available qty →
         Studio opening receipts on the ledger. Needs <code className="text-deep-navy">read_products</code>{" "}
         + <code className="text-deep-navy">read_inventory</code>. After that, manage stock with
-        Receive / Transfer — not Shopify sync.
+        Receive / Transfer — not Shopify sync. Timeouts unlock and retry automatically without wiping progress.
       </p>
     </div>
   );

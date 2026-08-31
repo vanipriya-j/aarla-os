@@ -9,7 +9,10 @@ import {
   type ShopifyCatalogSyncSummary,
 } from "@/lib/domain/external-commerce-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
-import { upsertShopifyCatalogProduct } from "@/lib/infra/repositories/postgres-shopify-catalog";
+import {
+  ensureShopifyCatalogSchema,
+  upsertShopifyCatalogProduct,
+} from "@/lib/infra/repositories/postgres-shopify-catalog";
 import {
   clearShopifyProductsWatermark,
   commitShopifyProductsWatermark,
@@ -74,6 +77,7 @@ export async function syncShopifyCatalogData(
   }
 
   await ensureTenantBasicsViaPool();
+  await ensureShopifyCatalogSchema();
 
   let query: string | null = null;
   let resumeCursor: string | null = deps.cursor ?? null;
@@ -99,6 +103,7 @@ export async function syncShopifyCatalogData(
     page = await connector.fetchProductsPage({
       cursor: resumeCursor,
       maxPages,
+      pageSize: 5,
       query,
     });
   } catch (err) {
@@ -123,7 +128,7 @@ export async function syncShopifyCatalogData(
 
   for (const product of page.products) {
     try {
-      const result = await upsertShopifyCatalogProduct(product);
+      const result = await upsertShopifyCatalogProduct(product, { skipSchemaEnsure: true });
       if (result.productAction === "inserted") summary.productsAdded += 1;
       else if (result.productAction === "updated") summary.productsUpdated += 1;
       else summary.recordsSkipped += 1;

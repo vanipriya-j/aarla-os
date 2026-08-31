@@ -782,7 +782,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     while (hasNext && pages < maxPages) {
       pages += 1;
-      const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
+      const pageSize = Math.max(3, Math.min(options.pageSize ?? 5, 25));
       const variables: {
         cursor: string | null;
         query: string | null;
@@ -823,7 +823,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     while (hasNext && pages < maxPages) {
       pages += 1;
-      const pageSize = Math.max(5, Math.min(options.pageSize ?? 50, 100));
+      const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
       const data: VariantInventoryQueryData = await this.graphql<VariantInventoryQueryData>(
         VARIANT_INVENTORY_QUERY,
         {
