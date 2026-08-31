@@ -32,7 +32,6 @@ export interface NavItem {
 
 /**
  * Daily operating loop — pack, call, stock, make, plan the week.
- * (Fulfil href stays /dispatch until the Fulfil Orders PR lands on main.)
  */
 export const operateNav: NavItem[] = [
   {
@@ -43,7 +42,7 @@ export const operateNav: NavItem[] = [
   },
   {
     label: "Fulfil Orders",
-    href: "/dispatch",
+    href: "/fulfil",
     icon: Truck,
     description: "Stock check, pack, ship and today's handover.",
   },
