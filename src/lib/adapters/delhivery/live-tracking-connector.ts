@@ -34,6 +34,8 @@ type RawShipment = {
   AWB?: string;
   DeliveryDate?: string | null;
   PickedupDate?: string | null;
+  PromisedDeliveryDate?: string | null;
+  ExpectedDeliveryDate?: string | null;
   Status?: {
     Status?: string;
     StatusType?: string;
@@ -54,6 +56,16 @@ type RawShipment = {
     };
   }>;
 };
+
+function firstNonEmptyDate(
+  ...values: Array<string | null | undefined>
+): string | null {
+  for (const v of values) {
+    const t = typeof v === "string" ? v.trim() : "";
+    if (t) return t;
+  }
+  return null;
+}
 
 type TrackingResponse = {
   ShipmentData?: Array<{ Shipment?: RawShipment }>;
@@ -100,6 +112,10 @@ function mapShipment(raw: RawShipment, requestedAwb: string): TrackedShipmentRes
       normalizedStatus === "delivered"
         ? raw.DeliveryDate ?? latestFromStatus ?? null
         : null,
+    promisedDeliveryAt: firstNonEmptyDate(
+      raw.PromisedDeliveryDate,
+      raw.ExpectedDeliveryDate,
+    ),
     latestScanAt: latestFromStatus ?? latestFromScans ?? null,
     latestScanLocation: raw.Status?.StatusLocation ?? scans.at(-1)?.scanLocation ?? null,
     syncStatus: "ok",

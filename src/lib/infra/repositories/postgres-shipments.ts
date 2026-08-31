@@ -6,8 +6,10 @@ import type {
   NormalizedShipmentStatus,
   Shipment,
   ShipmentCarrier,
+  ShipmentDiagnosticSort,
   ShipmentSyncStatus,
 } from "@/lib/domain/shipment-types";
+import { resolveShipmentTrackingUrl } from "@/lib/domain/shipment-types";
 import type {
   AppendEventsInput,
   ShipmentRepository,
@@ -18,6 +20,16 @@ type Q = <T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
 ) => Promise<T[]>;
+
+const DIAGNOSTIC_ORDER_BY: Record<ShipmentDiagnosticSort, string> = {
+  "last-synced": "s.last_synced_at desc nulls last, s.awb",
+  ordered: "o.order_date desc nulls last, s.awb",
+  promised: "s.promised_delivery_at desc nulls last, s.awb",
+  delivered: "s.delivered_at desc nulls last, s.awb",
+  status: "s.normalized_status asc, s.last_synced_at desc, s.awb",
+  customer: "c.name asc nulls last, s.awb",
+  order: "o.order_number asc nulls last, s.awb",
+};
 
 function iso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -43,6 +55,7 @@ function mapShipment(r: Record<string, unknown>): Shipment {
       r.provider_status_type == null ? null : String(r.provider_status_type),
     normalizedStatus: r.normalized_status as NormalizedShipmentStatus,
     deliveredAt: isoOrNull(r.delivered_at),
+    promisedDeliveryAt: isoOrNull(r.promised_delivery_at),
     latestScanAt: isoOrNull(r.latest_scan_at),
     latestScanLocation:
       r.latest_scan_location == null ? null : String(r.latest_scan_location),
@@ -144,11 +157,12 @@ export function createShipmentRepository(): ShipmentRepository {
              provider_status_type = $7,
              normalized_status = $8,
              delivered_at = coalesce($9, delivered_at),
-             latest_scan_at = $10,
-             latest_scan_location = $11,
-             sync_status = $12,
-             sync_error = $13,
-             raw_provider_payload = $14,
+             promised_delivery_at = coalesce($10, promised_delivery_at),
+             latest_scan_at = $11,
+             latest_scan_location = $12,
+             sync_status = $13,
+             sync_error = $14,
+             raw_provider_payload = $15,
              last_synced_at = now()
            where organization_id = $1 and carrier = $2 and awb = $3
            returning *`,
@@ -162,6 +176,7 @@ export function createShipmentRepository(): ShipmentRepository {
             input.providerStatusType,
             normalized,
             deliveredAt,
+            input.promisedDeliveryAt,
             input.latestScanAt,
             input.latestScanLocation,
             input.syncStatus,
@@ -182,9 +197,9 @@ export function createShipmentRepository(): ShipmentRepository {
         `insert into shipments (
            organization_id, external_order_id, external_fulfilment_id, carrier, awb,
            provider_status, provider_status_type, normalized_status,
-           delivered_at, latest_scan_at, latest_scan_location,
+           delivered_at, promised_delivery_at, latest_scan_at, latest_scan_location,
            sync_status, sync_error, raw_provider_payload, last_synced_at
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())
          returning *`,
         [
           ORG_ID,
@@ -196,6 +211,7 @@ export function createShipmentRepository(): ShipmentRepository {
           input.providerStatusType,
           input.normalizedStatus,
           input.deliveredAt,
+          input.promisedDeliveryAt,
           input.latestScanAt,
           input.latestScanLocation,
           input.syncStatus,
@@ -266,6 +282,8 @@ export function createShipmentRepository(): ShipmentRepository {
     async listDiagnostics(options = {}) {
       const pageSize = Math.min(Math.max(Math.floor(options.pageSize ?? 50), 1), 100);
       const page = Math.max(Math.floor(options.page ?? 1), 1);
+      const sortKey = (options.sort ?? "last-synced") as ShipmentDiagnosticSort;
+      const orderBy = DIAGNOSTIC_ORDER_BY[sortKey] ?? DIAGNOSTIC_ORDER_BY["last-synced"];
 
       const countRows = await q<{ c: string }>(
         `select count(*)::text as c from shipments where organization_id = $1`,
@@ -280,12 +298,14 @@ export function createShipmentRepository(): ShipmentRepository {
         `select s.*,
                 o.order_number,
                 o.order_date,
-                c.name as customer_name
+                c.name as customer_name,
+                f.tracking_url as fulfilment_tracking_url
          from shipments s
          left join external_orders o on o.id = s.external_order_id
          left join external_customers c on c.id = o.external_customer_id
+         left join external_fulfilments f on f.id = s.external_fulfilment_id
          where s.organization_id = $1
-         order by s.last_synced_at desc, s.awb
+         order by ${orderBy}
          limit $2 offset $3`,
         [ORG_ID, pageSize, total === 0 ? 0 : offset],
       );
@@ -306,11 +326,19 @@ export function createShipmentRepository(): ShipmentRepository {
             normalizedStatus: s.normalizedStatus,
             providerStatus: s.providerStatus,
             deliveredAt: s.deliveredAt,
+            promisedDeliveryAt: s.promisedDeliveryAt,
             latestScanAt: s.latestScanAt,
             latestScanLocation: s.latestScanLocation,
             lastSyncedAt: s.lastSyncedAt,
             syncError: s.syncError,
             syncStatus: s.syncStatus,
+            trackingUrl: resolveShipmentTrackingUrl(
+              s.awb,
+              s.carrier,
+              r.fulfilment_tracking_url == null
+                ? null
+                : String(r.fulfilment_tracking_url),
+            ),
           };
         }),
         total,

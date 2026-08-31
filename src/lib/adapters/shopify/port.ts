@@ -80,7 +80,7 @@ export type ShopifyFetchOptions = {
   cursor?: string | null;
   /** Max order connection pages to fetch in this call (default connector-specific) */
   maxPages?: number;
-  /** Orders per GraphQL page (default 25 — keeps upserts under Vercel 60s) */
+  /** Orders per GraphQL page (default 15 — keeps upserts under Vercel 60s) */
   pageSize?: number;
   /**
    * Optional Shopify orders search query, e.g. created_at:>'2026-01-01T00:00:00Z'
