@@ -11,21 +11,97 @@ type LineHint = {
   category?: string | null;
 };
 
+const COVER_OPTIONS = [
+  "Small ecommerce cover",
+  "Medium ecommerce cover",
+  "Large ecommerce cover",
+] as const;
+
+export type PackingCoverOption = (typeof COVER_OPTIONS)[number];
+
+export const PACKING_COVER_OPTIONS = COVER_OPTIONS;
+
+export const PACKING_EXTRA_MATERIAL_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: "thank-you-card", label: "Thank-you card" },
+  { code: "bubble-sleeve", label: "Bottle: bubble sleeve" },
+  { code: "protective-board", label: "Book: protective board" },
+  { code: "butter-paper", label: "Tee: fold + butter paper" },
+  { code: "void-fill", label: "Extra void fill" },
+  { code: "tissue", label: "Tissue wrap" },
+  { code: "sticker-card", label: "Sticker / insert card" },
+];
+
+function lineTags(title: string): string[] {
+  const t = title.toLowerCase();
+  const tags: string[] = [];
+  if (t.includes("bottle") || t.includes("tumbler")) tags.push("bottle");
+  if (t.includes("book")) tags.push("book");
+  if (t.includes("tee") || t.includes("shirt") || t.includes("apparel") || t.includes("tote")) {
+    tags.push("apparel");
+  }
+  if (t.includes("sticker")) tags.push("sticker");
+  if (t.includes("brass") || t.includes("ceramic")) tags.push("fragile");
+  if (tags.length === 0) tags.push("general");
+  return tags;
+}
+
+/** Stable packing pattern key so operator overrides can teach future suggestions. */
+export function packingLineSignature(lines: LineHint[]): string {
+  const totalUnits = lines.reduce((n, l) => n + l.quantity, 0);
+  const tags = new Set<string>();
+  for (const line of lines) {
+    for (const tag of lineTags(line.title)) tags.add(tag);
+  }
+  const bucket =
+    totalUnits >= 4 ? "4plus" : totalUnits >= 2 ? "2to3" : totalUnits === 1 ? "1" : "0";
+  return `units:${bucket}|${[...tags].sort().join("+")}`;
+}
+
 /**
  * Deterministic packing suggestion — founder overrides are stored separately.
- * No LLM.
+ * No LLM. Optional learned packing from a prior similar override wins.
  */
-export function suggestPacking(lines: LineHint[]): PackingSuggestion {
+export function suggestPacking(
+  lines: LineHint[],
+  learned?: { cover: string; materials: PackingSuggestion["materials"]; note?: string | null } | null,
+): PackingSuggestion {
+  const signature = packingLineSignature(lines);
+  if (learned?.cover) {
+    const materials =
+      learned.materials?.length > 0
+        ? learned.materials
+        : [
+            { code: "cover", label: learned.cover },
+            { code: "thank-you-card", label: "Thank-you card" },
+          ];
+    const notes = [
+      learned.note
+        ? `From earlier change: ${learned.note}`
+        : "From earlier packing change on a similar order.",
+    ];
+    return {
+      cover: learned.cover,
+      materials,
+      notes,
+      signature,
+      learnedFromNote: learned.note ?? null,
+    };
+  }
+
   const totalUnits = lines.reduce((n, l) => n + l.quantity, 0);
   const titles = lines.map((l) => l.title.toLowerCase());
   const hasBottle = titles.some((t) => t.includes("bottle") || t.includes("tumbler"));
   const hasBook = titles.some((t) => t.includes("book"));
   const hasApparel = titles.some(
-    (t) => t.includes("tee") || t.includes("shirt") || t.includes("apparel"),
+    (t) =>
+      t.includes("tee") ||
+      t.includes("shirt") ||
+      t.includes("apparel") ||
+      t.includes("tote"),
   );
   const fragile = hasBottle || titles.some((t) => t.includes("brass") || t.includes("ceramic"));
 
-  const cover =
+  const cover: PackingCoverOption =
     totalUnits >= 4 || (hasBottle && hasBook)
       ? "Large ecommerce cover"
       : totalUnits >= 2 || hasBottle
@@ -53,7 +129,36 @@ export function suggestPacking(lines: LineHint[]): PackingSuggestion {
   if (fragile) notes.push("Fragile items present — pad corners.");
   if (totalUnits === 1) notes.push("Single-item pack.");
 
-  return { cover, materials, notes };
+  return { cover, materials, notes, signature, learnedFromNote: null };
+}
+
+export function buildPackingActual(input: {
+  cover: string;
+  materialCodes: string[];
+  customMaterials?: string[];
+  signature: string;
+  reason: string;
+}): PackingSuggestion {
+  const materials: PackingSuggestion["materials"] = [
+    { code: "cover", label: input.cover },
+  ];
+  for (const opt of PACKING_EXTRA_MATERIAL_OPTIONS) {
+    if (input.materialCodes.includes(opt.code)) {
+      materials.push(opt);
+    }
+  }
+  for (const custom of input.customMaterials ?? []) {
+    const label = custom.trim();
+    if (!label) continue;
+    materials.push({ code: "custom", label });
+  }
+  return {
+    cover: input.cover,
+    materials,
+    notes: [input.reason.trim()],
+    signature: input.signature,
+    learnedFromNote: input.reason.trim(),
+  };
 }
 
 export type FreebieRule = {

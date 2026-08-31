@@ -22,6 +22,27 @@ describe("fulfilment decisions", () => {
     expect(s.materials.some((m) => /bubble/i.test(m.label))).toBe(true);
     expect(s.materials.some((m) => /board/i.test(m.label))).toBe(true);
     expect(s.materials.some((m) => /butter/i.test(m.label))).toBe(true);
+    expect(s.signature).toContain("units:");
+  });
+
+  it("prefers a learned packing override for similar orders", () => {
+    const s = suggestPacking(
+      [
+        { title: "Filter Coffee Sticker Sheet", quantity: 1 },
+        { title: "Ganesha Tote Bag", quantity: 2 },
+      ],
+      {
+        cover: "Medium ecommerce cover",
+        materials: [
+          { code: "cover", label: "Medium ecommerce cover" },
+          { code: "tissue", label: "Tissue wrap" },
+        ],
+        note: "Tote + stickers fit medium; skip void fill",
+      },
+    );
+    expect(s.cover).toBe("Medium ecommerce cover");
+    expect(s.learnedFromNote).toMatch(/Tote \+ stickers/);
+    expect(s.materials.some((m) => m.code === "tissue")).toBe(true);
   });
 
   it("suggests freebie only when studio stock exists", () => {

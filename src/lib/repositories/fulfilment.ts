@@ -240,6 +240,12 @@ export interface FulfilmentRepository {
       priority: number;
     }>
   >;
+  /** Most recent operator packing override for a similar line signature. */
+  findLearnedPacking(signature: string): Promise<{
+    cover: string;
+    materials: Array<{ code: string; label: string }>;
+    note: string | null;
+  } | null>;
   listPartnerStockBySkuHint(title: string): Promise<
     Array<{ partnerCode: string; partnerName: string; locationCode: string; qty: number }>
   >;

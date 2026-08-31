@@ -31,6 +31,12 @@ import {
   type FulfilmentShippingMethod,
   type FulfilmentTab,
 } from "@/lib/domain/fulfilment-types";
+import {
+  PACKING_COVER_OPTIONS,
+  PACKING_EXTRA_MATERIAL_OPTIONS,
+  buildPackingActual,
+  packingLineSignature,
+} from "@/lib/domain/fulfilment-decisions";
 import { CheckCircle2, Loader2, Package, RefreshCw, Truck } from "lucide-react";
 
 export default function FulfilOrdersPage() {
@@ -43,7 +49,13 @@ export default function FulfilOrdersPage() {
   const [detail, setDetail] = useState<FulfilmentOrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [packHint, setPackHint] = useState<{
-    packing: { cover: string; materials: Array<{ label: string }>; notes: string[] };
+    packing: {
+      cover: string;
+      materials: Array<{ label: string; code?: string }>;
+      notes: string[];
+      learnedFromNote?: string | null;
+      signature?: string;
+    };
     freebie: { label: string; estimatedCost: number | null } | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +65,11 @@ export default function FulfilOrdersPage() {
   const [awbDraft, setAwbDraft] = useState("");
   const [courierDraft, setCourierDraft] = useState("");
   const [shipMethod, setShipMethod] = useState<FulfilmentShippingMethod>("delhivery-surface");
+  const [showPackChange, setShowPackChange] = useState(false);
+  const [packCover, setPackCover] = useState("Medium ecommerce cover");
+  const [packMaterials, setPackMaterials] = useState<string[]>(["thank-you-card"]);
+  const [packCustom, setPackCustom] = useState("");
+  const [packReason, setPackReason] = useState("");
 
   const selectedRow = rows.find((r) => r.id === selectedId) ?? null;
 
@@ -77,6 +94,8 @@ export default function FulfilOrdersPage() {
     setSelectedId(id);
     setDetail(null);
     setPackHint(null);
+    setShowPackChange(false);
+    setPackReason("");
     setDetailLoading(true);
     setError(null);
     startTransition(async () => {
@@ -99,6 +118,12 @@ export default function FulfilOrdersPage() {
             ? { label: p.data.freebie.label, estimatedCost: p.data.freebie.estimatedCost }
             : null,
         });
+        setPackCover(p.data.packing.cover);
+        setPackMaterials(
+          p.data.packing.materials
+            .map((m) => m.code)
+            .filter((c): c is string => Boolean(c) && c !== "cover"),
+        );
       }
       if (d.data?.shippingMethod) setShipMethod(d.data.shippingMethod);
       setAwbDraft(d.data?.awb ?? "");
@@ -141,6 +166,12 @@ export default function FulfilOrdersPage() {
               ? { label: p.data.freebie.label, estimatedCost: p.data.freebie.estimatedCost }
               : null,
           });
+          setPackCover(p.data.packing.cover);
+          setPackMaterials(
+            p.data.packing.materials
+              .map((m) => m.code)
+              .filter((c): c is string => Boolean(c) && c !== "cover"),
+          );
         }
       }
     }
@@ -600,7 +631,7 @@ export default function FulfilOrdersPage() {
                   Boolean(detail.pickedAt)) && (
                   <FormSection
                     title="Packing & freebie"
-                    description="Deterministic suggestion — overrides are stored."
+                    description="Use the suggestion, or say what you changed — we’ll suggest that next time for similar orders."
                   >
                     {packHint ? (
                       <>
@@ -610,6 +641,11 @@ export default function FulfilOrdersPage() {
                             <li key={m.label}>{m.label}</li>
                           ))}
                         </ul>
+                        {packHint.packing.learnedFromNote ? (
+                          <p className="text-xs text-deep-navy/80 mt-2">
+                            Learned from earlier change: {packHint.packing.learnedFromNote}
+                          </p>
+                        ) : null}
                         <p className="text-sm mt-2">
                           Freebie:{" "}
                           {packHint.freebie
@@ -623,44 +659,178 @@ export default function FulfilOrdersPage() {
                         Loading packing suggestion…
                       </p>
                     )}
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      <button
-                        type="button"
-                        disabled={pending || !packHint}
-                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
-                        onClick={() => {
-                          runAction("Saving packing suggestion…", async () => {
-                            const res = await decidePackingAction({
-                              fulfilmentOrderId: detail.id,
-                              useSuggestion: true,
-                              freebieChoice: packHint?.freebie ? "add" : "none",
-                              freebieProductCode: null,
+                    {!showPackChange ? (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          type="button"
+                          disabled={pending || !packHint}
+                          className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                          onClick={() => {
+                            runAction("Saving packing suggestion…", async () => {
+                              const res = await decidePackingAction({
+                                fulfilmentOrderId: detail.id,
+                                useSuggestion: true,
+                                freebieChoice: packHint?.freebie ? "add" : "none",
+                                freebieProductCode: null,
+                              });
+                              setShowPackChange(false);
+                              await applyDetailResult(
+                                res,
+                                "Packing saved — choose shipping next.",
+                              );
                             });
-                            await applyDetailResult(res, "Packing saved — choose shipping next.");
-                          });
-                        }}
+                          }}
+                        >
+                          Use suggestion
+                        </button>
+                        <button
+                          type="button"
+                          disabled={pending}
+                          className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                          onClick={() => {
+                            setShowPackChange(true);
+                            setPackReason("");
+                            if (packHint) {
+                              setPackCover(packHint.packing.cover);
+                              setPackMaterials(
+                                packHint.packing.materials
+                                  .map((m) => m.code)
+                                  .filter((c): c is string => Boolean(c) && c !== "cover"),
+                              );
+                            }
+                          }}
+                        >
+                          Change packing…
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="mt-3 space-y-3 rounded-lg border border-border p-3"
+                        data-testid="fulfil-pack-change-form"
                       >
-                        Use suggestion
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
-                        onClick={() => {
-                          runAction("Saving packing override…", async () => {
-                            const res = await decidePackingAction({
-                              fulfilmentOrderId: detail.id,
-                              useSuggestion: false,
-                              overrideNote: "Operator changed packing",
-                              freebieChoice: "none",
-                            });
-                            await applyDetailResult(res, "Packing saved — choose shipping next.");
-                          });
-                        }}
-                      >
-                        Change packing · no freebie
-                      </button>
-                    </div>
+                        <p className="text-sm font-medium text-deep-navy">
+                          What are you packing instead?
+                        </p>
+                        <label className="block text-xs text-charcoal/70">
+                          Cover
+                          <select
+                            className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2"
+                            value={packCover}
+                            disabled={pending}
+                            onChange={(e) => setPackCover(e.target.value)}
+                          >
+                            {PACKING_COVER_OPTIONS.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <fieldset className="space-y-1">
+                          <legend className="text-xs text-charcoal/70">Materials</legend>
+                          {PACKING_EXTRA_MATERIAL_OPTIONS.map((m) => (
+                            <label
+                              key={m.code}
+                              className="flex items-center gap-2 text-sm text-charcoal/80"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={packMaterials.includes(m.code)}
+                                disabled={pending}
+                                onChange={(e) => {
+                                  setPackMaterials((prev) =>
+                                    e.target.checked
+                                      ? [...prev, m.code]
+                                      : prev.filter((c) => c !== m.code),
+                                  );
+                                }}
+                              />
+                              {m.label}
+                            </label>
+                          ))}
+                        </fieldset>
+                        <label className="block text-xs text-charcoal/70">
+                          Other materials (optional)
+                          <input
+                            className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2"
+                            value={packCustom}
+                            disabled={pending}
+                            placeholder="e.g. kraft tape + extra tissue"
+                            onChange={(e) => setPackCustom(e.target.value)}
+                          />
+                        </label>
+                        <label className="block text-xs text-charcoal/70">
+                          What changed / why? (saved for next similar order)
+                          <textarea
+                            className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2 min-h-[72px]"
+                            value={packReason}
+                            disabled={pending}
+                            placeholder="e.g. Tote + stickers fit medium cover; skip void fill"
+                            onChange={(e) => setPackReason(e.target.value)}
+                          />
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={pending || packReason.trim().length < 3}
+                            className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-50"
+                            onClick={() => {
+                              const reason = packReason.trim();
+                              if (reason.length < 3) {
+                                setError("Say what you changed so we can suggest it next time.");
+                                return;
+                              }
+                              const signature =
+                                packHint?.packing.signature ??
+                                packingLineSignature(
+                                  detail.lines.map((l) => ({
+                                    title: l.title,
+                                    quantity: l.requiredQuantity,
+                                  })),
+                                );
+                              const actual = buildPackingActual({
+                                cover: packCover,
+                                materialCodes: packMaterials,
+                                customMaterials: packCustom
+                                  .split(",")
+                                  .map((s) => s.trim())
+                                  .filter(Boolean),
+                                signature,
+                                reason,
+                              });
+                              runAction("Saving packing change…", async () => {
+                                const res = await decidePackingAction({
+                                  fulfilmentOrderId: detail.id,
+                                  useSuggestion: false,
+                                  actual,
+                                  overrideNote: reason,
+                                  freebieChoice: "none",
+                                });
+                                setShowPackChange(false);
+                                setPackReason("");
+                                await applyDetailResult(
+                                  res,
+                                  "Packing change saved — we’ll suggest this for similar orders.",
+                                );
+                              });
+                            }}
+                          >
+                            Save packing change
+                          </button>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                            onClick={() => {
+                              setShowPackChange(false);
+                              setPackReason("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </FormSection>
                 )}
 
@@ -837,6 +1007,12 @@ export default function FulfilOrdersPage() {
                                 }
                               : null,
                           });
+                          setPackCover(p.data.packing.cover);
+                          setPackMaterials(
+                            p.data.packing.materials
+                              .map((m) => m.code)
+                              .filter((c): c is string => Boolean(c) && c !== "cover"),
+                          );
                         }
                         const list = await listFulfilmentWorkbenchAction(tab);
                         if (list.ok) {

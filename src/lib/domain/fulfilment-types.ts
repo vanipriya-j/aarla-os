@@ -165,6 +165,10 @@ export type PackingSuggestion = {
   cover: string;
   materials: PackingSuggestionItem[];
   notes: string[];
+  /** Stable key for learning from operator overrides. */
+  signature?: string;
+  /** When suggestion came from a prior operator change. */
+  learnedFromNote?: string | null;
 };
 
 export type FreebieSuggestion = {

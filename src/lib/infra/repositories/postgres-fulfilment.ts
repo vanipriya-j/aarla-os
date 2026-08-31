@@ -643,6 +643,50 @@ export function createFulfilmentRepository(): FulfilmentRepository {
       }));
     },
 
+    async findLearnedPacking(signature) {
+      const rows = await q<{
+        packing_actual: unknown;
+        packing_override_note: string | null;
+      }>(
+        `select packing_actual, packing_override_note
+         from fulfilment_orders
+         where organization_id = $1
+           and packing_override_note is not null
+           and packing_actual is not null
+           and packing_actual->>'signature' = $2
+         order by packing_decided_at desc nulls last, updated_at desc
+         limit 1`,
+        [ORG_ID, signature],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      const actual =
+        row.packing_actual && typeof row.packing_actual === "object"
+          ? (row.packing_actual as {
+              cover?: string;
+              materials?: Array<{ code?: string; label?: string }>;
+            })
+          : null;
+      const cover = actual?.cover?.trim();
+      if (!cover) return null;
+      const materials = Array.isArray(actual?.materials)
+        ? actual!.materials
+            .filter((m) => m && (m.label || m.code))
+            .map((m) => ({
+              code: String(m.code ?? "custom"),
+              label: String(m.label ?? m.code ?? "material"),
+            }))
+        : [{ code: "cover", label: cover }];
+      return {
+        cover,
+        materials,
+        note:
+          row.packing_override_note == null || String(row.packing_override_note).trim() === ""
+            ? null
+            : String(row.packing_override_note),
+      };
+    },
+
     async listPartnerStockBySkuHint(title: string) {
       // Best-effort: partner location balances for products whose title matches.
       const rows = await q<{

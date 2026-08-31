@@ -1,5 +1,6 @@
 import {
   orderAgeDays,
+  packingLineSignature,
   recommendShippingMode,
   suggestFreebie,
   suggestPacking,
@@ -503,18 +504,8 @@ export async function confirmPicking(input: {
   const existing = await r.getDetail(input.fulfilmentOrderId);
   if (!existing) throw new Error("Not found");
   // Idempotent — repeated clicks must not spam the activity timeline.
-  if (
-    existing.pickedAt ||
-    existing.status === "ready-to-pack" ||
-    existing.status === "ready-to-ship" ||
-    existing.status === "ready-for-handover" ||
-    existing.status === "ready-for-pickup" ||
-    existing.status === "dispatched"
-  ) {
-    if (existing.status === "ready-to-pick" || existing.status === "stock-check") {
-      await r.confirmAllPicked(input.fulfilmentOrderId, input.actor ?? null);
-    }
-    return (await getFulfilmentDetail(input.fulfilmentOrderId))!;
+  if (existing.pickedAt) {
+    return existing;
   }
   await r.confirmAllPicked(input.fulfilmentOrderId, input.actor ?? null);
   await r.appendEvent({
@@ -539,14 +530,35 @@ export async function decidePacking(input: {
   const r = repo();
   const detail = await r.getDetail(input.fulfilmentOrderId);
   if (!detail) throw new Error("Not found");
-  const suggestion = suggestPacking(
-    detail.lines.map((l) => ({ title: l.title, quantity: l.requiredQuantity })),
-  );
-  const actual = input.useSuggestion ? suggestion : (input.actual ?? suggestion);
+  const lineHints = detail.lines.map((l) => ({
+    title: l.title,
+    quantity: l.requiredQuantity,
+  }));
+  const signature = packingLineSignature(lineHints);
+  const learned = await r.findLearnedPacking(signature);
+  const suggestion = suggestPacking(lineHints, learned);
+  if (!input.useSuggestion) {
+    const note = (input.overrideNote ?? "").trim();
+    if (!note) {
+      throw new Error("Say what you changed so we can suggest it next time.");
+    }
+  }
+  const actual = input.useSuggestion
+    ? suggestion
+    : (() => {
+        const raw = input.actual;
+        if (raw && typeof raw === "object") {
+          return {
+            ...(raw as Record<string, unknown>),
+            signature,
+          };
+        }
+        return { ...suggestion, signature, notes: [input.overrideNote!.trim()] };
+      })();
   await r.savePacking(input.fulfilmentOrderId, {
     suggestion,
     actual,
-    overrideNote: input.useSuggestion ? null : (input.overrideNote ?? "Changed packing"),
+    overrideNote: input.useSuggestion ? null : (input.overrideNote ?? null),
     actor: input.actor ?? null,
   });
   await r.saveFreebie(input.fulfilmentOrderId, {
@@ -558,10 +570,12 @@ export async function decidePacking(input: {
     fulfilmentOrderId: input.fulfilmentOrderId,
     eventType: "packed",
     summary: input.useSuggestion
-      ? "Packing suggestion accepted"
-      : "Packing changed from suggestion",
+      ? learned
+        ? "Packing suggestion accepted (from earlier change)"
+        : "Packing suggestion accepted"
+      : `Packing changed: ${(input.overrideNote ?? "").trim()}`,
     actor: input.actor ?? null,
-    detail: { suggestion, actual },
+    detail: { suggestion, actual, signature },
   });
   await recomputeFulfilmentStatus(input.fulfilmentOrderId, r);
   return (await getFulfilmentDetail(input.fulfilmentOrderId))!;
@@ -688,9 +702,13 @@ export async function getPackingAndFreebieSuggestions(fulfilmentOrderId: string)
   const r = repo();
   const detail = await r.getDetail(fulfilmentOrderId);
   if (!detail) throw new Error("Not found");
-  const packing = suggestPacking(
-    detail.lines.map((l) => ({ title: l.title, quantity: l.requiredQuantity })),
-  );
+  const lineHints = detail.lines.map((l) => ({
+    title: l.title,
+    quantity: l.requiredQuantity,
+  }));
+  const signature = packingLineSignature(lineHints);
+  const learned = await r.findLearnedPacking(signature);
+  const packing = suggestPacking(lineHints, learned);
   const rules = await r.listFreebieRules();
   const freebie = suggestFreebie(detail.totalAmount, rules, {});
   return { packing, freebie, statusLabel: fulfilmentStatusLabel(detail.status) };
