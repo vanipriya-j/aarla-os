@@ -400,6 +400,11 @@ export class FixtureShopifyConnector implements ShopifyConnector {
     };
   }
 
+  async fetchOrdersCount(query?: string | null): Promise<number | null> {
+    const page = await this.fetchCustomerCallPage({ query: query ?? null });
+    return page.orders.length;
+  }
+
   async fetchAbandonedCheckoutsPage(
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyAbandonedCheckoutPage> {

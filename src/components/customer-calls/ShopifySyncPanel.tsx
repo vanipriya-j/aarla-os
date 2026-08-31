@@ -15,6 +15,7 @@ import {
 } from "@/lib/domain/external-commerce-types";
 import { syncShopifyChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
+import { formatOrdersLoaded } from "@/lib/client/commerce-sync-progress";
 import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
 import { Hourglass, Loader2, RefreshCw } from "lucide-react";
 
@@ -26,6 +27,7 @@ function SummaryGrid({ summary }: { summary: ShopifySyncSummary }) {
     ["Customers added", summary.customersAdded],
     ["Customers updated", summary.customersUpdated],
     ["Orders read", summary.ordersRead],
+    ["Orders in Shopify (this filter)", summary.ordersTotal ?? "—"],
     ["Orders added", summary.ordersAdded],
     ["Orders updated", summary.ordersUpdated],
     ["Fulfilments found", summary.fulfilmentsFound],
@@ -93,19 +95,21 @@ export function ShopifySyncPanel() {
     }
 
     setError(null);
-    setStatus("Click received — incremental Shopify sync (new orders only)…");
+    setStatus("Asking Shopify how many orders to load…");
     let cursor: string | null = null;
     let total = emptyShopifySyncSummary();
     let guard = 0;
-    const maxChunks = 80; // safety: 80 × ~100 orders
+    const maxChunks = 80; // safety against runaway loops
 
     try {
       while (guard < maxChunks) {
         guard += 1;
         setStatus(
-          cursor
-            ? `Syncing chunk ${guard} (continuing)…`
-            : `Syncing chunk ${guard}…`,
+          total.ordersTotal != null
+            ? `${formatOrdersLoaded(total.ordersRead, total.ordersTotal)}…`
+            : total.ordersRead > 0
+              ? `${formatOrdersLoaded(total.ordersRead)}…`
+              : "Loading Shopify orders…",
         );
         let res;
         try {
@@ -124,6 +128,10 @@ export function ShopifySyncPanel() {
         }
         total = mergeShopifySyncSummaries(total, res.data);
         setSummary({ ...total });
+        setStatus(
+          `${formatOrdersLoaded(total.ordersRead, total.ordersTotal)}` +
+            (res.data.hasMore ? "…" : " — Shopify done"),
+        );
 
         if (res.data.errors.length && !res.data.complete) {
           setError(res.data.errors.slice(0, 3).join(" · "));
@@ -138,10 +146,12 @@ export function ShopifySyncPanel() {
 
       if (total.hasMore || !total.complete) {
         setStatus(
-          `Paused after ${guard} chunks (${total.ordersRead} orders). Sync again — it resumes.`,
+          `${formatOrdersLoaded(total.ordersRead, total.ordersTotal)} — more remain. Sync again — it resumes.`,
         );
       } else {
-        setStatus("Shopify sync complete.");
+        setStatus(
+          `Shopify sync complete — ${formatOrdersLoaded(total.ordersRead, total.ordersTotal)}.`,
+        );
       }
       const diag = await getShopifyCommerceDiagnosticsAction(1, PAGE_SIZE);
       setDiagnosticsLoaded(true);
@@ -163,7 +173,7 @@ export function ShopifySyncPanel() {
     <div className="space-y-4" data-testid="shopify-sync-panel">
       <FormSection
         title="Shopify commerce sync"
-        description="Default sync is incremental (new orders since last success). Pulls in small chunks. Does not start on page load. Does not refresh call queues."
+        description="Default sync is incremental (new orders since last success). Progress shows Loaded X of Y. Does not start on page load. Does not refresh call queues."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button

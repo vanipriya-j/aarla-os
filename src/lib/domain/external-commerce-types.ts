@@ -94,6 +94,11 @@ export interface ShopifySyncSummary {
   mode?: "incremental" | "full";
   /** Watermark used for this run (ISO), if incremental */
   incrementalFrom?: string | null;
+  /**
+   * Shopify ordersCount for this run’s filter (full catalog or incremental window).
+   * Used by the UI as “Loaded X of Y orders” — not a chunk index.
+   */
+  ordersTotal?: number | null;
 }
 
 export interface AbandonedCommerceOpportunity {
@@ -224,6 +229,7 @@ export function emptyShopifySyncSummary(): ShopifySyncSummary {
     complete: true,
     mode: "incremental",
     incrementalFrom: null,
+    ordersTotal: null,
   };
 }
 
@@ -248,6 +254,7 @@ export function mergeShopifySyncSummaries(
     complete: Boolean(b.complete),
     mode: b.mode ?? a.mode ?? "incremental",
     incrementalFrom: b.incrementalFrom ?? a.incrementalFrom ?? null,
+    ordersTotal: b.ordersTotal ?? a.ordersTotal ?? null,
   };
 }
 
