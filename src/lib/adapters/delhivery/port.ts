@@ -19,6 +19,8 @@ export type TrackedShipmentResult = {
   providerStatusType: string | null;
   normalizedStatus: NormalizedShipmentStatus;
   deliveredAt?: string | null;
+  /** PromisedDeliveryDate, else ExpectedDeliveryDate */
+  promisedDeliveryAt?: string | null;
   latestScanAt?: string | null;
   latestScanLocation?: string | null;
   syncStatus: ShipmentSyncStatus;
