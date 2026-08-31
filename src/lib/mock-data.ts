@@ -280,10 +280,10 @@ export const priorities: PriorityItem[] = [
   },
   {
     id: "pr2",
-    title: "Dispatch Kumon institutional order",
-    source: "Dispatch Orders",
+    title: "Fulfil Kumon institutional order",
+    source: "Fulfil Orders",
     urgency: "High",
-    href: "/dispatch",
+    href: "/fulfil",
   },
   {
     id: "pr3",
@@ -321,7 +321,7 @@ export const attentionItems: AttentionItem[] = [
     title: "ORD-8818 payment still pending",
     detail: "Kumon Learning Centre — ₹14,800",
     tone: "warning",
-    href: "/dispatch",
+    href: "/fulfil",
   },
   {
     id: "a4",

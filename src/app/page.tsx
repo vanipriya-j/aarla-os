@@ -253,8 +253,8 @@ export default async function HomePage() {
                 </li>
               ))}
             </ul>
-            <Link href="/dispatch" className="inline-block mt-3 text-sm text-aarla-red font-medium">
-              Open dispatch →
+            <Link href="/fulfil" className="inline-block mt-3 text-sm text-aarla-red font-medium">
+              Open fulfil →
             </Link>
           </div>
 
