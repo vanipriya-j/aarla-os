@@ -73,15 +73,17 @@ describe("role-based credentials + cookie sessions", () => {
   it("filters nav for crm to Customer Calls only", () => {
     const crm = navForRole("crm");
     expect(crm.showHome).toBe(false);
-    expect(crm.workflows).toHaveLength(0);
-    expect(crm.network).toHaveLength(0);
-    expect(crm.outreach.map((i) => i.href)).toEqual(["/customer-calls"]);
+    expect(crm.create).toHaveLength(0);
+    expect(crm.admin).toHaveLength(0);
+    expect(crm.operate.map((i) => i.href)).toEqual(["/customer-calls"]);
 
     const admin = navForRole("admin");
     expect(admin.showHome).toBe(true);
-    expect(admin.outreach.some((i) => i.href === "/diagnostics")).toBe(true);
-    expect(admin.finance.some((i) => i.href === "/finance/gst")).toBe(true);
-    expect(crm.finance).toHaveLength(0);
+    expect(admin.operate.some((i) => i.href === "/customer-calls")).toBe(true);
+    expect(admin.operate.some((i) => i.href === "/dispatch")).toBe(true);
+    expect(admin.admin.some((i) => i.href === "/diagnostics")).toBe(true);
+    expect(admin.admin.some((i) => i.href === "/finance/gst")).toBe(true);
+    expect(admin.create.length).toBeGreaterThan(0);
   });
 
   it("disables auth when no passwords are set", () => {

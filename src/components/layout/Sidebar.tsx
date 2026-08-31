@@ -7,6 +7,51 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { navForRole } from "@/lib/auth/nav";
 import { homePathForRole } from "@/lib/auth/roles";
+import type { NavItem } from "@/lib/navigation";
+
+function NavSection({
+  title,
+  items,
+  isActive,
+}: {
+  title: string;
+  items: NavItem[];
+  isActive: (href: string) => boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
+        {title}
+      </p>
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active = isActive(item.href);
+        return (
+          <Link
+            key={`${title}-${item.href}`}
+            href={item.href}
+            data-testid={
+              item.href === "/customer-calls"
+                ? "nav-customer-calls"
+                : item.href === "/finance/gst"
+                  ? "nav-gst-reconciliation"
+                  : undefined
+            }
+            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+              active
+                ? "bg-aarla-red text-white"
+                : "text-deep-navy hover:bg-pale-cream"
+            }`}
+          >
+            <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+            <span className="font-medium leading-snug">{item.label}</span>
+          </Link>
+        );
+      })}
+    </>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -47,113 +92,9 @@ export function Sidebar() {
           </Link>
         ) : null}
 
-        {nav.workflows.length > 0 ? (
-          <>
-            <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-              Workflows
-            </p>
-            {nav.workflows.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                    active
-                      ? "bg-aarla-red text-white"
-                      : "text-deep-navy hover:bg-pale-cream"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                  <span className="font-medium leading-snug">{item.label}</span>
-                </Link>
-              );
-            })}
-          </>
-        ) : null}
-
-        {nav.finance.length > 0 ? (
-          <>
-            <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-              Finance
-            </p>
-            {nav.finance.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  data-testid="nav-gst-reconciliation"
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                    active
-                      ? "bg-aarla-red text-white"
-                      : "text-deep-navy hover:bg-pale-cream"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                  <span className="font-medium leading-snug">{item.label}</span>
-                </Link>
-              );
-            })}
-          </>
-        ) : null}
-
-        {nav.network.length > 0 ? (
-          <>
-            <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-              Network
-            </p>
-            {nav.network.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                    active
-                      ? "bg-aarla-red text-white"
-                      : "text-deep-navy hover:bg-pale-cream"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                  <span className="font-medium leading-snug">{item.label}</span>
-                </Link>
-              );
-            })}
-          </>
-        ) : null}
-
-        {nav.outreach.length > 0 ? (
-          <>
-            <p className="px-3 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider text-charcoal/45">
-              Outreach
-            </p>
-            {nav.outreach.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  data-testid={
-                    item.href === "/customer-calls" ? "nav-customer-calls" : undefined
-                  }
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                    active
-                      ? "bg-aarla-red text-white"
-                      : "text-deep-navy hover:bg-pale-cream"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                  <span className="font-medium leading-snug">{item.label}</span>
-                </Link>
-              );
-            })}
-          </>
-        ) : null}
+        <NavSection title="Operate" items={nav.operate} isActive={isActive} />
+        <NavSection title="Create" items={nav.create} isActive={isActive} />
+        <NavSection title="Admin" items={nav.admin} isActive={isActive} />
       </nav>
 
       <div className="p-4 border-t border-border space-y-2">
