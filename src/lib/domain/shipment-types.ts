@@ -85,6 +85,26 @@ export interface ShipmentDiagnosticRow {
   lastSyncedAt: string;
   syncError: string | null;
   syncStatus: ShipmentSyncStatus;
+  /** Shopify fulfilment tracking URL, or Delhivery public track link from AWB */
+  trackingUrl: string | null;
+}
+
+/** Public Delhivery package page for an AWB (safe for clipboard / customer share). */
+export function delhiveryPublicTrackingUrl(awb: string): string | null {
+  const trimmed = awb.trim();
+  if (!trimmed) return null;
+  return `https://www.delhivery.com/track/package/${encodeURIComponent(trimmed)}`;
+}
+
+export function resolveShipmentTrackingUrl(
+  awb: string,
+  carrier: ShipmentCarrier,
+  fulfilmentTrackingUrl?: string | null,
+): string | null {
+  const fromFulfilment = fulfilmentTrackingUrl?.trim();
+  if (fromFulfilment) return fromFulfilment;
+  if (carrier === "delhivery") return delhiveryPublicTrackingUrl(awb);
+  return null;
 }
 
 export function formatShipmentStatusLabel(

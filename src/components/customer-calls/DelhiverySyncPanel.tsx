@@ -20,7 +20,7 @@ import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { formatAwbsTracked } from "@/lib/client/commerce-sync-progress";
 import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
-import { Hourglass, Loader2, Truck } from "lucide-react";
+import { Hourglass, Loader2, Link2, Truck } from "lucide-react";
 
 const PAGE_SIZE = 50;
 
@@ -108,6 +108,7 @@ export function DelhiverySyncPanel() {
   const [diagTotal, setDiagTotal] = useState(0);
   const [diagTotalPages, setDiagTotalPages] = useState(1);
   const [diagSort, setDiagSort] = useState<ShipmentDiagnosticSort>("last-synced");
+  const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [diagPending, startDiagTransition] = useTransition();
@@ -140,6 +141,20 @@ export function DelhiverySyncPanel() {
   function handleSortChange(next: ShipmentDiagnosticSort) {
     setDiagSort(next);
     loadDiagnostics(1, next);
+  }
+
+  async function copyTrackingUrl(awb: string, url: string) {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setCopiedAwb(awb);
+        window.setTimeout(() => {
+          setCopiedAwb((current) => (current === awb ? null : current));
+        }, 2000);
+      }
+    } catch {
+      // Clipboard denied — URL still available via browser share if needed.
+    }
   }
 
   async function handleSync() {
@@ -339,7 +354,8 @@ export function DelhiverySyncPanel() {
                     <th className="py-2 pr-4 font-medium">Last known status</th>
                     <th className="py-2 pr-4 font-medium">Promised</th>
                     <th className="py-2 pr-4 font-medium">Actual</th>
-                    <th className="py-2 font-medium">Ordered</th>
+                    <th className="py-2 pr-4 font-medium">Ordered</th>
+                    <th className="py-2 font-medium">Track</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -348,6 +364,8 @@ export function DelhiverySyncPanel() {
                       row.promisedDeliveryAt,
                       row.deliveredAt,
                     );
+                    const trackingUrl = row.trackingUrl;
+                    const copied = copiedAwb === row.awb;
                     return (
                       <tr
                         key={row.id}
@@ -386,7 +404,23 @@ export function DelhiverySyncPanel() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="py-2.5">{formatDate(row.orderedAt)}</td>
+                        <td className="py-2.5 pr-4">{formatDate(row.orderedAt)}</td>
+                        <td className="py-2.5">
+                          {trackingUrl ? (
+                            <button
+                              type="button"
+                              data-testid={`copy-tracking-${row.awb}`}
+                              onClick={() => void copyTrackingUrl(row.awb, trackingUrl)}
+                              className="inline-flex items-center gap-1.5 text-xs text-deep-navy hover:text-aarla-red"
+                              title={trackingUrl}
+                            >
+                              <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              {copied ? "Copied" : "Copy URL"}
+                            </button>
+                          ) : (
+                            <span className="text-charcoal/40">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

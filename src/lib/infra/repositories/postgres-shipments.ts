@@ -9,6 +9,7 @@ import type {
   ShipmentDiagnosticSort,
   ShipmentSyncStatus,
 } from "@/lib/domain/shipment-types";
+import { resolveShipmentTrackingUrl } from "@/lib/domain/shipment-types";
 import type {
   AppendEventsInput,
   ShipmentRepository,
@@ -297,10 +298,12 @@ export function createShipmentRepository(): ShipmentRepository {
         `select s.*,
                 o.order_number,
                 o.order_date,
-                c.name as customer_name
+                c.name as customer_name,
+                f.tracking_url as fulfilment_tracking_url
          from shipments s
          left join external_orders o on o.id = s.external_order_id
          left join external_customers c on c.id = o.external_customer_id
+         left join external_fulfilments f on f.id = s.external_fulfilment_id
          where s.organization_id = $1
          order by ${orderBy}
          limit $2 offset $3`,
@@ -329,6 +332,13 @@ export function createShipmentRepository(): ShipmentRepository {
             lastSyncedAt: s.lastSyncedAt,
             syncError: s.syncError,
             syncStatus: s.syncStatus,
+            trackingUrl: resolveShipmentTrackingUrl(
+              s.awb,
+              s.carrier,
+              r.fulfilment_tracking_url == null
+                ? null
+                : String(r.fulfilment_tracking_url),
+            ),
           };
         }),
         total,

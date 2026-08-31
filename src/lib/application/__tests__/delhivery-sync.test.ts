@@ -167,6 +167,7 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     expect(row?.normalizedStatus).toBe("in-transit");
     expect(row?.promisedDeliveryAt).toBe("2026-07-31T23:59:59.000Z");
     expect(row?.deliveredAt).toBeNull();
+    expect(row?.trackingUrl).toContain("AWB1002DEL");
 
     const byStatus = await getDelhiveryShipmentDiagnostics({
       repo: repo(),
