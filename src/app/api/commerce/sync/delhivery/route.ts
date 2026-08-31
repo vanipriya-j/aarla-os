@@ -42,7 +42,8 @@ export async function POST(request: Request) {
     }
 
     const data = await syncDelhiveryShipments({
-      offset: body.offset ?? 0,
+      // null/undefined → load saved resume offset; number → continue client loop
+      offset: body.offset === undefined ? null : body.offset,
     });
     return NextResponse.json({ ok: true, data });
   } catch (err) {

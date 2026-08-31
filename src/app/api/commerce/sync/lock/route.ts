@@ -7,6 +7,7 @@ import {
 import {
   saveShopifyAbandonedResumeCursor,
   saveShopifyOrdersResumeCursor,
+  saveDelhiveryResumeOffset,
   clearShopifyAbandonedWatermark,
   clearShopifyOrdersWatermark,
 } from "@/lib/application/commerce-sync-watermarks";
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       // Reset sync progress so the next Full re-sync does not skip unsaved orders.
       await saveShopifyOrdersResumeCursor(null);
       await saveShopifyAbandonedResumeCursor(null);
+      await saveDelhiveryResumeOffset(null);
       await clearShopifyOrdersWatermark();
       await clearShopifyAbandonedWatermark();
       return NextResponse.json({ ok: true, data: { cleared: true as const } });

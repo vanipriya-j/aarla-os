@@ -17,6 +17,7 @@ import {
   SHIPMENT_DIAGNOSTIC_SORTS,
 } from "@/lib/domain/shipment-types";
 import { syncDelhiveryChunkViaApi } from "@/lib/client/commerce-sync-api";
+import { runChunkWithAutoRetry } from "@/lib/client/commerce-sync-auto-retry";
 import { formatCommerceSyncFailure } from "@/lib/client/commerce-sync-errors";
 import { formatAwbsTracked } from "@/lib/client/commerce-sync-progress";
 import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPagination";
@@ -164,43 +165,49 @@ export function DelhiverySyncPanel() {
       return;
     }
 
+    const lockTokenRef = { current: token };
     setError(null);
-    setStatus("Counting AWBs to track…");
-    let offset: number | null = 0;
+    setStatus("Resuming Delhivery tracking from last saved offset…");
+    // null = server loads saved resume offset (does not restart at 0).
+    let offset: number | null = null;
     let total = emptyDelhiverySyncSummary();
     let guard = 0;
-    // 200 × 25 AWBs ≈ 5k — enough for full historical backfill.
-    const maxChunks = 200;
+    // 400 × 10 AWBs — enough for full historical backfill under small chunks.
+    const maxChunks = 400;
 
     try {
       while (guard < maxChunks) {
         guard += 1;
-        setStatus(
-          `${formatAwbsTracked(total.awbsProcessed ?? 0, total.uniqueAwbsTracked || null)}…`,
-        );
-        let res;
-        try {
-          res = await syncDelhiveryChunkViaApi(offset, token);
-        } catch (err) {
-          setError(formatCommerceSyncFailure(err));
-          setSummary(
-            (total.awbsProcessed ?? 0) > 0 || total.shipmentsCreated > 0 ? total : null,
-          );
-          setStatus(null);
-          return;
-        }
+        const res = await runChunkWithAutoRetry({
+          getToken: () => lockTokenRef.current,
+          setToken: (t) => {
+            lockTokenRef.current = t;
+          },
+          onRetry: (attempt, maxAttempts) => {
+            setError(null);
+            setStatus(
+              `Server timed out — unlocking and retrying ${attempt}/${maxAttempts}…`,
+            );
+          },
+          attempt: (tok) => syncDelhiveryChunkViaApi(offset, tok),
+        });
         if (!res.ok) {
           setError(res.error);
           setSummary(
             (total.awbsProcessed ?? 0) > 0 || total.shipmentsCreated > 0 ? total : null,
           );
-          setStatus(null);
+          setStatus(
+            "Stopped after automatic retries — click Update tracking only again to resume.",
+          );
           return;
         }
         total = mergeDelhiverySyncSummaries(total, res.data);
+        const through = res.data.complete
+          ? (res.data.uniqueAwbsTracked || total.awbsProcessed || 0)
+          : (res.data.nextOffset ?? total.awbsProcessed ?? 0);
         setSummary({ ...total });
         setStatus(
-          `${formatAwbsTracked(total.awbsProcessed ?? 0, total.uniqueAwbsTracked || null)}` +
+          `${formatAwbsTracked(through, total.uniqueAwbsTracked || null)}` +
             (res.data.hasMore ? "…" : " — done"),
         );
 
@@ -213,12 +220,12 @@ export function DelhiverySyncPanel() {
         if (offset == null) break;
       }
 
-      const processed = total.awbsProcessed ?? 0;
       const unique = total.uniqueAwbsTracked;
+      const through = total.complete ? unique : (offset ?? total.awbsProcessed ?? 0);
       setStatus(
         total.complete
-          ? `Delhivery sync complete — ${formatAwbsTracked(processed, unique)}.`
-          : `Delhivery sync paused — ${formatAwbsTracked(processed, unique)}. Click Sync again to continue.`,
+          ? `Delhivery sync complete — ${formatAwbsTracked(through, unique)}.`
+          : `Delhivery sync paused — ${formatAwbsTracked(through, unique)}. Click Update tracking only again.`,
       );
       const diag = await getDelhiveryShipmentDiagnosticsAction(1, PAGE_SIZE, diagSort);
       setDiagnosticsLoaded(true);
@@ -232,7 +239,7 @@ export function DelhiverySyncPanel() {
       setError(formatCommerceSyncFailure(err));
       setStatus(null);
     } finally {
-      await endSync(token);
+      await endSync(lockTokenRef.current);
     }
   }
 
@@ -240,7 +247,7 @@ export function DelhiverySyncPanel() {
     <div className="space-y-4" data-testid="delhivery-sync-panel">
       <FormSection
         title="Delhivery tracking"
-        description="Optional: refresh Delhivery tracking only (no Shopify pull). Prefer Sync on the Shopify stage for the full pipeline."
+        description="Optional: refresh Delhivery tracking only (no Shopify pull). Continues from the last saved AWB offset — does not restart at 0. Clear stuck lock resets. Prefer Sync on the Shopify stage for the full pipeline."
       >
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button

@@ -20,13 +20,21 @@ import {
   type ShipmentDiagnosticsPage,
 } from "@/lib/domain/shipment-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
+import {
+  getDelhiveryResumeOffset,
+  saveDelhiveryResumeOffset,
+} from "@/lib/application/commerce-sync-watermarks";
 
 export type SyncDelhiveryDeps = {
   connector?: DelhiveryConnector;
   repo?: ShipmentRepository;
-  /** Resume offset into the deduped AWB list */
-  offset?: number;
-  /** Max AWBs to track per invocation (default 25) */
+  /**
+   * Resume offset into the deduped AWB list.
+   * Pass null/undefined to load the saved resume offset (or start at 0).
+   * Pass an explicit number to continue a multi-chunk client loop.
+   */
+  offset?: number | null;
+  /** Max AWBs to track per invocation (default 10) */
   maxAwbs?: number;
 };
 
@@ -47,11 +55,11 @@ function resolveConnector(deps: SyncDelhiveryDeps): DelhiveryConnector {
 
 function defaultMaxAwbs(): number {
   const raw = process.env.DELHIVERY_SYNC_MAX_AWBS?.trim();
-  // Default 25 AWBs/chunk — matches Shopify page size and finishes full
-  // backfills with fewer Vercel round-trips (was 10).
-  const n = raw ? Number(raw) : 25;
-  if (!Number.isFinite(n) || n < 1) return 25;
-  return Math.min(Math.floor(n), 40);
+  // Default 10 AWBs/chunk — list+track+upsert must finish inside Vercel ~60s
+  // (remote Supabase RTT; was 25 and still timed out on ~300 AWBs).
+  const n = raw ? Number(raw) : 10;
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.min(Math.floor(n), 25);
 }
 
 type AwbLink = {
@@ -108,8 +116,14 @@ export async function syncDelhiveryShipments(
   const summary = emptyDelhiverySyncSummary();
   const repo = deps.repo ?? createShipmentRepository();
   const connector = resolveConnector(deps);
-  const offset = Math.max(0, Math.floor(deps.offset ?? 0));
   const maxAwbs = deps.maxAwbs ?? defaultMaxAwbs();
+
+  let offset: number;
+  if (deps.offset == null) {
+    offset = (await getDelhiveryResumeOffset()) ?? 0;
+  } else {
+    offset = Math.max(0, Math.floor(deps.offset));
+  }
 
   const fulfilments = await repo.listFulfilmentsWithOrders();
   const { evaluated, delhiveryFound, skipped, links } = buildAwbLinks(fulfilments);
@@ -121,11 +135,15 @@ export async function syncDelhiveryShipments(
   const awbs = dedupeAwbs(links.map((l) => l.awb)).sort();
   summary.uniqueAwbsTracked = awbs.length;
 
+  // If the AWB list shrank (fulfilments removed), clamp resume past the end.
+  if (offset > awbs.length) offset = 0;
+
   if (!awbs.length) {
     summary.awbsProcessed = 0;
     summary.hasMore = false;
     summary.nextOffset = null;
     summary.complete = true;
+    await saveDelhiveryResumeOffset(null);
     return summary;
   }
 
@@ -138,6 +156,7 @@ export async function syncDelhiveryShipments(
   summary.complete = !hasMore;
 
   if (!slice.length) {
+    await saveDelhiveryResumeOffset(null);
     return summary;
   }
 
@@ -146,7 +165,10 @@ export async function syncDelhiveryShipments(
 
   try {
     tracked = [];
-    for (const batch of chunkAwbs(slice, 30)) {
+    // Small API batches: Delhivery often returns a batch-level "does not exist"
+    // error with no ShipmentData — keep batches tight so one bad group can't
+    // burn a whole chunk's wall clock.
+    for (const batch of chunkAwbs(slice, 10)) {
       tracked.push(...(await connector.trackShipments(batch)));
     }
   } catch (err) {
@@ -156,6 +178,7 @@ export async function syncDelhiveryShipments(
     for (const awb of slice) {
       await repo.markSyncFailure("delhivery", awb, "error", message);
     }
+    await saveDelhiveryResumeOffset(hasMore ? nextOffset : null);
     return summary;
   }
 
@@ -177,7 +200,6 @@ export async function syncDelhiveryShipments(
     }
 
     try {
-      const existing = await repo.findByCarrierAwb("delhivery", result.awb);
       const upsert = await repo.upsertShipment({
         carrier: "delhivery",
         awb: result.awb,
@@ -199,10 +221,7 @@ export async function syncDelhiveryShipments(
       if (upsert.created) summary.shipmentsCreated += 1;
       else summary.shipmentsUpdated += 1;
 
-      const statusForTally = ok
-        ? upsert.shipment.normalizedStatus
-        : existing?.normalizedStatus ?? upsert.shipment.normalizedStatus;
-      if (ok) tallyNormalizedStatus(summary, statusForTally);
+      if (ok) tallyNormalizedStatus(summary, upsert.shipment.normalizedStatus);
 
       if (ok && result.scans?.length) {
         await repo.appendStatusEvents({
@@ -218,6 +237,9 @@ export async function syncDelhiveryShipments(
       );
     }
   }
+
+  // Persist resume so the next click continues instead of restarting at 0.
+  await saveDelhiveryResumeOffset(hasMore ? nextOffset : null);
 
   return summary;
 }
