@@ -3,6 +3,7 @@ import type {
   Shipment,
   ShipmentCarrier,
   ShipmentDiagnosticRow,
+  ShipmentDiagnosticSort,
   ShipmentSyncStatus,
 } from "@/lib/domain/shipment-types";
 import type { TrackedScan } from "@/lib/adapters/delhivery/port";
@@ -26,6 +27,7 @@ export type UpsertShipmentInput = {
   providerStatusType: string | null;
   normalizedStatus: NormalizedShipmentStatus;
   deliveredAt: string | null;
+  promisedDeliveryAt: string | null;
   latestScanAt: string | null;
   latestScanLocation: string | null;
   syncStatus: ShipmentSyncStatus;
@@ -57,6 +59,7 @@ export interface ShipmentRepository {
   listDiagnostics(options?: {
     page?: number;
     pageSize?: number;
+    sort?: ShipmentDiagnosticSort;
   }): Promise<{
     rows: ShipmentDiagnosticRow[];
     total: number;

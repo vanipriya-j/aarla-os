@@ -64,6 +64,7 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     const shipped = await repo().findByCarrierAwb("delhivery", "AWB1001DEL");
     expect(shipped?.normalizedStatus).toBe("delivered");
     expect(shipped?.deliveredAt).toBe("2026-07-22T12:18:25.000Z");
+    expect(shipped?.promisedDeliveryAt).toBe("2026-07-21T23:59:59.000Z");
   });
 
   it("4. duplicate AWBs are deduplicated before connector invocation", async () => {
@@ -164,6 +165,16 @@ describe.runIf(hasDb)("Delhivery shipment sync", () => {
     expect(row?.customerName).toBeTruthy();
     expect(row?.orderedAt).toBeTruthy();
     expect(row?.normalizedStatus).toBe("in-transit");
+    expect(row?.promisedDeliveryAt).toBe("2026-07-31T23:59:59.000Z");
+    expect(row?.deliveredAt).toBeNull();
+
+    const byStatus = await getDelhiveryShipmentDiagnostics({
+      repo: repo(),
+      sort: "status",
+    });
+    expect(byStatus.rows.length).toBeGreaterThan(0);
+    const statuses = byStatus.rows.map((r) => r.normalizedStatus);
+    expect(statuses).toEqual([...statuses].sort((a, b) => a.localeCompare(b)));
   });
 
   it("integration: read Shopify fulfilments → track → persist → re-sync", async () => {
