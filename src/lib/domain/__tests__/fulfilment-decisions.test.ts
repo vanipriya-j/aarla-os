@@ -4,6 +4,7 @@ import {
   recommendShippingMode,
   suggestFreebie,
   suggestPacking,
+  buildPackingActual,
 } from "@/lib/domain/fulfilment-decisions";
 import {
   isPastFulfilmentCutoff,
@@ -32,17 +33,31 @@ describe("fulfilment decisions", () => {
         { title: "Ganesha Tote Bag", quantity: 2 },
       ],
       {
-        cover: "Medium ecommerce cover",
+        cover: "Aarla white bag",
         materials: [
-          { code: "cover", label: "Medium ecommerce cover" },
-          { code: "tissue", label: "Tissue wrap" },
+          { code: "aarla-white-bag", label: "Aarla white bag" },
+          { code: "thank-you-card", label: "Thank-you card" },
         ],
-        note: "Tote + stickers fit medium; skip void fill",
+        note: "Store pickup — white bag only",
       },
     );
-    expect(s.cover).toBe("Medium ecommerce cover");
-    expect(s.learnedFromNote).toMatch(/Tote \+ stickers/);
-    expect(s.materials.some((m) => m.code === "tissue")).toBe(true);
+    expect(s.cover).toBe("Aarla white bag");
+    expect(s.learnedFromNote).toMatch(/Store pickup/);
+    expect(s.materials.map((m) => m.label)).toContain("Aarla white bag");
+  });
+
+  it("records free-form packing line items as-is", () => {
+    const actual = buildPackingActual({
+      items: ["Aarla white bag", "Large ecommerce cover", "Thank-you card"],
+      signature: "units:2to3|apparel+sticker",
+      reason: "Bagter + online style: bag inside cover",
+    });
+    expect(actual.cover).toBe("Aarla white bag");
+    expect(actual.materials.map((m) => m.label)).toEqual([
+      "Aarla white bag",
+      "Large ecommerce cover",
+      "Thank-you card",
+    ]);
   });
 
   it("suggests freebie only when studio stock exists", () => {

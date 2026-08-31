@@ -19,17 +19,28 @@ const COVER_OPTIONS = [
 
 export type PackingCoverOption = (typeof COVER_OPTIONS)[number];
 
-export const PACKING_COVER_OPTIONS = COVER_OPTIONS;
+/** Optional quick-adds only — packing change form is free-text line items. */
+export const PACKING_QUICK_ADD_ITEMS = [
+  "Aarla white bag",
+  "Small ecommerce cover",
+  "Medium ecommerce cover",
+  "Large ecommerce cover",
+  "Thank-you card",
+  "Bottle: bubble sleeve",
+  "Book: protective board",
+  "Tee: fold + butter paper",
+  "Extra void fill",
+  "Tissue wrap",
+  "Sticker / insert card",
+] as const;
 
-export const PACKING_EXTRA_MATERIAL_OPTIONS: Array<{ code: string; label: string }> = [
-  { code: "thank-you-card", label: "Thank-you card" },
-  { code: "bubble-sleeve", label: "Bottle: bubble sleeve" },
-  { code: "protective-board", label: "Book: protective board" },
-  { code: "butter-paper", label: "Tee: fold + butter paper" },
-  { code: "void-fill", label: "Extra void fill" },
-  { code: "tissue", label: "Tissue wrap" },
-  { code: "sticker-card", label: "Sticker / insert card" },
-];
+function slugCode(label: string): string {
+  const s = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return s || "custom";
+}
 
 function lineTags(title: string): string[] {
   const t = title.toLowerCase();
@@ -66,21 +77,19 @@ export function suggestPacking(
   learned?: { cover: string; materials: PackingSuggestion["materials"]; note?: string | null } | null,
 ): PackingSuggestion {
   const signature = packingLineSignature(lines);
-  if (learned?.cover) {
+  if (learned && ((learned.materials?.length ?? 0) > 0 || learned.cover)) {
     const materials =
       learned.materials?.length > 0
         ? learned.materials
-        : [
-            { code: "cover", label: learned.cover },
-            { code: "thank-you-card", label: "Thank-you card" },
-          ];
+        : [{ code: slugCode(learned.cover), label: learned.cover }];
+    const cover = learned.cover?.trim() || materials[0]?.label || "Custom pack";
     const notes = [
       learned.note
         ? `From earlier change: ${learned.note}`
         : "From earlier packing change on a similar order.",
     ];
     return {
-      cover: learned.cover,
+      cover,
       materials,
       notes,
       signature,
@@ -133,27 +142,26 @@ export function suggestPacking(
 }
 
 export function buildPackingActual(input: {
-  cover: string;
-  materialCodes: string[];
-  customMaterials?: string[];
+  /** Free-form packing line items, recorded as-is (bag, cover, inserts, …). */
+  items: string[];
   signature: string;
   reason: string;
 }): PackingSuggestion {
-  const materials: PackingSuggestion["materials"] = [
-    { code: "cover", label: input.cover },
-  ];
-  for (const opt of PACKING_EXTRA_MATERIAL_OPTIONS) {
-    if (input.materialCodes.includes(opt.code)) {
-      materials.push(opt);
-    }
-  }
-  for (const custom of input.customMaterials ?? []) {
-    const label = custom.trim();
+  const materials: PackingSuggestion["materials"] = [];
+  const seen = new Set<string>();
+  for (const raw of input.items) {
+    const label = raw.trim();
     if (!label) continue;
-    materials.push({ code: "custom", label });
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    materials.push({ code: slugCode(label), label });
+  }
+  if (materials.length === 0) {
+    throw new Error("Add at least one packing line item.");
   }
   return {
-    cover: input.cover,
+    cover: materials[0]!.label,
     materials,
     notes: [input.reason.trim()],
     signature: input.signature,

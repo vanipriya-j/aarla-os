@@ -32,12 +32,11 @@ import {
   type FulfilmentTab,
 } from "@/lib/domain/fulfilment-types";
 import {
-  PACKING_COVER_OPTIONS,
-  PACKING_EXTRA_MATERIAL_OPTIONS,
+  PACKING_QUICK_ADD_ITEMS,
   buildPackingActual,
   packingLineSignature,
 } from "@/lib/domain/fulfilment-decisions";
-import { CheckCircle2, Loader2, Package, RefreshCw, Truck } from "lucide-react";
+import { CheckCircle2, Loader2, Package, Plus, RefreshCw, Truck, X } from "lucide-react";
 
 export default function FulfilOrdersPage() {
   const [tab, setTab] = useState<FulfilmentTab>("stock-check");
@@ -66,9 +65,7 @@ export default function FulfilOrdersPage() {
   const [courierDraft, setCourierDraft] = useState("");
   const [shipMethod, setShipMethod] = useState<FulfilmentShippingMethod>("delhivery-surface");
   const [showPackChange, setShowPackChange] = useState(false);
-  const [packCover, setPackCover] = useState("Medium ecommerce cover");
-  const [packMaterials, setPackMaterials] = useState<string[]>(["thank-you-card"]);
-  const [packCustom, setPackCustom] = useState("");
+  const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
 
   const selectedRow = rows.find((r) => r.id === selectedId) ?? null;
@@ -118,11 +115,10 @@ export default function FulfilOrdersPage() {
             ? { label: p.data.freebie.label, estimatedCost: p.data.freebie.estimatedCost }
             : null,
         });
-        setPackCover(p.data.packing.cover);
-        setPackMaterials(
-          p.data.packing.materials
-            .map((m) => m.code)
-            .filter((c): c is string => Boolean(c) && c !== "cover"),
+        setPackItems(
+          p.data.packing.materials.map((m) => m.label).filter(Boolean).length > 0
+            ? p.data.packing.materials.map((m) => m.label)
+            : [p.data.packing.cover],
         );
       }
       if (d.data?.shippingMethod) setShipMethod(d.data.shippingMethod);
@@ -166,11 +162,10 @@ export default function FulfilOrdersPage() {
               ? { label: p.data.freebie.label, estimatedCost: p.data.freebie.estimatedCost }
               : null,
           });
-          setPackCover(p.data.packing.cover);
-          setPackMaterials(
-            p.data.packing.materials
-              .map((m) => m.code)
-              .filter((c): c is string => Boolean(c) && c !== "cover"),
+          setPackItems(
+            p.data.packing.materials.map((m) => m.label).filter(Boolean).length > 0
+              ? p.data.packing.materials.map((m) => m.label)
+              : [p.data.packing.cover],
           );
         }
       }
@@ -691,12 +686,14 @@ export default function FulfilOrdersPage() {
                             setShowPackChange(true);
                             setPackReason("");
                             if (packHint) {
-                              setPackCover(packHint.packing.cover);
-                              setPackMaterials(
-                                packHint.packing.materials
-                                  .map((m) => m.code)
-                                  .filter((c): c is string => Boolean(c) && c !== "cover"),
+                              const labels = packHint.packing.materials
+                                .map((m) => m.label)
+                                .filter(Boolean);
+                              setPackItems(
+                                labels.length > 0 ? labels : [packHint.packing.cover, ""],
                               );
+                            } else {
+                              setPackItems([""]);
                             }
                           }}
                         >
@@ -711,71 +708,93 @@ export default function FulfilOrdersPage() {
                         <p className="text-sm font-medium text-deep-navy">
                           What are you packing instead?
                         </p>
-                        <label className="block text-xs text-charcoal/70">
-                          Cover
-                          <select
-                            className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2"
-                            value={packCover}
-                            disabled={pending}
-                            onChange={(e) => setPackCover(e.target.value)}
-                          >
-                            {PACKING_COVER_OPTIONS.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <fieldset className="space-y-1">
-                          <legend className="text-xs text-charcoal/70">Materials</legend>
-                          {PACKING_EXTRA_MATERIAL_OPTIONS.map((m) => (
-                            <label
-                              key={m.code}
-                              className="flex items-center gap-2 text-sm text-charcoal/80"
-                            >
+                        <p className="text-xs text-charcoal/60">
+                          Free-form line items — ecommerce cover, Aarla white bag, both, inserts,
+                          whatever you used. Recorded as-is for next time.
+                        </p>
+                        <div className="space-y-2">
+                          {packItems.map((item, idx) => (
+                            <div key={`pack-item-${idx}`} className="flex gap-2 items-center">
                               <input
-                                type="checkbox"
-                                checked={packMaterials.includes(m.code)}
+                                className="flex-1 text-sm border border-border rounded-md px-3 py-2"
+                                value={item}
                                 disabled={pending}
+                                placeholder="e.g. Aarla white bag"
                                 onChange={(e) => {
-                                  setPackMaterials((prev) =>
-                                    e.target.checked
-                                      ? [...prev, m.code]
-                                      : prev.filter((c) => c !== m.code),
-                                  );
+                                  const next = [...packItems];
+                                  next[idx] = e.target.value;
+                                  setPackItems(next);
                                 }}
                               />
-                              {m.label}
-                            </label>
+                              <button
+                                type="button"
+                                disabled={pending || packItems.length <= 1}
+                                className="p-2 text-charcoal/50 hover:text-aarla-red disabled:opacity-30"
+                                aria-label="Remove line"
+                                onClick={() => {
+                                  setPackItems((prev) => prev.filter((_, i) => i !== idx));
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
                           ))}
-                        </fieldset>
-                        <label className="block text-xs text-charcoal/70">
-                          Other materials (optional)
-                          <input
-                            className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2"
-                            value={packCustom}
+                          <button
+                            type="button"
                             disabled={pending}
-                            placeholder="e.g. kraft tape + extra tissue"
-                            onChange={(e) => setPackCustom(e.target.value)}
-                          />
-                        </label>
+                            className="inline-flex items-center gap-1 text-xs text-deep-navy underline disabled:opacity-50"
+                            onClick={() => setPackItems((prev) => [...prev, ""])}
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Add line item
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {PACKING_QUICK_ADD_ITEMS.map((label) => (
+                            <button
+                              key={label}
+                              type="button"
+                              disabled={pending}
+                              className="text-[11px] px-2 py-1 rounded-full border border-border text-charcoal/70 hover:border-deep-navy/40 disabled:opacity-50"
+                              onClick={() => {
+                                setPackItems((prev) => {
+                                  const cleaned = prev.map((s) => s.trim()).filter(Boolean);
+                                  if (cleaned.some((s) => s.toLowerCase() === label.toLowerCase())) {
+                                    return cleaned.length > 0 ? cleaned : [""];
+                                  }
+                                  return [...cleaned, label];
+                                });
+                              }}
+                            >
+                              + {label}
+                            </button>
+                          ))}
+                        </div>
                         <label className="block text-xs text-charcoal/70">
                           What changed / why? (saved for next similar order)
                           <textarea
                             className="mt-1 w-full text-sm border border-border rounded-md px-3 py-2 min-h-[72px]"
                             value={packReason}
                             disabled={pending}
-                            placeholder="e.g. Tote + stickers fit medium cover; skip void fill"
+                            placeholder="e.g. Store pickup — Aarla white bag only; no ecommerce cover"
                             onChange={(e) => setPackReason(e.target.value)}
                           />
                         </label>
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            disabled={pending || packReason.trim().length < 3}
+                            disabled={
+                              pending ||
+                              packReason.trim().length < 3 ||
+                              packItems.every((s) => !s.trim())
+                            }
                             className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-50"
                             onClick={() => {
                               const reason = packReason.trim();
+                              const items = packItems.map((s) => s.trim()).filter(Boolean);
+                              if (items.length === 0) {
+                                setError("Add at least one packing line item.");
+                                return;
+                              }
                               if (reason.length < 3) {
                                 setError("Say what you changed so we can suggest it next time.");
                                 return;
@@ -789,12 +808,7 @@ export default function FulfilOrdersPage() {
                                   })),
                                 );
                               const actual = buildPackingActual({
-                                cover: packCover,
-                                materialCodes: packMaterials,
-                                customMaterials: packCustom
-                                  .split(",")
-                                  .map((s) => s.trim())
-                                  .filter(Boolean),
+                                items,
                                 signature,
                                 reason,
                               });
@@ -810,7 +824,7 @@ export default function FulfilOrdersPage() {
                                 setPackReason("");
                                 await applyDetailResult(
                                   res,
-                                  "Packing change saved — we’ll suggest this for similar orders.",
+                                  "Packing change saved — we’ll suggest these line items next time.",
                                 );
                               });
                             }}
@@ -1007,11 +1021,10 @@ export default function FulfilOrdersPage() {
                                 }
                               : null,
                           });
-                          setPackCover(p.data.packing.cover);
-                          setPackMaterials(
-                            p.data.packing.materials
-                              .map((m) => m.code)
-                              .filter((c): c is string => Boolean(c) && c !== "cover"),
+                          setPackItems(
+                            p.data.packing.materials.map((m) => m.label).filter(Boolean).length > 0
+                              ? p.data.packing.materials.map((m) => m.label)
+                              : [p.data.packing.cover],
                           );
                         }
                         const list = await listFulfilmentWorkbenchAction(tab);

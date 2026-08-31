@@ -667,8 +667,14 @@ export function createFulfilmentRepository(): FulfilmentRepository {
               materials?: Array<{ code?: string; label?: string }>;
             })
           : null;
-      const cover = actual?.cover?.trim();
-      if (!cover) return null;
+      const cover =
+        actual?.cover?.trim() ||
+        (Array.isArray(actual?.materials) && actual.materials[0]?.label
+          ? String(actual.materials[0].label)
+          : "");
+      if (!cover && !(Array.isArray(actual?.materials) && actual.materials.length > 0)) {
+        return null;
+      }
       const materials = Array.isArray(actual?.materials)
         ? actual!.materials
             .filter((m) => m && (m.label || m.code))
@@ -676,9 +682,9 @@ export function createFulfilmentRepository(): FulfilmentRepository {
               code: String(m.code ?? "custom"),
               label: String(m.label ?? m.code ?? "material"),
             }))
-        : [{ code: "cover", label: cover }];
+        : [{ code: "custom", label: cover }];
       return {
-        cover,
+        cover: cover || materials[0]!.label,
         materials,
         note:
           row.packing_override_note == null || String(row.packing_override_note).trim() === ""
