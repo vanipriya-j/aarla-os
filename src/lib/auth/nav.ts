@@ -1,36 +1,32 @@
 import type { AppRole } from "@/lib/auth/roles";
 import {
-  financeNav,
-  networkNav,
-  outreachNav,
-  primaryTiles,
+  adminNav,
+  createNav,
+  operateNav,
   type NavItem,
 } from "@/lib/navigation";
 
 export type NavSections = {
   showHome: boolean;
-  workflows: NavItem[];
-  finance: NavItem[];
-  network: NavItem[];
-  outreach: NavItem[];
+  operate: NavItem[];
+  create: NavItem[];
+  admin: NavItem[];
 };
 
-/** CRM only sees Customer Calls; Diagnostics stays admin. */
+/** CRM only sees Customer Calls; Admin sees full OS. */
 export function navForRole(role: AppRole): NavSections {
   if (role === "crm") {
     return {
       showHome: false,
-      workflows: [],
-      finance: [],
-      network: [],
-      outreach: outreachNav.filter((item) => item.href === "/customer-calls"),
+      operate: operateNav.filter((item) => item.href === "/customer-calls"),
+      create: [],
+      admin: [],
     };
   }
   return {
     showHome: true,
-    workflows: primaryTiles,
-    finance: financeNav,
-    network: networkNav,
-    outreach: outreachNav,
+    operate: operateNav,
+    create: createNav,
+    admin: adminNav,
   };
 }
