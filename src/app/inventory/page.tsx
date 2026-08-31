@@ -7,7 +7,10 @@ import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { DataTable } from "@/components/ui/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { StockMatrix } from "@/components/inventory/StockMatrix";
+import {
+  StockCatalogPanel,
+  type StockCatalogSelection,
+} from "@/components/inventory/StockCatalogPanel";
 import { VariantStockDetail } from "@/components/inventory/VariantStockDetail";
 import {
   TransferStockModal,
@@ -16,17 +19,8 @@ import {
 import { AdjustStockModal, type AdjustStockSubmitInput } from "@/components/inventory/AdjustStockModal";
 import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
 import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogSyncButton";
-import {
-  DEFAULT_INVENTORY_LOC,
-  buildApparelMatrix,
-  buildArtMatrix,
-  computeReplenishment,
-  deriveVariantTotals,
-  listVariantRows,
-  resolvePresentation,
-} from "@/lib/domain";
+import { DEFAULT_INVENTORY_LOC, computeReplenishment } from "@/lib/domain";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
-import type { Product, ReorderRule, VariantStockCell } from "@/lib/domain/types";
 
 type Tab = "stock" | "replenishment" | "locations" | "movements";
 
@@ -43,22 +37,6 @@ function tabFromParam(value: string | null): Tab {
   return TAB_ALIASES[value] ?? "stock";
 }
 
-/** Minimum-stock rule for a variant — falls back to a product-level (no-variant) rule. */
-function minQtyFor(rules: ReorderRule[], productId: string, variantId: string): number | undefined {
-  const exact = rules.find(
-    (r) => !r.partnerId && r.productId === productId && r.variantId === variantId,
-  );
-  if (exact) return exact.minQuantity;
-  const productLevel = rules.find((r) => !r.partnerId && r.productId === productId && !r.variantId);
-  return productLevel?.minQuantity;
-}
-
-interface StockSelection {
-  product: Product;
-  cell: VariantStockCell;
-  variantLabel: string;
-}
-
 interface TransferContext {
   productId: string;
   variantId?: string;
@@ -66,105 +44,6 @@ interface TransferContext {
   variantLabel?: string;
   defaultFromLocationId?: string;
   defaultToLocationId?: string;
-}
-
-interface ProductStockBlockProps {
-  product: Product;
-  movements: ReturnType<typeof useAppLedger>["movements"];
-  locations: ReturnType<typeof useAppLedger>["locations"];
-  reorderRules: ReorderRule[];
-  onSelectVariant: (selection: StockSelection) => void;
-}
-
-function ProductStockBlock({
-  product,
-  movements,
-  locations,
-  reorderRules,
-  onSelectVariant,
-}: ProductStockBlockProps) {
-  const cells = useMemo(
-    () => deriveVariantTotals(movements, product.id, product.variants, locations),
-    [movements, product, locations],
-  );
-  const presentation = resolvePresentation(product);
-  const lowStockVariantIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const cell of cells) {
-      const min = minQtyFor(reorderRules, product.id, cell.variantId);
-      if (min !== undefined && cell.total < min) set.add(cell.variantId);
-    }
-    return set;
-  }, [cells, reorderRules, product.id]);
-
-  const variantLabelFor = (variantId: string) =>
-    product.variants.find((v) => v.id === variantId)?.label ?? variantId;
-
-  const handleCellClick = (cell: VariantStockCell) => {
-    onSelectVariant({ product, cell, variantLabel: variantLabelFor(cell.variantId) });
-  };
-
-  return (
-    <div className="space-y-2">
-      <div>
-        <Link
-          href={`/products/${product.id}`}
-          className="font-medium text-deep-navy hover:text-aarla-red"
-        >
-          {product.title}
-        </Link>
-        <p className="text-xs text-charcoal/50">{product.sku}</p>
-      </div>
-
-      {presentation === "matrix-apparel" ? (
-        <StockMatrix
-          rows={buildApparelMatrix(product, cells)}
-          rowHeader="Colour"
-          columnHeader="Size"
-          onCellClick={handleCellClick}
-          lowStockVariantIds={lowStockVariantIds}
-        />
-      ) : presentation === "matrix-art" ? (
-        <StockMatrix
-          rows={buildArtMatrix(product, cells)}
-          rowHeader="Design"
-          columnHeader="Format"
-          onCellClick={handleCellClick}
-          lowStockVariantIds={lowStockVariantIds}
-        />
-      ) : (
-        <DataTable
-          rows={listVariantRows(product, cells)}
-          rowKey={(r) => r.variantId}
-          onRowClick={(r) => (r.cell ? handleCellClick(r.cell) : undefined)}
-          columns={[
-            {
-              key: "variant",
-              header: "Variant",
-              render: (r) => <span className="font-medium text-deep-navy">{r.label}</span>,
-            },
-            { key: "sku", header: "SKU", render: (r) => r.sku },
-            { key: "studio", header: "Studio", render: (r) => String(r.cell?.studio ?? 0) },
-            { key: "partner", header: "Partner", render: (r) => String(r.cell?.partner ?? 0) },
-            { key: "channel", header: "Channel", render: (r) => String(r.cell?.channel ?? 0) },
-            { key: "damaged", header: "Damaged", render: (r) => String(r.cell?.damaged ?? 0) },
-            {
-              key: "total",
-              header: "Total",
-              render: (r) => (
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-deep-navy">{r.cell?.total ?? 0}</span>
-                  {lowStockVariantIds.has(r.variantId) ? (
-                    <StatusChip label="Low stock" tone="danger" />
-                  ) : null}
-                </div>
-              ),
-            },
-          ]}
-        />
-      )}
-    </div>
-  );
 }
 
 function InventoryInner() {
@@ -189,7 +68,7 @@ function InventoryInner() {
     if (typeof window !== "undefined") window.location.reload();
   };
 
-  const [selection, setSelection] = useState<StockSelection | null>(null);
+  const [selection, setSelection] = useState<StockCatalogSelection | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [transferCtx, setTransferCtx] = useState<TransferContext | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -205,16 +84,6 @@ function InventoryInner() {
     { id: "locations", label: "Locations" },
     { id: "movements", label: "Movement Ledger" },
   ];
-
-  const productsByCategory = useMemo(() => {
-    const map = new Map<string, Product[]>();
-    for (const p of products) {
-      const arr = map.get(p.category) ?? [];
-      arr.push(p);
-      map.set(p.category, arr);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [products]);
 
   const replenishmentItems = useMemo(
     () =>
@@ -236,7 +105,7 @@ function InventoryInner() {
     setTimeout(() => setToast(null), 2800);
   };
 
-  const openDetail = (sel: StockSelection) => {
+  const openDetail = (sel: StockCatalogSelection) => {
     setSelection(sel);
     setDetailOpen(true);
   };
@@ -352,7 +221,7 @@ function InventoryInner() {
         ) : null}
 
         {tab === "stock" ? (
-          <div className="space-y-8">
+          <div className="space-y-4">
             {hydrated && !products.length ? (
               <div className="rounded-xl border border-border bg-pale-cream p-5 space-y-3 text-sm text-charcoal/70">
                 <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
@@ -362,30 +231,15 @@ function InventoryInner() {
                 </p>
                 <ShopifyCatalogSyncButton onDone={reload} />
               </div>
-            ) : null}
-            {productsByCategory.map(([category, categoryProducts]) => (
-              <section key={category} className="space-y-4">
-                <h2 className="font-display text-xl text-deep-navy">{category}</h2>
-                <div className="space-y-6">
-                  {categoryProducts.map((product) => (
-                    <ProductStockBlock
-                      key={product.id}
-                      product={product}
-                      movements={movements}
-                      locations={locations}
-                      reorderRules={reorderRules}
-                      onSelectVariant={openDetail}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-            <div className="card-surface-pale p-4 text-sm text-charcoal/65">
-              Signature journey:{" "}
-              <Link href="/products/prod-kolam-bottle" className="text-aarla-red font-medium">
-                Kolam Bottle →
-              </Link>
-            </div>
+            ) : (
+              <StockCatalogPanel
+                products={products}
+                movements={movements}
+                locations={locations}
+                reorderRules={reorderRules}
+                onSelectVariant={openDetail}
+              />
+            )}
           </div>
         ) : null}
 

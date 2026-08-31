@@ -495,9 +495,16 @@ export class FixtureShopifyConnector implements ShopifyConnector {
     if (this.options.failHard) {
       throw new Error(this.options.partialError || "Shopify Admin API unavailable");
     }
-    void options;
+    let products = structuredClone(FIXTURE_PRODUCTS);
+    const match = options.query?.match(/updated_at:>=?'([^']+)'/);
+    if (match?.[1]) {
+      const afterMs = new Date(match[1]).getTime();
+      if (Number.isFinite(afterMs)) {
+        products = products.filter((p) => new Date(p.updatedAt).getTime() >= afterMs);
+      }
+    }
     return {
-      products: structuredClone(FIXTURE_PRODUCTS),
+      products,
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,

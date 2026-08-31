@@ -35,6 +35,19 @@ export {
 export type { ApparelMatrixRow, ArtMatrixRow, VariantRow } from "./inventory-presentation";
 export { computeReplenishment } from "./inventory-replenishment";
 export type { ReplenishmentItem } from "./inventory-replenishment";
+export {
+  STOCK_TABLE_PAGE_SIZE,
+  buildStockTableRows,
+  filterStockTableRows,
+  paginateStockTableRows,
+  sortStockTableRows,
+  uniqueStockCategories,
+} from "./inventory-stock-table";
+export type {
+  StockSortKey,
+  StockStockFilter,
+  StockTableRow,
+} from "./inventory-stock-table";
 
 export function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", {
