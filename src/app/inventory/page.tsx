@@ -396,9 +396,25 @@ function InventoryInner() {
         {tab === "stock" ? (
           <div className="space-y-8">
             {hydrated && !products.length ? (
-              <p className="text-sm text-charcoal/55">
-                No products in the catalog yet. Run /setup if this environment is empty.
-              </p>
+              <div className="rounded-xl border border-border bg-pale-cream p-5 space-y-2 text-sm text-charcoal/70">
+                <p className="font-medium text-deep-navy">Catalog is empty</p>
+                <p>
+                  The ledger loaded, but there are no products
+                  {locations.length || movements.length
+                    ? ` (locations: ${locations.length}, movements: ${movements.length})`
+                    : " (and no locations/movements either)"}
+                  .
+                </p>
+                <p>
+                  Apply migrations and restore catalog via{" "}
+                  <Link href="/setup" className="text-aarla-red font-medium">
+                    /setup
+                  </Link>
+                  {locations.length || movements.length
+                    ? " — leave seed unchecked if you only need the new Inventory OS tables."
+                    : " with seed enabled if this environment was wiped."}
+                </p>
+              </div>
             ) : null}
             {productsByCategory.map(([category, categoryProducts]) => (
               <section key={category} className="space-y-4">
