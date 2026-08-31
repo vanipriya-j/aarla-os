@@ -14,7 +14,11 @@ import {
   type TransferStockSubmitInput,
 } from "@/components/inventory/TransferStockModal";
 import { AdjustStockModal, type AdjustStockSubmitInput } from "@/components/inventory/AdjustStockModal";
-import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
+import { SalesPaceBoard } from "@/components/inventory/SalesPaceBoard";
+import { AgingBoard } from "@/components/inventory/AgingBoard";
+import { PartnerStockBoard, type PartnerStockRow } from "@/components/inventory/PartnerStockBoard";
+import { ReconcileBoard } from "@/components/inventory/ReconcileBoard";
+import { HealthReplenishmentBoard } from "@/components/inventory/HealthReplenishmentBoard";
 import {
   DEFAULT_INVENTORY_LOC,
   buildApparelMatrix,
@@ -27,18 +31,39 @@ import {
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
 import type { Product, ReorderRule, VariantStockCell } from "@/lib/domain/types";
 
-type Tab = "stock" | "replenishment" | "locations" | "movements";
+type Tab =
+  | "stock"
+  | "pace"
+  | "replenishment"
+  | "aging"
+  | "locations"
+  | "partners"
+  | "transfers"
+  | "reconcile"
+  | "movements";
 
 const TAB_ALIASES: Record<string, Tab> = {
   products: "stock",
   batches: "locations",
+  "sales-pace": "pace",
+  "partner-stock": "partners",
 };
+
+const VALID_TABS: Tab[] = [
+  "stock",
+  "pace",
+  "replenishment",
+  "aging",
+  "locations",
+  "partners",
+  "transfers",
+  "reconcile",
+  "movements",
+];
 
 function tabFromParam(value: string | null): Tab {
   if (!value) return "stock";
-  if (value === "stock" || value === "replenishment" || value === "locations" || value === "movements") {
-    return value;
-  }
+  if ((VALID_TABS as string[]).includes(value)) return value as Tab;
   return TAB_ALIASES[value] ?? "stock";
 }
 
@@ -107,7 +132,7 @@ function ProductStockBlock({
     <div className="space-y-2">
       <div>
         <Link
-          href={`/products/${product.id}`}
+          href={`/inventory/products/${product.id}`}
           className="font-medium text-deep-navy hover:text-aarla-red"
         >
           {product.title}
@@ -195,9 +220,14 @@ function InventoryInner() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "stock", label: "Stock" },
+    { id: "pace", label: "Sales Pace" },
     { id: "replenishment", label: "Replenishment" },
+    { id: "aging", label: "Aging" },
     { id: "locations", label: "Locations" },
-    { id: "movements", label: "Movement Ledger" },
+    { id: "partners", label: "Partner Stock" },
+    { id: "transfers", label: "Transfers" },
+    { id: "reconcile", label: "Reconcile" },
+    { id: "movements", label: "Movements" },
   ];
 
   const productsByCategory = useMemo(() => {
@@ -270,6 +300,25 @@ function InventoryInner() {
     });
   };
 
+  const openTransferFromPartner = (row: PartnerStockRow) => {
+    setTransferCtx({
+      productId: row.productId,
+      variantId: row.variantId,
+      productTitle: `${row.productTitle} — ${row.variantLabel}`,
+      variantLabel: row.variantLabel,
+      defaultFromLocationId: row.locationId,
+      defaultToLocationId: DEFAULT_INVENTORY_LOC.studio,
+    });
+  };
+
+  const transferMovements = useMemo(
+    () =>
+      [...movements]
+        .filter((m) => m.movementType === "Transfer")
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [movements],
+  );
+
   const handleTransferConfirm = async (input: TransferStockSubmitInput) => {
     if (!transferCtx) return;
     const result = await transferStock({
@@ -316,7 +365,7 @@ function InventoryInner() {
     <>
       <Header
         title="Inventory"
-        subtitle="Balances are derived from the Stock Movement Ledger — the single source of truth."
+        subtitle="Operating inventory — ledger balances, sales pace, aging, partner stock, and reconciliation."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         <div className="flex flex-wrap gap-2">
@@ -364,39 +413,26 @@ function InventoryInner() {
               </section>
             ))}
             <div className="card-surface-pale p-4 text-sm text-charcoal/65">
-              Signature journey:{" "}
-              <Link href="/products/prod-kolam-bottle" className="text-aarla-red font-medium">
+              Open a product for By Size drill-down, pace, and DO_NOT_REPLENISH — e.g.{" "}
+              <Link href="/inventory/products/prod-kolam-bottle" className="text-aarla-red font-medium">
                 Kolam Bottle →
               </Link>
             </div>
           </div>
         ) : null}
 
+        {tab === "pace" ? <SalesPaceBoard /> : null}
+
         {tab === "replenishment" ? (
-          <div className="space-y-8">
-            <ReplenishmentPanel
-              title="A. Aarla Low Stock"
-              description="Studio stock has fallen below the configured minimum for these variants."
-              items={aarlaLow}
-              onTransfer={openTransferForReplenishment}
-              emptyMessage="Studio stock is healthy against every reorder rule."
-            />
-            <ReplenishmentPanel
-              title="B. Partner Replenishment Needed"
-              description="A specific partner's stock is below its partner-scoped minimum."
-              items={partnerNeed}
-              onTransfer={openTransferForReplenishment}
-              emptyMessage="No partner is below its replenishment threshold."
-            />
-            <ReplenishmentPanel
-              title="C. Global Low Stock"
-              description="Studio + partner stock combined is below the minimum — Shopify's reserved pool is never double-counted here."
-              items={globalLow}
-              onTransfer={openTransferForReplenishment}
-              emptyMessage="Global on-hand stock clears every reorder rule."
-            />
-          </div>
+          <HealthReplenishmentBoard
+            aarlaLow={aarlaLow}
+            partnerNeed={partnerNeed}
+            globalLow={globalLow}
+            onTransfer={openTransferForReplenishment}
+          />
         ) : null}
+
+        {tab === "aging" ? <AgingBoard /> : null}
 
         {tab === "locations" ? (
           <div className="space-y-8">
@@ -465,6 +501,62 @@ function InventoryInner() {
             </div>
           </div>
         ) : null}
+
+        {tab === "partners" ? (
+          <PartnerStockBoard
+            products={products}
+            movements={movements}
+            locations={locations}
+            onRecallTransfer={openTransferFromPartner}
+          />
+        ) : null}
+
+        {tab === "transfers" ? (
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-display text-xl text-deep-navy">Transfers</h2>
+              <p className="text-sm text-charcoal/60 mt-0.5">
+                Ledger transfer history. Start a new move from Stock, Partner Stock, or Replenishment.
+              </p>
+            </div>
+            <DataTable
+              rows={transferMovements}
+              rowKey={(r) => r.id}
+              emptyMessage="No transfers posted yet."
+              columns={[
+                { key: "date", header: "Date", render: (r) => r.date },
+                {
+                  key: "product",
+                  header: "Product",
+                  render: (r) => (
+                    <Link
+                      href={`/inventory/products/${r.productId}`}
+                      className="hover:text-aarla-red"
+                    >
+                      {productTitle(r.productId)}
+                    </Link>
+                  ),
+                },
+                {
+                  key: "variant",
+                  header: "Variant",
+                  render: (r) =>
+                    r.variantId
+                      ? products
+                          .find((p) => p.id === r.productId)
+                          ?.variants.find((v) => v.id === r.variantId)?.label ?? r.variantId
+                      : "—",
+                },
+                { key: "qty", header: "Qty", render: (r) => String(r.quantity) },
+                { key: "from", header: "From", render: (r) => locationName(r.fromLocationId) },
+                { key: "to", header: "To", render: (r) => locationName(r.toLocationId) },
+                { key: "ref", header: "Reference", render: (r) => r.reference },
+              ]}
+            />
+          </section>
+        ) : null}
+
+        {tab === "reconcile" ? <ReconcileBoard /> : null}
 
         {tab === "movements" ? (
           <DataTable

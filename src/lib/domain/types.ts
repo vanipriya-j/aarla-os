@@ -75,6 +75,9 @@ export interface Product {
   designedDate?: string;
   /** Optional override for how Inventory renders this product's variants. */
   inventoryPresentation?: InventoryPresentation;
+  isSeasonal?: boolean;
+  seasonLabel?: string | null;
+  seasonActiveMonths?: number[];
 }
 
 /** Canonical supply-side vendor. */

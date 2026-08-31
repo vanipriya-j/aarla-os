@@ -77,7 +77,7 @@ async function codesByUuids(
 function createProductRepo(q: QueryFn): ProductRepository {
   return {
     async list(): Promise<Product[]> {
-      const products = await q<{
+      type ProductRow = {
         code: string;
         sku: string;
         title: string;
@@ -91,13 +91,31 @@ function createProductRepo(q: QueryFn): ProductRepository {
         idea_origin: string | null;
         designed_date: string | Date | null;
         inventory_presentation: string;
+        is_seasonal?: boolean;
+        season_label?: string | null;
+        season_active_months?: number[] | null;
         id: string;
-      }>(
-        `select id, code, sku, title, category, world, story, selling_price, cost,
-                velocity, status, idea_origin, designed_date, inventory_presentation
-         from products where organization_id = $1 order by title`,
-        [ORG_ID],
-      );
+      };
+
+      let products: ProductRow[];
+      try {
+        products = await q<ProductRow>(
+          `select id, code, sku, title, category, world, story, selling_price, cost,
+                  velocity, status, idea_origin, designed_date, inventory_presentation,
+                  coalesce(is_seasonal, false) as is_seasonal,
+                  season_label,
+                  coalesce(season_active_months, '{}'::integer[]) as season_active_months
+           from products where organization_id = $1 order by title`,
+          [ORG_ID],
+        );
+      } catch {
+        products = await q<ProductRow>(
+          `select id, code, sku, title, category, world, story, selling_price, cost,
+                  velocity, status, idea_origin, designed_date, inventory_presentation
+           from products where organization_id = $1 order by title`,
+          [ORG_ID],
+        );
+      }
       if (!products.length) return [];
       const variants = await q<{
         product_id: string;
@@ -136,6 +154,11 @@ function createProductRepo(q: QueryFn): ProductRepository {
         designedDate: p.designed_date ? dateStr(p.designed_date) : undefined,
         inventoryPresentation: (p.inventory_presentation ??
           "auto") as Product["inventoryPresentation"],
+        isSeasonal: Boolean(p.is_seasonal),
+        seasonLabel: p.season_label ?? null,
+        seasonActiveMonths: Array.isArray(p.season_active_months)
+          ? p.season_active_months.map(Number)
+          : [],
       }));
     },
     async getByCode(code: string): Promise<Product | null> {
