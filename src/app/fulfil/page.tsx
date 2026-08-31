@@ -105,7 +105,7 @@ export default function FulfilOrdersPage() {
     <>
       <Header
         title="Fulfil Orders"
-        subtitle="Recent open Shopify orders (last 14 days) — stock check → pick → pack → ship → handover."
+        subtitle="Same set as Shopify: Unfulfilled + Partially fulfilled → stock check → pick → pack → ship → handover."
       />
 
       <div className="px-6 py-6 space-y-5" data-testid="fulfil-orders-page">
@@ -126,7 +126,7 @@ export default function FulfilOrdersPage() {
                 ];
                 if (res.data.archived > 0) {
                   parts.push(
-                    `cleared ${res.data.archived} out-of-window / already-shipped`,
+                    `cleared ${res.data.archived} already fulfilled`,
                   );
                 }
                 setStatus(`${parts.join("; ")}.`);

@@ -2,7 +2,7 @@ import type { QueryResultRow } from "pg";
 import { ORG_ID } from "@/lib/infra/db/ids";
 import { query as poolQuery } from "@/lib/infra/db/pool";
 import {
-  FULFILMENT_OPEN_ORDER_LOOKBACK_DAYS,
+  SHOPIFY_OPEN_FULFILMENT_STATUSES,
   statusesForTab,
   type FulfilmentStatus,
   type FulfilmentTab,
@@ -250,9 +250,9 @@ export function createFulfilmentRepository(): FulfilmentRepository {
 
     getDetail,
 
-    async listUnlinkedValidExternalOrders(limit = 50) {
-      // Daily packing queue — recent explicitly-open Shopify orders only.
-      // Do not walk the full sync history (oldest-first flooded Stock Check).
+    async listUnlinkedValidExternalOrders(limit = 200) {
+      // Match Shopify Admin filter: Fulfillment status is Unfulfilled, Partially fulfilled.
+      const openStatuses = [...SHOPIFY_OPEN_FULFILMENT_STATUSES];
       const rows = await q(
         `select o.id, o.order_number, o.order_date, o.total_amount,
                 o.financial_status, o.fulfilment_status, c.name as customer_name
@@ -264,36 +264,10 @@ export function createFulfilmentRepository(): FulfilmentRepository {
            and o.is_valid = true
            and o.cancelled_at is null
            and fo.id is null
-           and o.order_date >= (now() - ($3::int * interval '1 day'))
-           and lower(coalesce(o.fulfilment_status, '')) in (
-             'unfulfilled',
-             'partial',
-             'partially_fulfilled',
-             'partially fulfilled',
-             'in_progress',
-             'in progress',
-             'open',
-             'scheduled',
-             'on_hold',
-             'on hold',
-             'pending_fulfillment',
-             'pending fulfilment'
-           )
-           and not exists (
-             select 1 from shipments s
-             where s.external_order_id = o.id
-           )
-           and not exists (
-             select 1 from external_fulfilments ef
-             where ef.external_order_id = o.id
-               and (
-                 ef.tracking_number is not null
-                 or lower(coalesce(ef.fulfilment_status, '')) in ('success', 'closed', 'fulfilled')
-               )
-           )
+           and lower(coalesce(o.fulfilment_status, '')) = any($3::text[])
          order by o.order_date desc
          limit $2`,
-        [ORG_ID, limit, FULFILMENT_OPEN_ORDER_LOOKBACK_DAYS],
+        [ORG_ID, limit, openStatuses],
       );
       return rows.map((r) => ({
         id: String(r.id),
@@ -310,7 +284,8 @@ export function createFulfilmentRepository(): FulfilmentRepository {
     },
 
     async archiveAlreadyShippedStockChecks() {
-      // Clear mistaken historical pulls from Stock Check (full history / already in courier).
+      // Drop early-queue rows that are no longer Unfulfilled / Partially fulfilled in Shopify.
+      const openStatuses = [...SHOPIFY_OPEN_FULFILMENT_STATUSES];
       const rows = await q<{ id: string; order_number: string }>(
         `select fo.id, o.order_number
          from fulfilment_orders fo
@@ -319,28 +294,15 @@ export function createFulfilmentRepository(): FulfilmentRepository {
            and fo.status in ('received', 'stock-check')
            and (
              o.cancelled_at is not null
-             or lower(coalesce(o.fulfilment_status, '')) in ('fulfilled', 'success')
-             or o.order_date < (now() - ($2::int * interval '1 day'))
-             or exists (
-               select 1 from shipments s
-               where s.external_order_id = o.id
-             )
-             or exists (
-               select 1 from external_fulfilments ef
-               where ef.external_order_id = o.id
-                 and (
-                   ef.tracking_number is not null
-                   or lower(coalesce(ef.fulfilment_status, '')) in ('success', 'closed', 'fulfilled')
-                 )
-             )
+             or lower(coalesce(o.fulfilment_status, '')) <> all($2::text[])
            )`,
-        [ORG_ID, FULFILMENT_OPEN_ORDER_LOOKBACK_DAYS],
+        [ORG_ID, openStatuses],
       );
       for (const row of rows) {
         await q(
           `update fulfilment_orders
            set status = 'dispatched',
-               notes = coalesce(notes || E'\\n', '') || 'Auto-archived: not in current open-fulfil window (shipped, cancelled, or older than lookback).',
+               notes = coalesce(notes || E'\\n', '') || 'Auto-archived: Shopify fulfilment status is no longer Unfulfilled / Partially fulfilled.',
                handed_over_at = coalesce(handed_over_at, now())
            where id = $1`,
           [row.id],
@@ -350,7 +312,7 @@ export function createFulfilmentRepository(): FulfilmentRepository {
            values ($1, 'auto-archived', $2, 'system')`,
           [
             row.id,
-            `Auto-archived #${row.order_number}: not an open fulfil job for the current packing window.`,
+            `Auto-archived #${row.order_number}: not Unfulfilled/Partially fulfilled in Shopify.`,
           ],
         );
       }

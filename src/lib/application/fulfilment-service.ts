@@ -231,7 +231,7 @@ export async function getFulfilmentDetail(id: string): Promise<FulfilmentOrderDe
   return detail;
 }
 
-export async function syncIncomingOrdersIntoFulfilment(limit = 80): Promise<{
+export async function syncIncomingOrdersIntoFulfilment(limit = 200): Promise<{
   created: number;
   archived: number;
   ids: string[];
