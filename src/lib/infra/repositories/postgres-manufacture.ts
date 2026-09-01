@@ -42,11 +42,91 @@ let schemaReady = false;
 export async function ensureManufactureSchema(): Promise<void> {
   if (schemaReady) return;
   await ensureTenantBasicsViaPool();
-  // Columns / tables come from migration; best-effort alter for hot path.
-  await query(`alter table vendors add column if not exists how_they_work text not null default ''`).catch(
-    () => undefined,
-  );
+  // Best-effort so Save Workflow works even before a full /setup migrate.
+  const alters = [
+    `alter table vendors add column if not exists business_name text not null default ''`,
+    `alter table vendors add column if not exists contact_person text not null default ''`,
+    `alter table vendors add column if not exists phone text not null default ''`,
+    `alter table vendors add column if not exists whatsapp_number text not null default ''`,
+    `alter table vendors add column if not exists email text not null default ''`,
+    `alter table vendors add column if not exists address text not null default ''`,
+    `alter table vendors add column if not exists gstin text not null default ''`,
+    `alter table vendors add column if not exists what_they_make text not null default ''`,
+    `alter table vendors add column if not exists payment_terms text not null default ''`,
+    `alter table vendors add column if not exists advance_percentage numeric(5,2)`,
+    `alter table vendors add column if not exists notes text not null default ''`,
+    `alter table vendors add column if not exists is_active boolean not null default true`,
+    `alter table vendors add column if not exists how_they_work text not null default ''`,
+    `alter table vendors add column if not exists workflow_template_id uuid`,
+    `alter table vendors add column if not exists stated_lead_time_days integer`,
+    `alter table vendors add column if not exists internal_buffer_days integer not null default 21`,
+  ];
+  for (const sql of alters) {
+    await query(sql).catch(() => undefined);
+  }
+  await query(`
+    create table if not exists workflow_templates (
+      id uuid primary key default gen_random_uuid(),
+      organization_id uuid not null references organizations(id) on delete cascade,
+      code text not null,
+      name text not null,
+      vendor_id uuid references vendors(id) on delete set null,
+      source_description text not null default '',
+      vendor_lead_time_days integer,
+      internal_buffer_days integer not null default 21,
+      advance_percentage numeric(5,2),
+      status text not null default 'draft'
+        check (status in ('draft', 'approved', 'archived')),
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (organization_id, code)
+    )`).catch(() => undefined);
+  await query(`
+    create table if not exists workflow_template_steps (
+      id uuid primary key default gen_random_uuid(),
+      workflow_template_id uuid not null references workflow_templates(id) on delete cascade,
+      sequence integer not null,
+      name text not null,
+      step_type text not null,
+      responsibility text not null default 'aarla'
+        check (responsibility in ('aarla', 'vendor', 'either')),
+      required boolean not null default true,
+      payment_percentage numeric(5,2),
+      requires_approval boolean not null default false,
+      requires_attachment boolean not null default false,
+      requires_vendor_confirmation boolean not null default false,
+      updates_order_status text,
+      notes text not null default '',
+      unique (workflow_template_id, sequence)
+    )`).catch(() => undefined);
   schemaReady = true;
+}
+
+export async function getWorkflowTemplateForVendor(
+  vendorCode: string,
+): Promise<WorkflowTemplate | null> {
+  await ensureManufactureSchema();
+  const rows = await query<{ code: string }>(
+    `select wt.code
+     from vendors v
+     join workflow_templates wt on wt.id = v.workflow_template_id
+     where v.organization_id = $1 and v.code = $2
+     limit 1`,
+    [ORG_ID, vendorCode],
+  ).catch(() => [] as { code: string }[]);
+  if (rows[0]?.code) return getWorkflowTemplateByCode(rows[0].code);
+  // Fallback: latest approved template for this vendor
+  const fallback = await query<{ code: string }>(
+    `select wt.code
+     from workflow_templates wt
+     join vendors v on v.id = wt.vendor_id
+     where wt.organization_id = $1 and v.code = $2 and wt.status = 'approved'
+     order by wt.updated_at desc
+     limit 1`,
+    [ORG_ID, vendorCode],
+  ).catch(() => [] as { code: string }[]);
+  if (!fallback[0]?.code) return null;
+  return getWorkflowTemplateByCode(fallback[0].code);
 }
 
 function mapVendor(r: Record<string, unknown>): MfgVendorProfile {

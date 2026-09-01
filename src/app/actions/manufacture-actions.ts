@@ -20,6 +20,7 @@ import {
   getMfgVendor,
   getVendorOrder,
   getWorkflowInstanceForOrder,
+  getWorkflowTemplateForVendor,
   listCommunications,
   listMfgVendors,
   listProductionRequirements,
@@ -56,7 +57,8 @@ export async function getManufactureVendorAction(code: string) {
   try {
     const v = await getMfgVendor(code);
     if (!v) return { ok: false as const, error: "Vendor not found" };
-    return { ok: true as const, data: v };
+    const workflow = await getWorkflowTemplateForVendor(code);
+    return { ok: true as const, data: { vendor: v, workflow } };
   } catch (e) {
     return fail(e);
   }
