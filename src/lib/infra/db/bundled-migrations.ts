@@ -83,5 +83,9 @@ export const BUNDLED_MIGRATIONS: { filename: string; sql: string }[] = [
   {
     "filename": "20260831140000_shopify_product_catalog.sql",
     "sql": "-- Shopify product catalog sync \u2192 Aarla products / product_variants.\n-- Catalog metadata only \u2014 does NOT write stock_movements.\n-- Idempotent for /setup.\n\nalter table products\n  add column if not exists shopify_product_id text;\n\nalter table products\n  add column if not exists catalog_source text not null default 'manual';\n\nalter table product_variants\n  add column if not exists shopify_variant_id text;\n\ncreate unique index if not exists products_org_shopify_product_id_uidx\n  on products (organization_id, shopify_product_id)\n  where shopify_product_id is not null;\n\ncreate unique index if not exists product_variants_org_shopify_variant_id_uidx\n  on product_variants (organization_id, shopify_variant_id)\n  where shopify_variant_id is not null;\n\n-- Widen commerce sync watermark channels for catalog sync.\nalter table commerce_sync_watermarks drop constraint if exists commerce_sync_watermarks_channel_check;\n\nalter table commerce_sync_watermarks\n  add constraint commerce_sync_watermarks_channel_check\n  check (channel in (\n    'shopify_orders',\n    'shopify_abandoned_checkouts',\n    'delhivery_awbs',\n    'shopify_products'\n  ));\n"
+  },
+  {
+    "filename": "20260901140000_shopify_inventory_sync.sql",
+    "sql": "-- Inventory sync Aarla ↔ Shopify: persist inventory item ids for set-quantities.\n-- Idempotent for /setup.\n\nalter table product_variants\n  add column if not exists shopify_inventory_item_id text;\n\ncreate index if not exists product_variants_shopify_inventory_item_idx\n  on product_variants (organization_id, shopify_inventory_item_id)\n  where shopify_inventory_item_id is not null;\n\n-- Optional org setting for preferred Shopify location gid (push target).\ncreate table if not exists shopify_inventory_settings (\n  organization_id uuid primary key references organizations(id) on delete cascade,\n  primary_location_id text,\n  updated_at timestamptz not null default now()\n);\n"
   }
-];
+]

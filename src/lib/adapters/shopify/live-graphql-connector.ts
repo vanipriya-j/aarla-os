@@ -27,6 +27,8 @@ import type {
   ShopifyTaxLineRecord,
   ShopifyVariantInventoryPage,
   ShopifyVariantInventoryRecord,
+  ShopifySetInventoryQuantityInput,
+  ShopifySetInventoryResult,
 } from "./port";
 import { shopifyGidToExternalId } from "./normalize";
 import {
@@ -485,8 +487,42 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
         id
         sku
         inventoryQuantity
+        inventoryItem {
+          id
+          inventoryLevels(first: 5) {
+            edges {
+              node {
+                location { id name isActive }
+                quantities(names: ["available"]) { name quantity }
+              }
+            }
+          }
+        }
       }
     }
+  }
+}
+`;
+
+const LOCATIONS_QUERY = `
+query SyncInventoryLocations {
+  locations(first: 25, includeInactive: false) {
+    edges {
+      node {
+        id
+        name
+        isActive
+        fulfillsOnlineOrders
+      }
+    }
+  }
+}
+`;
+
+const INVENTORY_SET_QUANTITIES = `
+mutation InventorySetQuantities($input: InventorySetQuantitiesInput!) {
+  inventorySetQuantities(input: $input) {
+    userErrors { field message }
   }
 }
 `;
@@ -499,8 +535,38 @@ type VariantInventoryQueryData = {
         id: string;
         sku: string | null;
         inventoryQuantity: number | null;
+        inventoryItem?: {
+          id: string;
+          inventoryLevels?: {
+            edges: Array<{
+              node: {
+                location: { id: string; name: string; isActive: boolean };
+                quantities: Array<{ name: string; quantity: number }>;
+              };
+            }>;
+          };
+        } | null;
       };
     }>;
+  };
+};
+
+type LocationsQueryData = {
+  locations: {
+    edges: Array<{
+      node: {
+        id: string;
+        name: string;
+        isActive: boolean;
+        fulfillsOnlineOrders: boolean;
+      };
+    }>;
+  };
+};
+
+type InventorySetQuantitiesData = {
+  inventorySetQuantities: {
+    userErrors: Array<{ field: string[] | null; message: string }>;
   };
 };
 
@@ -837,7 +903,19 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
         const sku =
           (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
         const available = Math.max(0, Math.floor(Number(edge.node.inventoryQuantity ?? 0)));
-        variants.push({ externalVariantId, sku, available });
+        const inventoryItemId = edge.node.inventoryItem?.id ?? null;
+        const levels = edge.node.inventoryItem?.inventoryLevels?.edges ?? [];
+        const primaryLevel =
+          levels.find((l) => l.node.location.isActive && l.node.location.id)?.node ??
+          levels[0]?.node ??
+          null;
+        variants.push({
+          externalVariantId,
+          sku,
+          available,
+          inventoryItemId,
+          locationId: primaryLevel?.location.id ?? null,
+        });
       }
       hasNext = data.productVariants.pageInfo.hasNextPage;
       cursor = data.productVariants.pageInfo.endCursor;
@@ -849,6 +927,35 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       nextCursor: hasNext ? cursor : null,
       pagesFetched: pages,
     };
+  }
+
+  async fetchPrimaryInventoryLocationId(): Promise<string | null> {
+    assertServerOnly();
+    const data = await this.graphql<LocationsQueryData>(LOCATIONS_QUERY, {});
+    const nodes = data.locations.edges.map((e) => e.node).filter((n) => n.isActive);
+    const online = nodes.find((n) => n.fulfillsOnlineOrders);
+    return online?.id ?? nodes[0]?.id ?? null;
+  }
+
+  async setInventoryQuantities(
+    quantities: ShopifySetInventoryQuantityInput[],
+  ): Promise<ShopifySetInventoryResult> {
+    assertServerOnly();
+    if (!quantities.length) return { ok: true, errors: [] };
+    const data = await this.graphql<InventorySetQuantitiesData>(INVENTORY_SET_QUANTITIES, {
+      input: {
+        name: "available",
+        reason: "correction",
+        ignoreCompareQuantity: true,
+        quantities: quantities.map((q) => ({
+          inventoryItemId: q.inventoryItemId,
+          locationId: q.locationId,
+          quantity: Math.max(0, Math.floor(q.quantity)),
+        })),
+      },
+    });
+    const errors = (data.inventorySetQuantities.userErrors ?? []).map((e) => e.message);
+    return { ok: errors.length === 0, errors };
   }
 
   async fetchCustomerCallPayload(

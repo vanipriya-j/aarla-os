@@ -524,12 +524,25 @@ export class FixtureShopifyConnector implements ShopifyConnector {
           externalVariantId: v.externalVariantId,
           sku: v.sku,
           available: i === 0 ? 12 : 5,
+          inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
+          locationId: "gid://shopify/Location/fixture-primary",
         })),
       ),
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,
     };
+  }
+
+  async fetchPrimaryInventoryLocationId(): Promise<string | null> {
+    return "gid://shopify/Location/fixture-primary";
+  }
+
+  async setInventoryQuantities(
+    quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number }>,
+  ) {
+    void quantities;
+    return { ok: true, errors: [] as string[] };
   }
 }
 

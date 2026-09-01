@@ -130,6 +130,22 @@ export async function syncShopifyOpeningInventoryChunkViaApi(
   });
 }
 
+export async function syncShopifyInventoryChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+  action: "compare" | "push" | "pull" = "compare",
+  driftedOnly = true,
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventorySyncSummary>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    cursor,
+    lockToken,
+    action,
+    driftedOnly,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

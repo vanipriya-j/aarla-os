@@ -161,6 +161,10 @@ export interface ShopifyVariantInventoryRecord {
   sku: string;
   /** Total sellable qty across Shopify locations (Admin inventoryQuantity). */
   available: number;
+  /** gid://shopify/InventoryItem/... when available from Admin API */
+  inventoryItemId?: string | null;
+  /** Primary Shopify location gid used for set-quantities pushes */
+  locationId?: string | null;
 }
 
 export type ShopifyVariantInventoryPage = {
@@ -168,6 +172,17 @@ export type ShopifyVariantInventoryPage = {
   hasMore: boolean;
   nextCursor: string | null;
   pagesFetched: number;
+};
+
+export type ShopifySetInventoryQuantityInput = {
+  inventoryItemId: string;
+  locationId: string;
+  quantity: number;
+};
+
+export type ShopifySetInventoryResult = {
+  ok: boolean;
+  errors: string[];
 };
 
 export interface ShopifyConnector {
@@ -184,11 +199,17 @@ export interface ShopifyConnector {
   fetchProductsPage?(options?: ShopifyFetchOptions): Promise<ShopifyProductsPage>;
   /**
    * Chunked variant inventory quantities (Shopify Admin inventoryQuantity).
-   * Used only for one-time legacy opening balances — not continuous sync.
+   * Used for opening balances, drift compare, and sync.
    */
   fetchVariantInventoryPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyVariantInventoryPage>;
+  /** Primary active Shopify location gid — required for inventorySetQuantities. */
+  fetchPrimaryInventoryLocationId?(): Promise<string | null>;
+  /** Set absolute available qty on Shopify for one or more inventory items. */
+  setInventoryQuantities?(
+    quantities: ShopifySetInventoryQuantityInput[],
+  ): Promise<ShopifySetInventoryResult>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.
