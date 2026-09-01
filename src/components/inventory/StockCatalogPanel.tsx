@@ -20,6 +20,7 @@ import {
 import type { Location, Product, ReorderRule, StockMovement } from "@/lib/domain/types";
 import { Search } from "lucide-react";
 import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
+import { Button } from "@/components/ui/Button";
 
 export type StockCatalogSelection = {
   product: Product;
@@ -294,6 +295,27 @@ export function StockCatalogPanel({
               </div>
             ),
           },
+          {
+            key: "make",
+            header: "Reorder",
+            render: (r) => {
+              const suggested = r.total === 0 ? 20 : Math.max(10, 20 - r.total);
+              const label =
+                r.variantLabel && r.variantLabel !== "Default"
+                  ? `${r.productTitle} / ${r.variantLabel}`
+                  : r.productTitle;
+              return (
+                <Link
+                  href={`/manufacture/needs?make=${encodeURIComponent(r.productId)}&variant=${encodeURIComponent(r.variantId)}&qty=${suggested}&label=${encodeURIComponent(label)}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Button size="sm" variant="outline">
+                    Make
+                  </Button>
+                </Link>
+              );
+            },
+          },
         ]}
       />
 
@@ -307,8 +329,8 @@ export function StockCatalogPanel({
       />
 
       <p className="text-xs text-charcoal/50">
-        One row per variant. Click a row for location breakdown, transfer, or adjust. Open the
-        product name for the Aarla product page, or the Shopify icon to edit in Admin.
+        One row per variant. Click a row for location breakdown, transfer, or adjust. Use Make to
+        create a vendor order. Filter Zero to see out-of-stock variants.
       </p>
     </div>
   );

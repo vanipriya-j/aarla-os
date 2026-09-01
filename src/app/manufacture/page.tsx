@@ -22,6 +22,8 @@ type NeedsBoard = {
     available: number;
     kind: string;
   }>;
+  zeroCount?: number;
+  lowCount?: number;
 };
 
 function daysOverdue(date: string | null): number | null {
@@ -117,8 +119,11 @@ export default function ManufactureHomePage() {
           <h2 className="font-display text-xl text-deep-navy flex items-center gap-2">
             <Package className="h-5 w-5" /> Needs Making
           </h2>
+          <p className="text-sm text-charcoal/60">
+            Zero stock: {needs?.zeroCount ?? "—"} · Below minimum: {needs?.lowCount ?? "—"}
+          </p>
           <div className="space-y-3">
-            {(needs?.fromInventory ?? []).slice(0, 5).map((n) => (
+            {(needs?.fromInventory ?? []).slice(0, 8).map((n) => (
               <div key={`${n.productId}-${n.variantId}`} className="card-surface p-4 flex flex-wrap justify-between gap-3">
                 <div>
                   <p className="font-medium text-deep-navy">{n.label}</p>
@@ -126,7 +131,11 @@ export default function ManufactureHomePage() {
                     Required: {n.quantityToProduce} · ATP: {n.available} · {n.reason}
                   </p>
                 </div>
-                <Link href={`/manufacture/needs?make=${encodeURIComponent(n.productId)}&qty=${n.quantityToProduce}`}>
+                <Link
+                  href={`/manufacture/needs?make=${encodeURIComponent(n.productId)}${
+                    n.variantId ? `&variant=${encodeURIComponent(n.variantId)}` : ""
+                  }&qty=${n.quantityToProduce}&label=${encodeURIComponent(n.label)}`}
+                >
                   <Button size="sm">Make</Button>
                 </Link>
               </div>
@@ -147,8 +156,13 @@ export default function ManufactureHomePage() {
               </div>
             ))}
             {!needs?.fromInventory.length && !needs?.persisted.length ? (
-              <p className="text-sm text-charcoal/55">No open manufacturing needs right now.</p>
+              <p className="text-sm text-charcoal/55">
+                No open manufacturing needs. Use Needs Making → Make any product to reorder anything.
+              </p>
             ) : null}
+            <Link href="/manufacture/needs" className="text-sm text-aarla-red inline-flex items-center gap-1">
+              Open Needs Making <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
         </section>
 
