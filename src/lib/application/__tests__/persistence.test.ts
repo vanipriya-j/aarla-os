@@ -3,8 +3,11 @@ import { closePool } from "@/lib/infra/db/pool";
 import {
   adjustStock,
   createManufacturingPO,
+  createPartner,
+  establishPartnerOpeningBalances,
   getInventorySnapshots,
   healthCheck,
+  listPartners,
   listProducts,
   listPurchaseOrders,
   listReorderRules,
@@ -14,6 +17,8 @@ import {
   transferStock,
   transferToPartner,
 } from "@/lib/application/services";
+import { partnerStockFor } from "@/lib/domain/ledger";
+import { createPostgresUnitOfWork } from "@/lib/infra/repositories/postgres-unit-of-work";
 
 const hasDb = !!process.env.DATABASE_URL;
 const runId = `${Date.now()}`;
@@ -97,6 +102,68 @@ describe.runIf(hasDb)("Postgres persistence (application services)", () => {
       reference: `PSALE-PERSIST-${runId}`,
     });
     expect(sale).not.toBeNull();
+  });
+
+  it("createPartner + legacy opening stock + sale deduct partner qty", async () => {
+    const name = `Persist Café ${runId}`;
+    const partner = await createPartner({
+      name,
+      partnerType: "Café",
+      locationLabel: "Test Lane",
+      contact: "persist@example.com",
+      margin: 18,
+    });
+    expect(partner.name).toBe(name);
+    expect(partner.id.startsWith("partner-")).toBe(true);
+
+    const listed = await listPartners();
+    expect(listed.some((p) => p.id === partner.id)).toBe(true);
+
+    const productId = "prod-muruga-bottle";
+    const variantId = "var-mur-750";
+    const opening = await establishPartnerOpeningBalances(partner.id, [
+      {
+        productId,
+        variantId,
+        quantity: 7,
+        notes: `legacy persist ${runId}`,
+      },
+    ]);
+    expect(opening.written).toHaveLength(1);
+    expect(opening.written[0]?.toLocationId).toBe(`loc-${partner.id}`);
+    expect(opening.written[0]?.fromLocationId).toBe("loc-external");
+    expect(opening.written[0]?.reference).toBe(`OPEN-PARTNER-${partner.id}-${variantId}`);
+
+    const again = await establishPartnerOpeningBalances(partner.id, [
+      { productId, variantId, quantity: 3 },
+    ]);
+    expect(again.written).toHaveLength(0);
+    expect(again.skipped).toBeGreaterThan(0);
+
+    const uow = createPostgresUnitOfWork();
+    const [movements, locations] = await Promise.all([
+      uow.movements.list(),
+      uow.locations.list(),
+    ]);
+    const beforeSale = partnerStockFor(movements, partner.id, locations).find(
+      (s) => s.productId === productId,
+    )?.quantity;
+    expect(beforeSale).toBe(7);
+
+    const sale = await recordPartnerSale({
+      productId,
+      variantId,
+      partnerId: partner.id,
+      quantity: 2,
+      reference: `PSALE-NEW-PARTNER-${runId}`,
+    });
+    expect(sale).not.toBeNull();
+
+    const afterMoves = await uow.movements.list();
+    const afterSale = partnerStockFor(afterMoves, partner.id, locations).find(
+      (s) => s.productId === productId,
+    )?.quantity;
+    expect(afterSale).toBe(5);
   });
 
   it("variant-aware partner transfer and sale move a specific variant's stock", async () => {

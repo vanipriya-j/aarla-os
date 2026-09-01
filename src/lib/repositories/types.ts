@@ -44,6 +44,15 @@ export interface LocationRepository {
 export interface PartnerRepository {
   list(): Promise<Partner[]>;
   getByCode(code: string): Promise<Partner | null>;
+  create(input: {
+    name: string;
+    partnerType?: Partner["partnerType"];
+    locationLabel?: string;
+    contact?: string;
+    margin?: number;
+    merchandisingNotes?: string;
+    code?: string;
+  }): Promise<Partner>;
 }
 
 export interface BatchRepository {
