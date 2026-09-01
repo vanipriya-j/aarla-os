@@ -49,6 +49,11 @@ export type InventorySyncDeps = {
   driftedOnly?: boolean;
   /** Load Shopify inventoryItem ids (needed for Push). */
   includeInventoryItems?: boolean;
+  /**
+   * Resolve Shopify primary location via `locations` (needs read_locations).
+   * Compare/Pull leave this off — only Push needs it.
+   */
+  resolveShopifyLocation?: boolean;
 };
 
 function resolveConnector(deps: InventorySyncDeps): ShopifyConnector {
@@ -147,15 +152,24 @@ async function resolvePushLocationId(
   ).catch(() => [] as { primary_location_id: string | null }[]);
   if (stored[0]?.primary_location_id) return stored[0].primary_location_id;
   if (typeof connector.fetchPrimaryInventoryLocationId === "function") {
-    const loc = await connector.fetchPrimaryInventoryLocationId();
-    if (loc) {
-      await query(
-        `insert into shopify_inventory_settings (organization_id, primary_location_id)
-         values ($1,$2)
-         on conflict (organization_id) do update set primary_location_id = excluded.primary_location_id, updated_at = now()`,
-        [ORG_ID, loc],
-      ).catch(() => undefined);
-      return loc;
+    try {
+      const loc = await connector.fetchPrimaryInventoryLocationId();
+      if (loc) {
+        await query(
+          `insert into shopify_inventory_settings (organization_id, primary_location_id)
+           values ($1,$2)
+           on conflict (organization_id) do update set primary_location_id = excluded.primary_location_id, updated_at = now()`,
+          [ORG_ID, loc],
+        ).catch(() => undefined);
+        return loc;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        /ACCESS_DENIED|locations|read_locations|not authorized|permission/i.test(message)
+          ? `${message} — Push needs read_locations on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`
+          : message,
+      );
     }
   }
   return null;
@@ -260,10 +274,14 @@ async function buildDriftPage(
   const allRows = compareInventoryDrift({ rows: draftRows });
   const stats = summarizeInventoryDrift(allRows);
   const rows = deps.driftedOnly ? allRows.filter((r) => r.status !== "match") : allRows;
-  const primaryLocationId = await resolvePushLocationId(
-    connector,
-    page.variants.find((v) => v.locationId)?.locationId ?? null,
-  );
+  // Compare/Pull never need Shopify locations — only Push does.
+  const primaryLocationId =
+    deps.resolveShopifyLocation === true
+      ? await resolvePushLocationId(
+          connector,
+          page.variants.find((v) => v.locationId)?.locationId ?? null,
+        )
+      : null;
 
   return {
     connector,
@@ -304,6 +322,7 @@ export async function pushAarlaInventoryToShopify(
     ...deps,
     driftedOnly: false,
     includeInventoryItems: true,
+    resolveShopifyLocation: true,
   });
   if (typeof connector.setInventoryQuantities !== "function") {
     summary.errors.push("Shopify connector cannot set inventory quantities.");

@@ -142,10 +142,10 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
           </div>
         </div>
         <p className="text-xs text-charcoal/50">
-          Compare / Pull use the same Shopify qty field as Import base inventory. Push needs live{" "}
-          <code>write_inventory</code> + <code>read_locations</code> on the store token (new app
-          version alone is not enough — reinstall, or clear a stale{" "}
-          <code>SHOPIFY_ADMIN_API_ACCESS_TOKEN</code> in Vercel).
+          Compare / Pull use the same Shopify qty field as Import base inventory (no locations
+          call). Push needs live <code>write_inventory</code> + <code>read_locations</code> on the
+          store token — a new app version alone is not enough; reinstall, or clear a stale{" "}
+          <code>SHOPIFY_ADMIN_API_ACCESS_TOKEN</code> in Vercel.
         </p>
         {status ? <p className="text-sm text-deep-navy">{status}</p> : null}
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
