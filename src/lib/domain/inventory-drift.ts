@@ -1,6 +1,6 @@
 /**
- * Pure inventory drift comparison — Shopify available vs Aarla Studio ATP.
- * Orders stay on Shopify; stock truth is reconciled both ways from this signal.
+ * Pure inventory mismatch comparison — Shopify available vs Aarla Studio ATP.
+ * Used as a review board for one-time Admin fixes; not a required two-way sync.
  */
 
 export type InventoryDriftRow = {

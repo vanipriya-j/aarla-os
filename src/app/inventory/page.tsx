@@ -88,7 +88,7 @@ function InventoryInner() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "stock", label: "Stock" },
-    { id: "sync", label: "Shopify sync" },
+    { id: "sync", label: "Mismatches" },
     { id: "replenishment", label: "Replenishment" },
     { id: "locations", label: "Locations" },
     { id: "movements", label: "Movement Ledger" },

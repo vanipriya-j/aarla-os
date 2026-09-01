@@ -11,7 +11,7 @@ import {
   runChunkWithAutoRetry,
 } from "@/lib/client/commerce-sync-auto-retry";
 import type { InventoryDriftRow } from "@/lib/domain/inventory-drift";
-import { ArrowDownUp, RefreshCw, ExternalLink } from "lucide-react";
+import { ArrowDownUp, RefreshCw } from "lucide-react";
 
 type Action = "compare" | "push" | "pull";
 
@@ -158,43 +158,28 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                 <th className="px-4 py-3">SKU</th>
                 <th className="px-4 py-3">Aarla Studio</th>
                 <th className="px-4 py-3">Shopify available</th>
-                <th className="px-4 py-3">Fix hint</th>
-                <th className="px-4 py-3">Shopify</th>
+                <th className="px-4 py-3">One-time fix</th>
               </tr>
             </thead>
             <tbody>
               {mismatches.map((r) => (
                 <tr key={`${r.productId}:${r.variantId}`} className="border-b border-border/70">
                   <td className="px-4 py-3 font-medium text-deep-navy">{r.label}</td>
-                  <td className="px-4 py-3 text-charcoal/60">{r.sku || "—"}</td>
+                  <td className="px-4 py-3 text-charcoal/60 font-mono text-xs">{r.sku || "—"}</td>
                   <td className="px-4 py-3 tabular-nums">{r.aarlaStudio}</td>
                   <td className="px-4 py-3 tabular-nums">{r.shopifyAvailable}</td>
                   <td className="px-4 py-3 text-xs text-charcoal/70">
                     {r.status === "aarla_higher"
-                      ? `Set Shopify available to ${r.aarlaStudio} (or leave if Shopify is intentionally lower)`
-                      : `Shopify has ${r.shopifyAvailable}; Studio shows ${r.aarlaStudio} — check sales not yet in Aarla, or set Shopify to ${r.aarlaStudio}`}
-                  </td>
-                  <td className="px-4 py-3">
-                    <a
-                      href={`https://admin.shopify.com/store/${
-                        (typeof process !== "undefined" && false) || "aarla"
-                      }/products`}
-                      className="inline-flex items-center gap-1 text-xs text-deep-navy hover:text-aarla-red"
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Open Shopify Admin products (search by SKU)"
-                    >
-                      Admin <ExternalLink className="h-3 w-3" />
-                    </a>
+                      ? `In Shopify Admin → Aarla Office → set Available to ${r.aarlaStudio}`
+                      : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}. Either set Shopify to ${r.aarlaStudio}, or pull orders/sales into Aarla first.`}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="px-4 py-3 text-xs text-charcoal/50 border-t border-border">
-            One-time cleanup: open Shopify Admin → product inventory at <strong>Aarla Office</strong>{" "}
-            → set Available to match Studio (or the truth you choose). No need to Push/Pull the
-            whole catalog.
+            One-time cleanup: Shopify Admin → product → inventory at <strong>Aarla Office</strong> →
+            set Available. Search by SKU from the table. No need to Push/Pull the whole catalog.
           </p>
         </div>
       ) : rows.length > 0 ? (
