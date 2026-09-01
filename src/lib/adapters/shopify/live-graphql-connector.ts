@@ -478,6 +478,14 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
   };
 }
 
+/**
+ * Read path for Compare / Pull / Import base inventory.
+ * Same fields as Import: ProductVariant.inventoryQuantity only.
+ * Avoid inventoryLevels (and optional inventoryItem) here — those fields
+ * hard-fail GraphQL when the live token lacks read_inventory, even if the
+ * Dev Dashboard app version lists the scope. Push resolves location via
+ * LOCATIONS_QUERY; inventory item ids are loaded only when pushing.
+ */
 const VARIANT_INVENTORY_QUERY = `
 query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
   productVariants(first: $pageSize, after: $cursor, query: $query) {
@@ -487,17 +495,21 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
         id
         sku
         inventoryQuantity
-        inventoryItem {
-          id
-          inventoryLevels(first: 5) {
-            edges {
-              node {
-                location { id name isActive }
-                quantities(names: ["available"]) { name quantity }
-              }
-            }
-          }
-        }
+      }
+    }
+  }
+}
+`;
+
+/** Push enrichment — needs read_inventory on the live token. */
+const VARIANT_INVENTORY_ITEMS_QUERY = `
+query SyncVariantInventoryItems($cursor: String, $query: String, $pageSize: Int!) {
+  productVariants(first: $pageSize, after: $cursor, query: $query) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        inventoryItem { id }
       }
     }
   }
@@ -535,17 +547,18 @@ type VariantInventoryQueryData = {
         id: string;
         sku: string | null;
         inventoryQuantity: number | null;
-        inventoryItem?: {
-          id: string;
-          inventoryLevels?: {
-            edges: Array<{
-              node: {
-                location: { id: string; name: string; isActive: boolean };
-                quantities: Array<{ name: string; quantity: number }>;
-              };
-            }>;
-          };
-        } | null;
+      };
+    }>;
+  };
+};
+
+type VariantInventoryItemsQueryData = {
+  productVariants: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    edges: Array<{
+      node: {
+        id: string;
+        inventoryItem?: { id: string } | null;
       };
     }>;
   };
@@ -890,31 +903,45 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     while (hasNext && pages < maxPages) {
       pages += 1;
       const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
+      const query = options.query?.trim() ? options.query.trim() : null;
       const data: VariantInventoryQueryData = await this.graphql<VariantInventoryQueryData>(
         VARIANT_INVENTORY_QUERY,
         {
           cursor,
           pageSize,
-          query: options.query?.trim() ? options.query.trim() : null,
+          query,
         },
       );
+
+      const itemIdByVariant = new Map<string, string>();
+      if (options.includeInventoryItems) {
+        try {
+          const items = await this.graphql<VariantInventoryItemsQueryData>(
+            VARIANT_INVENTORY_ITEMS_QUERY,
+            { cursor, pageSize, query },
+          );
+          for (const edge of items.productVariants.edges) {
+            const vid = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
+            const iid = edge.node.inventoryItem?.id;
+            if (iid) itemIdByVariant.set(vid, iid);
+          }
+        } catch {
+          // Push can still use DB-cached inventory item ids; Compare/Pull don't need them.
+        }
+      }
+
       for (const edge of data.productVariants.edges) {
         const externalVariantId = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
         const sku =
           (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
         const available = Math.max(0, Math.floor(Number(edge.node.inventoryQuantity ?? 0)));
-        const inventoryItemId = edge.node.inventoryItem?.id ?? null;
-        const levels = edge.node.inventoryItem?.inventoryLevels?.edges ?? [];
-        const primaryLevel =
-          levels.find((l) => l.node.location.isActive && l.node.location.id)?.node ??
-          levels[0]?.node ??
-          null;
         variants.push({
           externalVariantId,
           sku,
           available,
-          inventoryItemId,
-          locationId: primaryLevel?.location.id ?? null,
+          inventoryItemId: itemIdByVariant.get(externalVariantId) ?? null,
+          // Prefer LOCATIONS_QUERY (Aarla Office / online fulfilment) for Push.
+          locationId: null,
         });
       }
       hasNext = data.productVariants.pageInfo.hasNextPage;

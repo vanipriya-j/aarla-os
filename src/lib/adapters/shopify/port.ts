@@ -87,6 +87,11 @@ export type ShopifyFetchOptions = {
    * Used for incremental sync.
    */
   query?: string | null;
+  /**
+   * When true, also load inventoryItem.id (needs live read_inventory).
+   * Compare/Pull/Import leave this off and use inventoryQuantity only.
+   */
+  includeInventoryItems?: boolean;
 };
 
 export type ShopifyCustomerCallPage = ShopifyCustomerCallPayload & {

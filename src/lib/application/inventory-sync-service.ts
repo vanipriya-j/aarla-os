@@ -47,6 +47,8 @@ export type InventorySyncDeps = {
   maxPages?: number;
   /** When true, only drifted rows are returned in `rows`. */
   driftedOnly?: boolean;
+  /** Load Shopify inventoryItem ids (needed for Push). */
+  includeInventoryItems?: boolean;
 };
 
 function resolveConnector(deps: InventorySyncDeps): ShopifyConnector {
@@ -206,12 +208,13 @@ async function buildDriftPage(
       cursor: deps.cursor ?? null,
       maxPages: deps.maxPages ?? 1,
       pageSize: 15,
+      includeInventoryItems: deps.includeInventoryItems === true,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify inventory fetch failed";
     throw new Error(
       /ACCESS_DENIED|read_inventory|write_inventory|not authorized|permission/i.test(message)
-        ? `${message} — grant read_inventory / write_inventory (and read_locations) on the Shopify app, then reinstall/scopes.`
+        ? `${message} — app config scopes are not enough: reinstall the app on the store, or remove a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN from Vercel and redeploy so client credentials pick up the new grant.`
         : message,
     );
   }
@@ -226,7 +229,17 @@ async function buildDriftPage(
       skippedUnmatched += 1;
       continue;
     }
-    await persistInventoryItemId(v.externalVariantId, v.inventoryItemId);
+    let inventoryItemId = v.inventoryItemId ?? null;
+    if (!inventoryItemId) {
+      const cached = await query<{ shopify_inventory_item_id: string | null }>(
+        `select shopify_inventory_item_id from product_variants
+         where organization_id = $1 and shopify_variant_id = $2
+         limit 1`,
+        [ORG_ID, v.externalVariantId],
+      ).catch(() => [] as { shopify_inventory_item_id: string | null }[]);
+      inventoryItemId = cached[0]?.shopify_inventory_item_id ?? null;
+    }
+    await persistInventoryItemId(v.externalVariantId, inventoryItemId);
     const aarlaStudio = studioByKey.get(`${match.productCode}:${match.variantCode}`) ?? 0;
     draftRows.push({
       productId: match.productCode,
@@ -237,7 +250,7 @@ async function buildDriftPage(
           : match.title,
       sku: match.sku || v.sku,
       shopifyVariantId: v.externalVariantId,
-      inventoryItemId: v.inventoryItemId ?? null,
+      inventoryItemId,
       locationId: v.locationId ?? null,
       aarlaStudio,
       shopifyAvailable: v.available,
@@ -290,6 +303,7 @@ export async function pushAarlaInventoryToShopify(
   const { summary, connector, primaryLocationId } = await buildDriftPage({
     ...deps,
     driftedOnly: false,
+    includeInventoryItems: true,
   });
   if (typeof connector.setInventoryQuantities !== "function") {
     summary.errors.push("Shopify connector cannot set inventory quantities.");
