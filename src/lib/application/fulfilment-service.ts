@@ -17,7 +17,7 @@ import {
 } from "@/lib/domain/fulfilment-types";
 import { balanceAt, deriveBalances } from "@/lib/domain/ledger";
 import { LOC_CODES } from "@/lib/engine/business-engine";
-import { transferStock } from "@/lib/application/services";
+import { recordShopifySale, transferStock } from "@/lib/application/services";
 import { ORG_ID } from "@/lib/infra/db/ids";
 import { query } from "@/lib/infra/db/pool";
 import { createFulfilmentRepository } from "@/lib/infra/repositories/postgres-fulfilment";
@@ -74,7 +74,28 @@ async function studioQtyForProductCode(
   return balanceAt(balances, productCode, LOC_CODES.studio, variantCode ?? "");
 }
 
-async function matchCatalog(title: string, variantTitle: string | null) {
+async function matchCatalog(
+  title: string,
+  variantTitle: string | null,
+  externalVariantId?: string | null,
+) {
+  if (externalVariantId) {
+    const byShopify = await query<{ product_code: string; variant_code: string | null }>(
+      `select p.code as product_code, v.code as variant_code
+       from product_variants v
+       join products p on p.id = v.product_id
+       where v.organization_id = $1 and v.shopify_variant_id = $2
+       limit 1`,
+      [ORG_ID, externalVariantId],
+    );
+    if (byShopify[0]) {
+      return {
+        productCode: String(byShopify[0].product_code),
+        variantCode:
+          byShopify[0].variant_code == null ? null : String(byShopify[0].variant_code),
+      };
+    }
+  }
   const rows = await query<{ product_code: string; variant_code: string | null }>(
     `select p.code as product_code, v.code as variant_code
      from products p
@@ -101,8 +122,10 @@ async function loadExternalLines(externalOrderId: string) {
     title: string;
     variant_title: string | null;
     quantity: number;
+    external_variant_id: string | null;
+    external_line_item_id: string;
   }>(
-    `select id, title, variant_title, quantity
+    `select id, title, variant_title, quantity, external_variant_id, external_line_item_id
      from external_order_items where external_order_id = $1 order by title`,
     [externalOrderId],
   );
@@ -236,17 +259,25 @@ export async function syncIncomingOrdersIntoFulfilment(limit = 200): Promise<{
   created: number;
   archived: number;
   ids: string[];
+  salesPosted: number;
+  salesSkipped: number;
 }> {
   const r = repo();
   // Clean up earlier pulls that imported already-shipped history.
   const archived = await r.archiveAlreadyShippedStockChecks();
   const unlinked = await r.listUnlinkedValidExternalOrders(limit);
   const ids: string[] = [];
+  let salesPosted = 0;
+  let salesSkipped = 0;
   for (const order of unlinked) {
     const items = await loadExternalLines(order.id);
     const lines = [];
     for (const item of items) {
-      const match = await matchCatalog(item.title, item.variant_title);
+      const match = await matchCatalog(
+        item.title,
+        item.variant_title,
+        item.external_variant_id,
+      );
       const systemStudioQty = await studioQtyForProductCode(
         match.productCode,
         match.variantCode,
@@ -264,8 +295,51 @@ export async function syncIncomingOrdersIntoFulfilment(limit = 200): Promise<{
       lines,
     });
     ids.push(detail.id);
+
+    // Inventory bearing: deduct Studio for matched lines (shared online pool).
+    for (const item of items) {
+      const match = await matchCatalog(
+        item.title,
+        item.variant_title,
+        item.external_variant_id,
+      );
+      const qty = Math.floor(Number(item.quantity) || 0);
+      if (qty <= 0 || !match.productCode) {
+        salesSkipped += 1;
+        continue;
+      }
+      const reference = `shopify-sale:${order.id}:${item.external_line_item_id}`;
+      try {
+        const mv = await recordShopifySale({
+          productId: match.productCode,
+          variantId: match.variantCode ?? undefined,
+          quantity: qty,
+          reference,
+          notes: `Shopify order ${order.orderNumber ?? order.id} · ${item.title}`,
+        });
+        if (mv) {
+          salesPosted += 1;
+          await r.appendEvent({
+            fulfilmentOrderId: detail.id,
+            eventType: "shopify-sale-posted",
+            summary: `Studio stock deducted ×${qty} for ${item.title}`,
+            actor: "system",
+          });
+        } else {
+          salesSkipped += 1;
+          await r.appendEvent({
+            fulfilmentOrderId: detail.id,
+            eventType: "shopify-sale-skipped",
+            summary: `Could not deduct Studio stock for ${item.title} (insufficient or already posted)`,
+            actor: "system",
+          });
+        }
+      } catch {
+        salesSkipped += 1;
+      }
+    }
   }
-  return { created: ids.length, archived, ids };
+  return { created: ids.length, archived, ids, salesPosted, salesSkipped };
 }
 
 export async function setLinePhysicalCheck(input: {

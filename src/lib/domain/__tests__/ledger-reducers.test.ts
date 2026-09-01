@@ -131,6 +131,28 @@ describe("ledger reducers / projectors (Phase 0–1 invariants)", () => {
     expect(kolam?.quantity).toBe(6);
   });
 
+  it("5b. Shopify Sale depletes Studio (shared online pool)", () => {
+    const movements = [
+      buildStockMovement({
+        quantity: 10,
+        fromLocationId: LOC.external,
+        toLocationId: LOC.studio,
+        movementType: "Purchase Receipt",
+        reference: "RCV-S",
+      }),
+      buildStockMovement({
+        quantity: 3,
+        fromLocationId: LOC.studio,
+        toLocationId: LOC.sold,
+        movementType: "Shopify Sale",
+        reference: "shopify-sale:ord-1:line-1",
+      }),
+    ];
+    const bal = deriveBalances(movements);
+    expect(balanceAt(bal, "prod-kolam-bottle", LOC.studio)).toBe(7);
+    expect(balanceAt(bal, "prod-kolam-bottle", LOC.sold)).toBe(3);
+  });
+
   it("6. inventory positions are derived only from Stock Movements", () => {
     const fromSeed = deriveInventorySnapshots(
       movementsSeed,
