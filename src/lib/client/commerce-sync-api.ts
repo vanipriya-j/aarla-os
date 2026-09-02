@@ -165,6 +165,27 @@ export async function refreshShopifyInventoryRowViaApi(
   });
 }
 
+/** Push Studio ATP → Shopify Available for one mismatch row (Studio is truth). */
+export async function pushShopifyAvailableRowViaApi(
+  lockToken: string,
+  input: {
+    productId: string;
+    variantId: string;
+    shopifyVariantId?: string | null;
+    sku?: string | null;
+    inventoryItemId?: string | null;
+    locationId?: string | null;
+  },
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventoryRowPushResult>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    lockToken,
+    action: "push-available",
+    ...input,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

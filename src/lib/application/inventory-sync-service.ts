@@ -1,12 +1,13 @@
 /**
- * Bidirectional inventory sync — Aarla Studio ↔ Shopify available.
+ * Inventory sync — Aarla Studio ↔ Shopify Available (Aarla Office).
  *
- * Policy:
+ * Policy (weekend tighten):
  * - Sales pipeline remains Shopify (orders sync into Aarla).
- * - Manufacturing / receive / transfer ops happen in Aarla.
- * - Push: set Shopify available = Aarla Studio ATP (ops → storefront).
- * - Pull: adjust Aarla Studio to match Shopify available (sales/qty → ledger).
- * - Drift board compares both without writing.
+ * - Manufacture / receive / transfer ops happen in Aarla.
+ * - Receive → best-effort Push: Shopify Available = Studio ATP for linked variants.
+ * - Mismatch board: fix in Admin + Sync, or Push Available when Studio is truth.
+ * - Manufacture → Shopify Incoming is deferred (API needs scheduled changes); WIP stays in Aarla.
+ * - Pull remains optional advanced (sales/qty → ledger).
  */
 import "server-only";
 import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
@@ -554,5 +555,262 @@ export async function refreshShopifyInventoryRow(input: {
   const row = rows[0] ?? null;
   result.row = row;
   result.aligned = row?.status === "match";
+  return result;
+}
+
+export type PushAvailableResult = {
+  /** True when at least one Shopify-linked variant was considered. */
+  attempted: boolean;
+  pushed: number;
+  skippedUnlinked: number;
+  skippedNoInventoryItem: number;
+  errors: string[];
+};
+
+export type InventoryRowPushResult = {
+  pushed: boolean;
+  row: InventoryDriftRow | null;
+  aligned: boolean;
+  errors: string[];
+};
+
+async function ensureInventoryItemId(
+  connector: ShopifyConnector,
+  shopifyVariantId: string,
+  sku: string | null | undefined,
+  cached: string | null | undefined,
+): Promise<string | null> {
+  if (cached) return cached;
+  if (typeof connector.fetchVariantInventoryPage !== "function") return null;
+  const search = shopifyVariantSearchQuery({ shopifyVariantId, sku });
+  if (!search) return null;
+  try {
+    const page = await connector.fetchVariantInventoryPage({
+      query: search,
+      maxPages: 1,
+      pageSize: 5,
+      includeInventoryItems: true,
+    });
+    const hit =
+      page.variants.find((v) => v.externalVariantId === shopifyVariantId) ??
+      page.variants[0];
+    if (hit?.inventoryItemId) {
+      await persistInventoryItemId(hit.externalVariantId, hit.inventoryItemId);
+      return hit.inventoryItemId;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Set Shopify Available = current Aarla Studio ATP for every linked variant
+ * of a product. Used after Receive (and for explicit per-product push).
+ */
+export async function pushStudioAvailableForProduct(input: {
+  productId: string;
+  connector?: ShopifyConnector;
+}): Promise<PushAvailableResult> {
+  const result: PushAvailableResult = {
+    attempted: false,
+    pushed: 0,
+    skippedUnlinked: 0,
+    skippedNoInventoryItem: 0,
+    errors: [],
+  };
+
+  let connector: ShopifyConnector;
+  try {
+    connector = resolveConnector({ connector: input.connector });
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+  if (typeof connector.setInventoryQuantities !== "function") {
+    result.errors.push("Shopify connector cannot set inventory quantities.");
+    return result;
+  }
+
+  await ensureCoreInventoryLocations();
+  await query(
+    `alter table product_variants add column if not exists shopify_inventory_item_id text`,
+  ).catch(() => undefined);
+
+  const linked = await query<{
+    variant_code: string;
+    sku: string;
+    shopify_variant_id: string;
+    shopify_inventory_item_id: string | null;
+  }>(
+    `select pv.code as variant_code, pv.sku, pv.shopify_variant_id, pv.shopify_inventory_item_id
+     from product_variants pv
+     join products p on p.id = pv.product_id
+     where pv.organization_id = $1 and p.code = $2
+       and pv.shopify_variant_id is not null and trim(pv.shopify_variant_id) <> ''`,
+    [ORG_ID, input.productId],
+  );
+
+  if (!linked.length) {
+    result.skippedUnlinked = 1;
+    return result;
+  }
+
+  result.attempted = true;
+  const studioByKey = await studioQtyMap();
+  let primaryLocationId: string | null = null;
+  try {
+    primaryLocationId = await resolvePushLocationId(connector, null);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+  if (!primaryLocationId) {
+    result.errors.push("No Shopify inventory location found for push.");
+    return result;
+  }
+
+  const batch: Array<{ inventoryItemId: string; locationId: string; quantity: number }> =
+    [];
+  for (const v of linked) {
+    const inventoryItemId = await ensureInventoryItemId(
+      connector,
+      v.shopify_variant_id,
+      v.sku,
+      v.shopify_inventory_item_id,
+    );
+    if (!inventoryItemId) {
+      result.skippedNoInventoryItem += 1;
+      continue;
+    }
+    const qty = studioByKey.get(`${input.productId}:${v.variant_code}`) ?? 0;
+    batch.push({
+      inventoryItemId,
+      locationId: primaryLocationId,
+      quantity: qty,
+    });
+  }
+
+  for (let i = 0; i < batch.length; i += 10) {
+    const slice = batch.slice(i, i + 10);
+    const setResult = await connector.setInventoryQuantities(slice);
+    if (!setResult.ok) {
+      result.errors.push(...setResult.errors);
+    } else {
+      result.pushed += slice.length;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Push Studio ATP → Shopify Available for one mismatch row, then re-read.
+ */
+export async function pushStudioAvailableForRow(input: {
+  productId: string;
+  variantId: string;
+  shopifyVariantId?: string | null;
+  sku?: string | null;
+  inventoryItemId?: string | null;
+  locationId?: string | null;
+  connector?: ShopifyConnector;
+}): Promise<InventoryRowPushResult> {
+  const result: InventoryRowPushResult = {
+    pushed: false,
+    row: null,
+    aligned: false,
+    errors: [],
+  };
+
+  let connector: ShopifyConnector;
+  try {
+    connector = resolveConnector({ connector: input.connector });
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+  if (typeof connector.setInventoryQuantities !== "function") {
+    result.errors.push("Shopify connector cannot set inventory quantities.");
+    return result;
+  }
+
+  await ensureCoreInventoryLocations();
+
+  let shopifyVariantId = input.shopifyVariantId?.trim() || null;
+  let inventoryItemId = input.inventoryItemId?.trim() || null;
+  let sku = input.sku?.trim() || null;
+
+  if (!shopifyVariantId || !inventoryItemId) {
+    const rows = await query<{
+      shopify_variant_id: string | null;
+      shopify_inventory_item_id: string | null;
+      sku: string;
+    }>(
+      `select pv.shopify_variant_id, pv.shopify_inventory_item_id, pv.sku
+       from product_variants pv
+       join products p on p.id = pv.product_id
+       where pv.organization_id = $1 and p.code = $2 and pv.code = $3
+       limit 1`,
+      [ORG_ID, input.productId, input.variantId],
+    );
+    const hit = rows[0];
+    if (hit) {
+      shopifyVariantId = shopifyVariantId || hit.shopify_variant_id;
+      inventoryItemId = inventoryItemId || hit.shopify_inventory_item_id;
+      sku = sku || hit.sku;
+    }
+  }
+
+  if (!shopifyVariantId) {
+    result.errors.push("Variant is not linked to Shopify — cannot push Available.");
+    return result;
+  }
+
+  inventoryItemId = await ensureInventoryItemId(
+    connector,
+    shopifyVariantId,
+    sku,
+    inventoryItemId,
+  );
+  if (!inventoryItemId) {
+    result.errors.push("Missing Shopify inventory item id for this variant.");
+    return result;
+  }
+
+  let locationId = input.locationId?.trim() || null;
+  try {
+    locationId = await resolvePushLocationId(connector, locationId);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+  if (!locationId) {
+    result.errors.push("No Shopify inventory location found for push.");
+    return result;
+  }
+
+  const studioByKey = await studioQtyMap();
+  const quantity = studioByKey.get(`${input.productId}:${input.variantId}`) ?? 0;
+
+  const setResult = await connector.setInventoryQuantities([
+    { inventoryItemId, locationId, quantity },
+  ]);
+  if (!setResult.ok) {
+    result.errors.push(...setResult.errors);
+    return result;
+  }
+  result.pushed = true;
+
+  const refreshed = await refreshShopifyInventoryRow({
+    shopifyVariantId,
+    sku,
+    productId: input.productId,
+    variantId: input.variantId,
+    connector,
+  });
+  result.row = refreshed.row;
+  result.aligned = refreshed.aligned;
+  if (refreshed.errors.length) result.errors.push(...refreshed.errors);
   return result;
 }

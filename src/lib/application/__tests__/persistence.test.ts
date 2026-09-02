@@ -71,6 +71,9 @@ describe.runIf(hasDb)("Postgres persistence (application services)", () => {
     expect(result).not.toBeNull();
     expect(result!.movements.some((m) => m.movementType === "Purchase Receipt")).toBe(true);
     expect(result!.movements.some((m) => m.movementType === "Damage")).toBe(true);
+    // Shopify push is best-effort; without live credentials it soft-skips.
+    expect(result!.shopifyPush).not.toBeNull();
+    expect(Array.isArray(result!.shopifyPush!.errors)).toBe(true);
 
     const after = (await getInventorySnapshots()).find((s) => s.productId === "prod-muruga-bottle");
     expect((after?.studioStock ?? 0) - (before?.studioStock ?? 0)).toBe(14);

@@ -3,6 +3,7 @@ import {
   compareShopifyInventoryDrift,
   pullShopifyInventoryToAarla,
   pushAarlaInventoryToShopify,
+  pushStudioAvailableForRow,
   refreshShopifyInventoryRow,
 } from "@/lib/application/inventory-sync-service";
 import { acquireOrRenewCommerceSyncLock } from "@/lib/application/commerce-sync-lock";
@@ -25,21 +26,23 @@ function toErrorMessage(err: unknown): string {
 
 /**
  * POST /api/commerce/sync/shopify-inventory
- * action: compare | push | pull | refresh
- * Chunked Shopify ↔ Aarla inventory sync, or single-row refresh.
+ * action: compare | push | pull | refresh | push-available
+ * Chunked Shopify ↔ Aarla inventory sync, single-row refresh, or Push Available.
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       cursor?: string | null;
       lockToken?: string;
-      action?: "compare" | "push" | "pull" | "refresh";
+      action?: "compare" | "push" | "pull" | "refresh" | "push-available";
       driftedOnly?: boolean;
       shopifyVariantId?: string | null;
       sku?: string | null;
       productId?: string | null;
       variantId?: string | null;
       shopifyProductId?: string | null;
+      inventoryItemId?: string | null;
+      locationId?: string | null;
     };
     const lockToken = body.lockToken?.trim();
     if (!lockToken) {
@@ -63,6 +66,24 @@ export async function POST(request: Request) {
         productId: body.productId,
         variantId: body.variantId,
         shopifyProductId: body.shopifyProductId,
+      });
+      return NextResponse.json({ ok: true, data });
+    }
+
+    if (action === "push-available") {
+      if (!body.productId || !body.variantId) {
+        return NextResponse.json(
+          { ok: false, error: "productId and variantId are required for push-available." },
+          { status: 400 },
+        );
+      }
+      const data = await pushStudioAvailableForRow({
+        productId: body.productId,
+        variantId: body.variantId,
+        shopifyVariantId: body.shopifyVariantId,
+        sku: body.sku,
+        inventoryItemId: body.inventoryItemId,
+        locationId: body.locationId,
       });
       return NextResponse.json({ ok: true, data });
     }

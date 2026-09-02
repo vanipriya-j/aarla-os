@@ -59,7 +59,7 @@ export default function ManufacturePage() {
     <>
       <Header
         title="Manufacture / Reorder"
-        subtitle="Raises a canonical Purchase Order. Stock enters the ledger when you Receive."
+        subtitle="Create vendor POs. Stock stays Aarla WIP until Receive — then Shopify Available at Aarla Office. Incoming on Shopify is not set from Manufacture yet."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-5xl">
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
