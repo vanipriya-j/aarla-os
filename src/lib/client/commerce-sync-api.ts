@@ -146,6 +146,25 @@ export async function syncShopifyInventoryChunkViaApi(
   });
 }
 
+export async function refreshShopifyInventoryRowViaApi(
+  lockToken: string,
+  input: {
+    shopifyVariantId?: string | null;
+    sku?: string | null;
+    productId?: string | null;
+    variantId?: string | null;
+    shopifyProductId?: string | null;
+  },
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventoryRowRefreshResult>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    lockToken,
+    action: "refresh",
+    ...input,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

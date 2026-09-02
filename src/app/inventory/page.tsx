@@ -248,6 +248,7 @@ function InventoryInner() {
                 locations={locations}
                 reorderRules={reorderRules}
                 onSelectVariant={openDetail}
+                onShopifyRowSynced={reload}
               />
             )}
           </div>

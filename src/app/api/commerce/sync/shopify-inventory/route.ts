@@ -3,6 +3,7 @@ import {
   compareShopifyInventoryDrift,
   pullShopifyInventoryToAarla,
   pushAarlaInventoryToShopify,
+  refreshShopifyInventoryRow,
 } from "@/lib/application/inventory-sync-service";
 import { acquireOrRenewCommerceSyncLock } from "@/lib/application/commerce-sync-lock";
 import {
@@ -24,16 +25,21 @@ function toErrorMessage(err: unknown): string {
 
 /**
  * POST /api/commerce/sync/shopify-inventory
- * action: compare | push | pull
- * Chunked Shopify ↔ Aarla inventory sync.
+ * action: compare | push | pull | refresh
+ * Chunked Shopify ↔ Aarla inventory sync, or single-row refresh.
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       cursor?: string | null;
       lockToken?: string;
-      action?: "compare" | "push" | "pull";
+      action?: "compare" | "push" | "pull" | "refresh";
       driftedOnly?: boolean;
+      shopifyVariantId?: string | null;
+      sku?: string | null;
+      productId?: string | null;
+      variantId?: string | null;
+      shopifyProductId?: string | null;
     };
     const lockToken = body.lockToken?.trim();
     if (!lockToken) {
@@ -49,6 +55,18 @@ export async function POST(request: Request) {
     }
 
     const action = body.action ?? "compare";
+
+    if (action === "refresh") {
+      const data = await refreshShopifyInventoryRow({
+        shopifyVariantId: body.shopifyVariantId,
+        sku: body.sku,
+        productId: body.productId,
+        variantId: body.variantId,
+        shopifyProductId: body.shopifyProductId,
+      });
+      return NextResponse.json({ ok: true, data });
+    }
+
     const deps = {
       cursor: body.cursor ?? null,
       driftedOnly: body.driftedOnly ?? true,

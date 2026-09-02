@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import {
+  refreshShopifyInventoryRowViaApi,
   syncShopifyInventoryChunkViaApi,
   unlockCommerceSyncLockViaApi,
 } from "@/lib/client/commerce-sync-api";
@@ -21,8 +22,7 @@ type Action = "compare" | "push" | "pull";
 
 /**
  * Stock mismatch board — Shopify available vs Aarla Studio.
- * Primary job: show where they differ so founders can one-time fix in Shopify Admin.
- * Push/Pull remain optional advanced tools, not the default workflow.
+ * Primary job: show where they differ; fix in Shopify Admin; Sync this row.
  */
 export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
   const [pending, startTransition] = useTransition();
@@ -30,6 +30,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rows, setRows] = useState<InventoryDriftRow[]>([]);
+  const [rowSyncing, setRowSyncing] = useState<string | null>(null);
   const [totals, setTotals] = useState({
     matched: 0,
     drifted: 0,
@@ -99,8 +100,6 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
           cursor = res.data.nextCursor ?? null;
           if (!cursor) break;
         }
-        // Chunks collapse per page; merge again so one Aarla SKU isn't repeated
-        // across Shopify pagination.
         const merged =
           action === "compare" || action === "pull" || action === "push"
             ? mergeInventoryDriftPages(collected)
@@ -136,6 +135,58 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
     });
   };
 
+  const syncRow = async (r: InventoryDriftRow) => {
+    const key = `${r.productId}:${r.variantId}`;
+    setRowSyncing(key);
+    setError(null);
+    setStatus(`Syncing ${r.sku || r.label} from Shopify…`);
+    const token = newCommerceSyncLockToken();
+    try {
+      const res = await refreshShopifyInventoryRowViaApi(token, {
+        shopifyVariantId: r.shopifyVariantId,
+        sku: r.sku,
+        productId: r.productId,
+        variantId: r.variantId,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        setStatus("Row sync failed.");
+        return;
+      }
+      if (res.data.errors.length) {
+        setError(res.data.errors.slice(0, 2).join(" · "));
+      }
+      if (res.data.aligned || !res.data.row || res.data.row.status === "match") {
+        setRows((prev) => prev.filter((x) => `${x.productId}:${x.variantId}` !== key));
+        setTotals((t) => ({
+          ...t,
+          drifted: Math.max(0, t.drifted - 1),
+          matched: t.matched + 1,
+        }));
+        setStatus(
+          `${r.sku || r.label} aligned` +
+            (res.data.catalogUpdated ? " (catalog metadata updated)" : ""),
+        );
+      } else if (res.data.row) {
+        setRows((prev) =>
+          prev.map((x) =>
+            `${x.productId}:${x.variantId}` === key ? res.data.row! : x,
+          ),
+        );
+        setStatus(
+          `${r.sku || r.label} refreshed — still mismatched (Studio ${res.data.row.aarlaStudio} vs Shopify ${res.data.row.shopifyAvailable})`,
+        );
+      }
+      onDone?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus(null);
+    } finally {
+      setRowSyncing(null);
+      await unlockCommerceSyncLockViaApi().catch(() => undefined);
+    }
+  };
+
   const mismatches = rows.filter((r) => r.status !== "match");
 
   return (
@@ -147,16 +198,15 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               <ArrowDownUp className="h-5 w-5" /> Stock mismatches
             </h2>
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
-              Not a full two-way sync. Show where <strong>Shopify available</strong> (Aarla Office)
-              differs from <strong>Aarla Studio</strong>, then fix once in Shopify Admin if needed.
+              Fix mapping / metadata / Available qty in Shopify Admin, then{" "}
+              <strong>Sync</strong> that row — no need to refresh the whole catalog.
             </p>
             <p className="text-xs text-charcoal/50 mt-2 max-w-2xl">
-              Going forward: <strong>Receive</strong> into Studio → that qty should be{" "}
-              <em>Available</em> at Aarla Office. Manufacture / WIP stays in Aarla until receive —
-              Shopify “Committed” is for open orders, not manufacturing.
+              Going forward: <strong>Receive</strong> → Shopify <em>Available</em> at Aarla Office.
+              Manufacture → <em>Incoming</em> (not Committed).
             </p>
           </div>
-          <Button size="sm" disabled={pending} onClick={() => run("compare")}>
+          <Button size="sm" disabled={pending || !!rowSyncing} onClick={() => run("compare")}>
             <RefreshCw className="h-4 w-4" />
             {pending ? "Loading…" : "Show mismatches"}
           </Button>
@@ -181,30 +231,49 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                 <th className="px-4 py-3">Aarla Studio</th>
                 <th className="px-4 py-3">Shopify available</th>
                 <th className="px-4 py-3">One-time fix</th>
+                <th className="px-4 py-3">Sync</th>
               </tr>
             </thead>
             <tbody>
-              {mismatches.map((r) => (
-                <tr key={`${r.productId}:${r.variantId}`} className="border-b border-border/70">
-                  <td className="px-4 py-3 font-medium text-deep-navy">{r.label}</td>
-                  <td className="px-4 py-3 text-charcoal/60 font-mono text-xs">{r.sku || "—"}</td>
-                  <td className="px-4 py-3 tabular-nums">{r.aarlaStudio}</td>
-                  <td className="px-4 py-3 tabular-nums">{r.shopifyAvailable}</td>
-                  <td className="px-4 py-3 text-xs text-charcoal/70">
-                    {r.shopifyLinkCount > 1
-                      ? `${r.shopifyLinkCount} Shopify variants share this Aarla SKU — summed available ${r.shopifyAvailable}. Fix duplicate SKUs in Shopify/catalog. `
-                      : ""}
-                    {r.status === "aarla_higher"
-                      ? `In Shopify Admin → Aarla Office → set Available to ${r.aarlaStudio}`
-                      : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}. Either set Shopify to ${r.aarlaStudio}, or pull orders/sales into Aarla first.`}
-                  </td>
-                </tr>
-              ))}
+              {mismatches.map((r) => {
+                const key = `${r.productId}:${r.variantId}`;
+                const syncing = rowSyncing === key;
+                return (
+                  <tr key={key} className="border-b border-border/70">
+                    <td className="px-4 py-3 font-medium text-deep-navy">{r.label}</td>
+                    <td className="px-4 py-3 text-charcoal/60 font-mono text-xs">
+                      {r.sku || "—"}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums">{r.aarlaStudio}</td>
+                    <td className="px-4 py-3 tabular-nums">{r.shopifyAvailable}</td>
+                    <td className="px-4 py-3 text-xs text-charcoal/70">
+                      {r.shopifyLinkCount > 1
+                        ? `${r.shopifyLinkCount} Shopify variants share this Aarla SKU — summed available ${r.shopifyAvailable}. Fix duplicate SKUs in Shopify/catalog. `
+                        : ""}
+                      {r.status === "aarla_higher"
+                        ? `In Shopify Admin → Aarla Office → set Available to ${r.aarlaStudio}`
+                        : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}.`}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        disabled={pending || !!rowSyncing}
+                        onClick={() => void syncRow(r)}
+                        data-testid="mismatch-row-sync"
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-deep-navy hover:bg-pale-cream disabled:opacity-50"
+                        title="Re-read this SKU from Shopify after you fix it in Admin"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                        {syncing ? "…" : "Sync"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <p className="px-4 py-3 text-xs text-charcoal/50 border-t border-border">
-            One-time cleanup: Shopify Admin → product → inventory at <strong>Aarla Office</strong> →
-            set Available. Search by SKU from the table. No need to Push/Pull the whole catalog.
+            Fix in Shopify Admin, then Sync that row. If it aligns, it drops off this list.
           </p>
         </div>
       ) : rows.length > 0 ? (
@@ -229,8 +298,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         {showAdvanced ? (
           <div className="space-y-2 pt-1">
             <p className="text-xs text-charcoal/55 max-w-2xl">
-              Optional only. Prefer fixing individual rows in Shopify Admin. Push overwrites Shopify
-              available from Studio; Pull writes Aarla adjustments from Shopify.
+              Optional only. Prefer per-row Sync after fixing in Shopify Admin.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" disabled={pending} onClick={() => run("push")}>

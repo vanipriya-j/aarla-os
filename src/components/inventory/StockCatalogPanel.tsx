@@ -18,8 +18,15 @@ import {
   type StockTableRow,
 } from "@/lib/domain/inventory-stock-table";
 import type { Location, Product, ReorderRule, StockMovement } from "@/lib/domain/types";
-import { Search } from "lucide-react";
+import { Search, RefreshCw } from "lucide-react";
 import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
+import {
+  newCommerceSyncLockToken,
+} from "@/lib/client/commerce-sync-auto-retry";
+import {
+  refreshShopifyInventoryRowViaApi,
+  unlockCommerceSyncLockViaApi,
+} from "@/lib/client/commerce-sync-api";
 
 export type StockCatalogSelection = {
   product: Product;
@@ -33,6 +40,8 @@ type Props = {
   locations: Location[];
   reorderRules: ReorderRule[];
   onSelectVariant: (selection: StockCatalogSelection) => void;
+  /** Called after a per-row Shopify refresh so the parent can reload ledger/catalog. */
+  onShopifyRowSynced?: () => void;
 };
 
 const STOCK_FILTERS: { id: StockStockFilter; label: string }[] = [
@@ -66,12 +75,15 @@ export function StockCatalogPanel({
   locations,
   reorderRules,
   onSelectVariant,
+  onShopifyRowSynced,
 }: Props) {
   const [category, setCategory] = useState<string | "all">("all");
   const [stockFilter, setStockFilter] = useState<StockStockFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<StockSortKey>("title-asc");
   const [page, setPage] = useState(1);
+  const [rowSyncing, setRowSyncing] = useState<string | null>(null);
+  const [rowSyncMsg, setRowSyncMsg] = useState<string | null>(null);
 
   const allRows = useMemo(
     () => buildStockTableRows({ products, movements, locations, reorderRules }),
@@ -104,8 +116,50 @@ export function StockCatalogPanel({
 
   const resetPage = () => setPage(1);
 
+  const syncShopifyRow = async (r: StockTableRow) => {
+    if (!r.shopifyVariantId && !r.variantSku && !r.product.shopifyProductId) return;
+    setRowSyncing(r.key);
+    setRowSyncMsg(`Syncing ${r.variantSku || r.productTitle} from Shopify…`);
+    const token = newCommerceSyncLockToken();
+    try {
+      const res = await refreshShopifyInventoryRowViaApi(token, {
+        shopifyVariantId: r.shopifyVariantId,
+        sku: r.variantSku || r.productSku,
+        productId: r.productId,
+        variantId: r.variantId,
+        shopifyProductId: r.product.shopifyProductId,
+      });
+      if (!res.ok) {
+        setRowSyncMsg(res.error);
+        return;
+      }
+      const bits: string[] = [];
+      if (res.data.catalogUpdated) bits.push("catalog updated");
+      if (res.data.row) {
+        bits.push(
+          res.data.aligned
+            ? "Studio ↔ Shopify aligned"
+            : `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
+        );
+      }
+      if (res.data.errors.length) bits.push(res.data.errors[0]!);
+      setRowSyncMsg(bits.join(" · ") || "Synced");
+      onShopifyRowSynced?.();
+    } catch (err) {
+      setRowSyncMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRowSyncing(null);
+      await unlockCommerceSyncLockViaApi().catch(() => undefined);
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="stock-catalog-panel">
+      {rowSyncMsg ? (
+        <p className="text-sm text-deep-navy rounded-lg border border-border bg-white px-3 py-2">
+          {rowSyncMsg}
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Product type">
         <button
           type="button"
@@ -244,6 +298,24 @@ export function StockCatalogPanel({
                     >
                       <ShopifyIcon className="h-4 w-4" />
                     </a>
+                  ) : null}
+                  {r.shopifyVariantId || r.product.shopifyProductId || r.variantSku ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void syncShopifyRow(r);
+                      }}
+                      disabled={!!rowSyncing}
+                      title="Sync this SKU from Shopify (after fixing Admin)"
+                      aria-label={`Sync ${r.productTitle} from Shopify`}
+                      data-testid="stock-row-sync"
+                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-deep-navy hover:bg-pale-cream disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${rowSyncing === r.key ? "animate-spin" : ""}`}
+                      />
+                    </button>
                   ) : null}
                 </div>
               </div>

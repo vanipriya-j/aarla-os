@@ -402,3 +402,157 @@ export async function pullShopifyInventoryToAarla(
     deps.driftedOnly === false ? summary.rows : summary.rows.filter((r) => r.status !== "match");
   return summary;
 }
+
+export type InventoryRowRefreshResult = {
+  row: InventoryDriftRow | null;
+  /** True when Studio and Shopify available now match (row can leave the mismatch list). */
+  aligned: boolean;
+  catalogUpdated: boolean;
+  errors: string[];
+};
+
+export function shopifyVariantSearchQuery(input: {
+  shopifyVariantId?: string | null;
+  sku?: string | null;
+}): string | null {
+  const idRaw = input.shopifyVariantId?.trim();
+  if (idRaw) {
+    const numeric = idRaw.includes("/") ? idRaw.split("/").pop() : idRaw;
+    if (numeric && /^\d+$/.test(numeric)) return `id:${numeric}`;
+  }
+  const sku = input.sku?.trim();
+  if (sku) {
+    // Quote SKUs that contain spaces/specials.
+    const safe = /[\s:]/.test(sku) ? `"${sku.replace(/"/g, "")}"` : sku;
+    return `sku:${safe}`;
+  }
+  return null;
+}
+
+/**
+ * Re-read one Shopify variant (after a founder fix in Admin) and return the
+ * updated mismatch row for that Aarla SKU — no full catalog refresh.
+ */
+export async function refreshShopifyInventoryRow(input: {
+  shopifyVariantId?: string | null;
+  sku?: string | null;
+  productId?: string | null;
+  variantId?: string | null;
+  shopifyProductId?: string | null;
+  connector?: ShopifyConnector;
+}): Promise<InventoryRowRefreshResult> {
+  const result: InventoryRowRefreshResult = {
+    row: null,
+    aligned: false,
+    catalogUpdated: false,
+    errors: [],
+  };
+  const connector = resolveConnector({ connector: input.connector });
+  if (typeof connector.fetchVariantInventoryPage !== "function") {
+    result.errors.push("Shopify connector does not support inventory quantities");
+    return result;
+  }
+
+  const search = shopifyVariantSearchQuery(input);
+  if (!search) {
+    result.errors.push("Need a Shopify variant id or SKU to refresh this row.");
+    return result;
+  }
+
+  await ensureCoreInventoryLocations();
+
+  // Best-effort: refresh catalog metadata for the parent Shopify product first.
+  if (
+    input.shopifyProductId &&
+    typeof connector.fetchProductsPage === "function"
+  ) {
+    try {
+      const { ensureShopifyCatalogSchema, upsertShopifyCatalogProduct } = await import(
+        "@/lib/infra/repositories/postgres-shopify-catalog"
+      );
+      await ensureShopifyCatalogSchema();
+      const numeric =
+        input.shopifyProductId.includes("/")
+          ? input.shopifyProductId.split("/").pop()
+          : input.shopifyProductId;
+      if (numeric && /^\d+$/.test(numeric)) {
+        const page = await connector.fetchProductsPage({
+          query: `id:${numeric}`,
+          maxPages: 1,
+          pageSize: 5,
+        });
+        for (const product of page.products) {
+          await upsertShopifyCatalogProduct(product);
+          result.catalogUpdated = true;
+        }
+      }
+    } catch (err) {
+      result.errors.push(
+        `Catalog refresh: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  let page;
+  try {
+    page = await connector.fetchVariantInventoryPage({
+      query: search,
+      maxPages: 1,
+      pageSize: 25,
+      includeInventoryItems: false,
+    });
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+
+  if (!page.variants.length) {
+    result.errors.push(`No Shopify variant found for ${search}`);
+    return result;
+  }
+
+  const studioByKey = await studioQtyMap();
+  const draftRows: Parameters<typeof compareInventoryDrift>[0]["rows"] = [];
+
+  for (const v of page.variants) {
+    let match = await mapShopifyVariantToAarla(v.externalVariantId, v.sku);
+    // Prefer the Aarla row the founder clicked when provided.
+    if (input.productId && input.variantId) {
+      match = {
+        productCode: input.productId,
+        variantCode: input.variantId,
+        title: match?.title ?? input.productId,
+        variantLabel: match?.variantLabel ?? input.variantId,
+        sku: match?.sku || v.sku || input.sku || "",
+      };
+    }
+    if (!match) continue;
+    await persistInventoryItemId(v.externalVariantId, v.inventoryItemId);
+    const aarlaStudio = studioByKey.get(`${match.productCode}:${match.variantCode}`) ?? 0;
+    draftRows.push({
+      productId: match.productCode,
+      variantId: match.variantCode,
+      label:
+        match.variantLabel && match.variantLabel !== "Default"
+          ? `${match.title} / ${match.variantLabel}`
+          : match.title,
+      sku: match.sku || v.sku,
+      shopifyVariantId: v.externalVariantId,
+      inventoryItemId: v.inventoryItemId ?? null,
+      locationId: v.locationId ?? null,
+      aarlaStudio,
+      shopifyAvailable: v.available,
+    });
+  }
+
+  if (!draftRows.length) {
+    result.errors.push("Shopify variant found but not linked to an Aarla catalog row.");
+    return result;
+  }
+
+  const rows = compareInventoryDrift({ rows: draftRows });
+  const row = rows[0] ?? null;
+  result.row = row;
+  result.aligned = row?.status === "match";
+  return result;
+}
