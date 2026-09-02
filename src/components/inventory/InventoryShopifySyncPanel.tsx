@@ -169,6 +169,9 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                   <td className="px-4 py-3 tabular-nums">{r.aarlaStudio}</td>
                   <td className="px-4 py-3 tabular-nums">{r.shopifyAvailable}</td>
                   <td className="px-4 py-3 text-xs text-charcoal/70">
+                    {r.shopifyLinkCount > 1
+                      ? `${r.shopifyLinkCount} Shopify variants share this Aarla SKU — summed available ${r.shopifyAvailable}. Fix duplicate SKUs in Shopify/catalog. `
+                      : ""}
                     {r.status === "aarla_higher"
                       ? `In Shopify Admin → Aarla Office → set Available to ${r.aarlaStudio}`
                       : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}. Either set Shopify to ${r.aarlaStudio}, or pull orders/sales into Aarla first.`}

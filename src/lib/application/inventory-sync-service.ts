@@ -112,10 +112,12 @@ async function mapShopifyVariantToAarla(
        from product_variants pv
        join products p on p.id = pv.product_id
        where pv.organization_id = $1 and pv.sku = $2
-       limit 1`,
+       limit 2`,
       [ORG_ID, sku],
     );
-    if (bySku[0]) {
+    // Only use SKU when it uniquely identifies one Aarla variant — shared SKUs
+    // otherwise explode the mismatch table (same Studio row × many Shopify qtys).
+    if (bySku.length === 1 && bySku[0]) {
       return {
         productCode: bySku[0].product_code,
         variantCode: bySku[0].variant_code,
