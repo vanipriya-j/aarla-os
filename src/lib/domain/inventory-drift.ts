@@ -121,3 +121,34 @@ export function summarizeInventoryDrift(rows: InventoryDriftRow[]): {
     shopifyHigher: rows.filter((r) => r.status === "shopify_higher").length,
   };
 }
+
+/**
+ * Re-collapse after multi-page client collection — each API chunk collapses
+ * internally, but the same Aarla variant can reappear on later Shopify pages.
+ */
+export function mergeInventoryDriftPages(rows: InventoryDriftRow[]): InventoryDriftRow[] {
+  const byKey = new Map<string, InventoryDriftRow>();
+
+  for (const r of rows) {
+    const key = `${r.productId}::${r.variantId}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...r });
+      continue;
+    }
+    existing.shopifyAvailable += Math.max(0, Math.floor(r.shopifyAvailable));
+    existing.shopifyLinkCount += Math.max(1, r.shopifyLinkCount || 1);
+    if (!existing.inventoryItemId && r.inventoryItemId) {
+      existing.inventoryItemId = r.inventoryItemId;
+    }
+    const delta = existing.shopifyAvailable - existing.aarlaStudio;
+    existing.delta = delta;
+    existing.status = delta === 0 ? "match" : delta > 0 ? "shopify_higher" : "aarla_higher";
+  }
+
+  return Array.from(byKey.values()).sort((a, b) => {
+    const rank = (s: InventoryDriftRow["status"]) =>
+      s === "match" ? 2 : s === "shopify_higher" ? 0 : 1;
+    return rank(a.status) - rank(b.status) || a.label.localeCompare(b.label);
+  });
+}

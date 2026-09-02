@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compareInventoryDrift,
+  mergeInventoryDriftPages,
   summarizeInventoryDrift,
 } from "@/lib/domain/inventory-drift";
 
@@ -101,5 +102,48 @@ describe("inventory drift", () => {
     expect(rows[0]?.aarlaStudio).toBe(16);
     expect(rows[0]?.status).toBe("match");
     expect(rows[0]?.shopifyLinkCount).toBe(5);
+  });
+
+  it("merges the same Aarla variant across paginated compare chunks", () => {
+    const page1 = compareInventoryDrift({
+      rows: [
+        {
+          productId: "prod-tee",
+          variantId: "var-2xl-cream",
+          label: "Marapachi",
+          sku: "ARL-ADT-XS-015",
+          shopifyVariantId: "s1",
+          aarlaStudio: 16,
+          shopifyAvailable: 1,
+        },
+        {
+          productId: "prod-tee",
+          variantId: "var-2xl-cream",
+          label: "Marapachi",
+          sku: "ARL-ADT-XS-015",
+          shopifyVariantId: "s2",
+          aarlaStudio: 16,
+          shopifyAvailable: 6,
+        },
+      ],
+    });
+    const page2 = compareInventoryDrift({
+      rows: [
+        {
+          productId: "prod-tee",
+          variantId: "var-2xl-cream",
+          label: "Marapachi",
+          sku: "ARL-ADT-XS-015",
+          shopifyVariantId: "s3",
+          aarlaStudio: 16,
+          shopifyAvailable: 9,
+        },
+      ],
+    });
+    const merged = mergeInventoryDriftPages([...page1, ...page2]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.shopifyAvailable).toBe(16);
+    expect(merged[0]?.shopifyLinkCount).toBe(3);
+    expect(merged[0]?.status).toBe("match");
   });
 });

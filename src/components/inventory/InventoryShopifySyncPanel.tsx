@@ -11,6 +11,10 @@ import {
   runChunkWithAutoRetry,
 } from "@/lib/client/commerce-sync-auto-retry";
 import type { InventoryDriftRow } from "@/lib/domain/inventory-drift";
+import {
+  mergeInventoryDriftPages,
+  summarizeInventoryDrift,
+} from "@/lib/domain/inventory-drift";
 import { ArrowDownUp, RefreshCw } from "lucide-react";
 
 type Action = "compare" | "push" | "pull";
@@ -95,11 +99,29 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
           cursor = res.data.nextCursor ?? null;
           if (!cursor) break;
         }
-        setRows(collected);
-        setTotals({ matched, drifted, aarlaHigher, shopifyHigher, pushed, pulled });
+        // Chunks collapse per page; merge again so one Aarla SKU isn't repeated
+        // across Shopify pagination.
+        const merged =
+          action === "compare" || action === "pull" || action === "push"
+            ? mergeInventoryDriftPages(collected)
+            : collected;
+        const mergedStats = summarizeInventoryDrift(merged);
+        const displayRows =
+          action === "compare"
+            ? merged.filter((r) => r.status !== "match")
+            : merged;
+        setRows(displayRows);
+        setTotals({
+          matched: mergedStats.matched,
+          drifted: mergedStats.drifted,
+          aarlaHigher: mergedStats.aarlaHigher,
+          shopifyHigher: mergedStats.shopifyHigher,
+          pushed,
+          pulled,
+        });
         setStatus(
           action === "compare"
-            ? `Mismatch table ready — ${drifted} to review, ${matched} already aligned.`
+            ? `Mismatch table ready — ${mergedStats.drifted} to review, ${mergedStats.matched} already aligned.`
             : action === "push"
               ? `Push done — set ${pushed} Shopify available qty from Aarla Studio.`
               : `Pull done — adjusted ${pulled} Studio balances from Shopify.`,
