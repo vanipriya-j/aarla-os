@@ -448,6 +448,10 @@ async function buildDriftPage(
   }
 
   for (const v of page.variants) {
+    if (!v.locationId || !v.locationName) {
+      skippedUnmatched += 1;
+      continue;
+    }
     let match = byShopifyId.get(normalizeShopifyVariantId(v.externalVariantId));
     if (!match) {
       // Unique-SKU fallback only (shared SKUs explode the mismatch table).
@@ -474,7 +478,7 @@ async function buildDriftPage(
       sku: match.sku || v.sku,
       shopifyVariantId: v.externalVariantId,
       inventoryItemId,
-      locationId: v.locationId ?? officeLocationId,
+      locationId: v.locationId,
       aarlaStudio,
       shopifyAvailable: v.available,
     });

@@ -152,6 +152,15 @@ export async function syncShopifyOpeningInventory(
     [];
 
   for (const v of page.variants) {
+    if (!v.locationId || !v.locationName) {
+      summary.skippedUnmatched += 1;
+      if (summary.errors.length < 3) {
+        summary.errors.push(
+          `${v.sku}: no Aarla Office level (shop total ${v.shopTotal ?? "?"}; ${v.levelSummary || "no levels"})`,
+        );
+      }
+      continue;
+    }
     if (v.available <= 0) {
       summary.skippedZero += 1;
       continue;
@@ -165,7 +174,7 @@ export async function syncShopifyOpeningInventory(
       productId: match.productCode,
       variantId: match.variantCode,
       quantity: v.available,
-      notes: `Legacy opening balance from Shopify Aarla Office available (${v.available})`,
+      notes: `Legacy opening balance from Shopify ${v.locationName} available (${v.available}; shop total ${v.shopTotal ?? "?"})`,
     });
   }
 
