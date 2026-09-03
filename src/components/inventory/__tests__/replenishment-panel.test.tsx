@@ -28,10 +28,14 @@ describe("ReplenishmentPanel", () => {
     );
 
     expect(screen.getByText("Carnatic Raga Tray")).toBeInTheDocument();
-    expect(screen.getByText("Manufacture")).toBeInTheDocument();
+    expect(screen.getByText("Reorder")).toBeInTheDocument();
 
-    await user.click(screen.getByText("Manufacture").closest("a")!);
+    await user.click(screen.getByText("Reorder").closest("a")!);
     expect(onTransfer).not.toHaveBeenCalled();
+    expect(screen.getByText("Reorder").closest("a")).toHaveAttribute(
+      "href",
+      expect.stringContaining("/manufacture/needs?make="),
+    );
   });
 
   it("shows a Transfer button for partner-need rows and calls onTransfer with the item", async () => {

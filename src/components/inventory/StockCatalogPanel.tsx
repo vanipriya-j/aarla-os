@@ -18,6 +18,10 @@ import {
   type StockTableRow,
 } from "@/lib/domain/inventory-stock-table";
 import type { Location, Product, ReorderRule, StockMovement } from "@/lib/domain/types";
+import {
+  manufactureReorderHref,
+  suggestedReorderQty,
+} from "@/lib/domain/manufacture-reorder-link";
 import { Search } from "lucide-react";
 import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
 import { Button } from "@/components/ui/Button";
@@ -184,7 +188,7 @@ export function StockCatalogPanel({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2" aria-label="Stock filter">
+      <div className="flex flex-wrap items-center gap-2" aria-label="Stock filter">
         {STOCK_FILTERS.map((f) => (
           <button
             key={f.id}
@@ -198,6 +202,18 @@ export function StockCatalogPanel({
             {f.label}
           </button>
         ))}
+        {stockFilter === "zero" || stockFilter === "low" ? (
+          <Link
+            href={manufactureReorderHref({
+              productId: "",
+              filter: stockFilter === "zero" ? "zero" : "low",
+            })}
+            className="text-sm text-aarla-red hover:underline underline-offset-2 ml-1"
+            data-testid="stock-filter-reorder-link"
+          >
+            Reorder {stockFilter === "zero" ? "zero-stock" : "low-stock"} →
+          </Link>
+        ) : null}
       </div>
 
       <DataTable
@@ -288,29 +304,62 @@ export function StockCatalogPanel({
           {
             key: "total",
             header: "Total",
-            render: (r) => (
-              <div className="flex items-center gap-2">
-                <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
-                {r.lowStock ? <StatusChip label="Low stock" tone="danger" /> : null}
-              </div>
-            ),
+            render: (r) => {
+              const isZero = r.total <= 0;
+              const suggested = suggestedReorderQty(r.total);
+              const label =
+                r.variantLabel && r.variantLabel !== "Default"
+                  ? `${r.productTitle} / ${r.variantLabel}`
+                  : r.productTitle;
+              return (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
+                  {isZero ? <StatusChip label="Zero stock" tone="danger" /> : null}
+                  {!isZero && r.lowStock ? (
+                    <StatusChip label="Low stock" tone="warning" />
+                  ) : null}
+                  {isZero || r.lowStock ? (
+                    <Link
+                      href={manufactureReorderHref({
+                        productId: r.productId,
+                        variantId: r.variantId,
+                        quantity: suggested,
+                        label,
+                      })}
+                      onClick={(e) => e.stopPropagation()}
+                      data-testid="stock-row-reorder-inline"
+                    >
+                      <Button size="sm" variant="outline">
+                        Reorder
+                      </Button>
+                    </Link>
+                  ) : null}
+                </div>
+              );
+            },
           },
           {
             key: "make",
             header: "Reorder",
             render: (r) => {
-              const suggested = r.total === 0 ? 20 : Math.max(10, 20 - r.total);
+              const suggested = suggestedReorderQty(r.total);
               const label =
                 r.variantLabel && r.variantLabel !== "Default"
                   ? `${r.productTitle} / ${r.variantLabel}`
                   : r.productTitle;
               return (
                 <Link
-                  href={`/manufacture/needs?make=${encodeURIComponent(r.productId)}&variant=${encodeURIComponent(r.variantId)}&qty=${suggested}&label=${encodeURIComponent(label)}`}
+                  href={manufactureReorderHref({
+                    productId: r.productId,
+                    variantId: r.variantId,
+                    quantity: suggested,
+                    label,
+                  })}
                   onClick={(e) => e.stopPropagation()}
+                  data-testid="stock-row-reorder"
                 >
-                  <Button size="sm" variant="outline">
-                    Make
+                  <Button size="sm" variant={r.total <= 0 || r.lowStock ? "primary" : "outline"}>
+                    Reorder
                   </Button>
                 </Link>
               );
@@ -329,8 +378,9 @@ export function StockCatalogPanel({
       />
 
       <p className="text-xs text-charcoal/50">
-        One row per variant. Click a row for location breakdown, transfer, or adjust. Use Make to
-        create a vendor order. Filter Zero to see out-of-stock variants.
+        One row per variant. Click a row for location breakdown, transfer, or adjust.{" "}
+        <strong>Reorder</strong> opens Needs Making to add the SKU to a vendor PO (multi-product
+        orders supported). Filter Zero / Low stock for restock candidates.
       </p>
     </div>
   );

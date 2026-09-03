@@ -21,6 +21,10 @@ import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
 import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogSyncButton";
 import { DEFAULT_INVENTORY_LOC, computeReplenishment } from "@/lib/domain";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
+import {
+  manufactureReorderHref,
+  suggestedReorderQty,
+} from "@/lib/domain/manufacture-reorder-link";
 
 type Tab = "stock" | "replenishment" | "locations" | "movements";
 
@@ -251,6 +255,7 @@ function InventoryInner() {
               items={aarlaLow}
               onTransfer={openTransferForReplenishment}
               emptyMessage="Studio stock is healthy against every reorder rule."
+              needsFilter="low"
             />
             <ReplenishmentPanel
               title="B. Partner Replenishment Needed"
@@ -265,6 +270,7 @@ function InventoryInner() {
               items={globalLow}
               onTransfer={openTransferForReplenishment}
               emptyMessage="Global on-hand stock clears every reorder rule."
+              needsFilter="low"
             />
           </div>
         ) : null}
@@ -389,6 +395,19 @@ function InventoryInner() {
         cell={selection?.cell ?? null}
         onTransfer={openTransferFromDetail}
         onAdjust={openAdjustFromDetail}
+        reorderHref={
+          selection
+            ? manufactureReorderHref({
+                productId: selection.product.id,
+                variantId: selection.cell.variantId,
+                quantity: suggestedReorderQty(selection.cell.total),
+                label:
+                  selection.variantLabel && selection.variantLabel !== "Default"
+                    ? `${selection.product.title} / ${selection.variantLabel}`
+                    : selection.product.title,
+              })
+            : null
+        }
       />
 
       {transferCtx ? (

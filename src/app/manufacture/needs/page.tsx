@@ -31,6 +31,7 @@ function NeedsInner() {
   const makeVariantId = search.get("variant");
   const makeQty = Number(search.get("qty") ?? "20");
   const makeLabelParam = search.get("label");
+  const makeFilter = search.get("filter");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [board, setBoard] = useState<{
@@ -60,7 +61,9 @@ function NeedsInner() {
   const [query, setQuery] = useState("");
   const [pickProductId, setPickProductId] = useState("");
   const [pickVariantId, setPickVariantId] = useState("");
-  const [filter, setFilter] = useState<"all" | "zero" | "low">("all");
+  const [filter, setFilter] = useState<"all" | "zero" | "low">(
+    makeFilter === "zero" || makeFilter === "low" ? makeFilter : "all",
+  );
 
   const load = () => {
     startTransition(async () => {
@@ -357,9 +360,9 @@ function NeedsInner() {
                       n.variantId ? `&variant=${encodeURIComponent(n.variantId)}` : ""
                     }&qty=${n.quantityToProduce}&label=${encodeURIComponent(n.label)}`}
                   >
-                    <Button size="sm">Make</Button>
+                    <Button size="sm">Reorder</Button>
                   </Link>
-                  <Link href="/inventory/transfers">
+                  <Link href="/inventory?tab=replenishment">
                     <Button size="sm" variant="outline">
                       Transfer instead
                     </Button>
@@ -392,7 +395,7 @@ function NeedsInner() {
                 <Link
                   href={`/manufacture/needs?make=${encodeURIComponent(n.productId)}&qty=${n.quantityToProduce}`}
                 >
-                  <Button size="sm">Make</Button>
+                  <Button size="sm">Reorder</Button>
                 </Link>
               </article>
             ))}
@@ -408,9 +411,14 @@ export default function ManufactureNeedsPage() {
     <>
       <Header
         title="Needs Making"
-        subtitle="Zero stock and low stock from Inventory — or make any product on demand."
+        subtitle="Zero stock and low stock from Inventory — Reorder opens a vendor PO (add more lines for multi-product orders)."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Link href="/manufacture/orders">
+              <Button size="sm" variant="outline">
+                Vendor orders
+              </Button>
+            </Link>
             <Link href="/inventory">
               <Button size="sm" variant="outline">
                 Inventory
