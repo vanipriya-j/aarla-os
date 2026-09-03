@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
   pushShopifyAvailableRowViaApi,
@@ -21,17 +21,29 @@ import { ArrowDownUp, RefreshCw, Upload } from "lucide-react";
 
 type Action = "compare" | "push" | "pull";
 
+function rowKey(r: Pick<InventoryDriftRow, "productId" | "variantId">) {
+  return `${r.productId}:${r.variantId}`;
+}
+
+/** Let the browser paint after each chunk (do not wrap the loop in startTransition). */
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 /**
  * Stock mismatch board — Shopify available vs Aarla Studio.
- * Primary job: show where they differ; fix in Shopify Admin; Sync this row.
+ * Rows appear as each Shopify page is read; you can act on early rows while the scan continues.
  */
 export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
-  const [pending, startTransition] = useTransition();
+  const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rows, setRows] = useState<InventoryDriftRow[]>([]);
   const [rowSyncing, setRowSyncing] = useState<string | null>(null);
+  const [variantsRead, setVariantsRead] = useState(0);
   const [totals, setTotals] = useState({
     matched: 0,
     drifted: 0,
@@ -40,30 +52,73 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
     pushed: 0,
     pulled: 0,
   });
+  /** Rows cleared by Sync/Push during an in-flight scan — keep them off the live merge. */
+  const dismissedKeysRef = useRef(new Set<string>());
+  const scanGenerationRef = useRef(0);
+
+  const paintCollected = (
+    collected: InventoryDriftRow[],
+    action: Action,
+    pushed: number,
+    pulled: number,
+  ) => {
+    const merged =
+      action === "compare" || action === "pull" || action === "push"
+        ? mergeInventoryDriftPages(collected)
+        : collected;
+    const mergedStats = summarizeInventoryDrift(merged);
+    const displayRows = (
+      action === "compare" ? merged.filter((r) => r.status !== "match") : merged
+    ).filter((r) => !dismissedKeysRef.current.has(rowKey(r)));
+    setRows(displayRows);
+    setTotals({
+      matched: mergedStats.matched,
+      drifted: mergedStats.drifted,
+      aarlaHigher: mergedStats.aarlaHigher,
+      shopifyHigher: mergedStats.shopifyHigher,
+      pushed,
+      pulled,
+    });
+    return mergedStats;
+  };
 
   const run = (action: Action) => {
-    startTransition(async () => {
-      setError(null);
-      setStatus(
-        action === "compare"
-          ? "Loading mismatch table (Shopify available vs Aarla Studio)…"
-          : action === "push"
-            ? "Pushing Aarla Studio → Shopify available…"
-            : "Pulling Shopify → Aarla Studio (adjustments)…",
-      );
+    if (scanning) return;
+    const generation = scanGenerationRef.current + 1;
+    scanGenerationRef.current = generation;
+    dismissedKeysRef.current = new Set();
+    setScanning(true);
+    setError(null);
+    setRows([]);
+    setVariantsRead(0);
+    setTotals({
+      matched: 0,
+      drifted: 0,
+      aarlaHigher: 0,
+      shopifyHigher: 0,
+      pushed: 0,
+      pulled: 0,
+    });
+    setStatus(
+      action === "compare"
+        ? "Reading Shopify… mismatches will appear as pages load."
+        : action === "push"
+          ? "Pushing Aarla Studio → Shopify available…"
+          : "Pulling Shopify → Aarla Studio (adjustments)…",
+    );
+
+    void (async () => {
       const lockTokenRef = { current: newCommerceSyncLockToken() };
       let cursor: string | null = null;
       let guard = 0;
-      let matched = 0;
-      let drifted = 0;
-      let aarlaHigher = 0;
-      let shopifyHigher = 0;
       let pushed = 0;
       let pulled = 0;
+      let readTotal = 0;
       const collected: InventoryDriftRow[] = [];
 
       try {
         while (guard < 200) {
+          if (scanGenerationRef.current !== generation) return;
           guard += 1;
           const res = await runChunkWithAutoRetry({
             getToken: () => lockTokenRef.current,
@@ -76,68 +131,59 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
             attempt: (token) =>
               syncShopifyInventoryChunkViaApi(cursor, token, action, true),
           });
+          if (scanGenerationRef.current !== generation) return;
           if (!res.ok) {
             setError(res.error);
             setStatus("Stopped — fix scopes/errors and try again.");
             return;
           }
-          matched += res.data.matched;
-          drifted += res.data.drifted;
-          aarlaHigher += res.data.aarlaHigher;
-          shopifyHigher += res.data.shopifyHigher;
           pushed += res.data.pushed;
           pulled += res.data.pulled;
+          readTotal += res.data.variantsRead;
           collected.push(...res.data.rows);
           if (res.data.errors.length) {
             setError(res.data.errors.slice(0, 3).join(" · "));
           }
+
+          const stats = paintCollected(collected, action, pushed, pulled);
+          setVariantsRead(readTotal);
           setStatus(
-            `Read ${res.data.variantsRead} · mismatches ${drifted} · matched ${matched}` +
+            (res.data.hasMore
+              ? `Scanning… read ${readTotal} Shopify variants`
+              : `Scan complete — read ${readTotal} Shopify variants`) +
+              ` · mismatches ${stats.drifted} · matched ${stats.matched}` +
               (action === "push" ? ` · pushed ${pushed}` : "") +
-              (action === "pull" ? ` · pulled ${pulled}` : "") +
-              (res.data.hasMore ? "…" : ""),
+              (action === "pull" ? ` · pulled ${pulled}` : ""),
           );
+          await yieldToPaint();
+
           if (!res.data.hasMore) break;
           cursor = res.data.nextCursor ?? null;
           if (!cursor) break;
         }
-        const merged =
-          action === "compare" || action === "pull" || action === "push"
-            ? mergeInventoryDriftPages(collected)
-            : collected;
-        const mergedStats = summarizeInventoryDrift(merged);
-        const displayRows =
-          action === "compare"
-            ? merged.filter((r) => r.status !== "match")
-            : merged;
-        setRows(displayRows);
-        setTotals({
-          matched: mergedStats.matched,
-          drifted: mergedStats.drifted,
-          aarlaHigher: mergedStats.aarlaHigher,
-          shopifyHigher: mergedStats.shopifyHigher,
-          pushed,
-          pulled,
-        });
+        if (scanGenerationRef.current !== generation) return;
+        const stats = paintCollected(collected, action, pushed, pulled);
         setStatus(
           action === "compare"
-            ? `Mismatch table ready — ${mergedStats.drifted} to review, ${mergedStats.matched} already aligned.`
+            ? `Mismatch table ready — ${stats.drifted} to review, ${stats.matched} already aligned (${readTotal} variants read).`
             : action === "push"
               ? `Push done — set ${pushed} Shopify available qty from Aarla Studio.`
               : `Pull done — adjusted ${pulled} Studio balances from Shopify.`,
         );
         if (action !== "compare") onDone?.();
       } catch (err) {
+        if (scanGenerationRef.current !== generation) return;
         setError(err instanceof Error ? err.message : String(err));
         setStatus(null);
       } finally {
+        if (scanGenerationRef.current === generation) setScanning(false);
         await unlockCommerceSyncLockViaApi().catch(() => undefined);
       }
-    });
+    })();
   };
 
   const syncRow = async (r: InventoryDriftRow) => {
-    const key = `${r.productId}:${r.variantId}`;
+    const key = rowKey(r);
     setRowSyncing(key);
     setError(null);
     setStatus(`Syncing ${r.sku || r.label} from Shopify…`);
@@ -158,7 +204,8 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         setError(res.data.errors.slice(0, 2).join(" · "));
       }
       if (res.data.aligned || !res.data.row || res.data.row.status === "match") {
-        setRows((prev) => prev.filter((x) => `${x.productId}:${x.variantId}` !== key));
+        dismissedKeysRef.current.add(key);
+        setRows((prev) => prev.filter((x) => rowKey(x) !== key));
         setTotals((t) => ({
           ...t,
           drifted: Math.max(0, t.drifted - 1),
@@ -170,9 +217,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         );
       } else if (res.data.row) {
         setRows((prev) =>
-          prev.map((x) =>
-            `${x.productId}:${x.variantId}` === key ? res.data.row! : x,
-          ),
+          prev.map((x) => (rowKey(x) === key ? res.data.row! : x)),
         );
         setStatus(
           `${r.sku || r.label} refreshed — still mismatched (Studio ${res.data.row.aarlaStudio} vs Shopify ${res.data.row.shopifyAvailable})`,
@@ -189,7 +234,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
   };
 
   const pushAvailableRow = async (r: InventoryDriftRow) => {
-    const key = `${r.productId}:${r.variantId}`;
+    const key = rowKey(r);
     setRowSyncing(key);
     setError(null);
     setStatus(`Pushing Studio ${r.aarlaStudio} → Shopify Available for ${r.sku || r.label}…`);
@@ -212,7 +257,8 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         setError(res.data.errors.slice(0, 2).join(" · "));
       }
       if (res.data.aligned || !res.data.row || res.data.row.status === "match") {
-        setRows((prev) => prev.filter((x) => `${x.productId}:${x.variantId}` !== key));
+        dismissedKeysRef.current.add(key);
+        setRows((prev) => prev.filter((x) => rowKey(x) !== key));
         setTotals((t) => ({
           ...t,
           drifted: Math.max(0, t.drifted - 1),
@@ -225,9 +271,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         );
       } else if (res.data.row) {
         setRows((prev) =>
-          prev.map((x) =>
-            `${x.productId}:${x.variantId}` === key ? res.data.row! : x,
-          ),
+          prev.map((x) => (rowKey(x) === key ? res.data.row! : x)),
         );
         setStatus(
           res.data.pushed
@@ -256,8 +300,8 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               <ArrowDownUp className="h-5 w-5" /> Stock mismatches
             </h2>
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
-              When Studio is truth, <strong>Push Available</strong>. When you fixed Shopify Admin,{" "}
-              <strong>Sync</strong> that row.
+              Rows appear as Shopify pages load — act on them while the scan continues. When Studio
+              is truth, <strong>Push Available</strong>. After an Admin fix, <strong>Sync</strong>.
             </p>
             <p className="text-xs text-charcoal/50 mt-2 max-w-2xl">
               <strong>Receive</strong> auto-pushes Shopify <em>Available</em> at Aarla Office for
@@ -265,15 +309,16 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               needs scheduled changes (later). Do not use Committed for WIP.
             </p>
           </div>
-          <Button size="sm" disabled={pending || !!rowSyncing} onClick={() => run("compare")}>
-            <RefreshCw className="h-4 w-4" />
-            {pending ? "Loading…" : "Show mismatches"}
+          <Button size="sm" disabled={scanning} onClick={() => run("compare")}>
+            <RefreshCw className={`h-4 w-4 ${scanning ? "animate-spin" : ""}`} />
+            {scanning ? "Scanning…" : "Show mismatches"}
           </Button>
         </div>
         {status ? <p className="text-sm text-deep-navy">{status}</p> : null}
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
-        {(totals.drifted > 0 || totals.matched > 0) && (
+        {(totals.drifted > 0 || totals.matched > 0 || scanning) && (
           <p className="text-xs text-charcoal/55">
+            {scanning ? `Live · ${variantsRead} read · ` : ""}
             Mismatches {totals.drifted} · Matched {totals.matched} · Aarla higher{" "}
             {totals.aarlaHigher} · Shopify higher {totals.shopifyHigher}
           </p>
@@ -295,7 +340,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
             </thead>
             <tbody>
               {mismatches.map((r) => {
-                const key = `${r.productId}:${r.variantId}`;
+                const key = rowKey(r);
                 const syncing = rowSyncing === key;
                 const canPush =
                   r.status === "aarla_higher" && r.shopifyLinkCount <= 1;
@@ -320,7 +365,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                         {canPush ? (
                           <button
                             type="button"
-                            disabled={pending || !!rowSyncing}
+                            disabled={!!rowSyncing}
                             onClick={() => void pushAvailableRow(r)}
                             data-testid="mismatch-row-push-available"
                             className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-deep-navy hover:bg-pale-cream disabled:opacity-50"
@@ -332,7 +377,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                         ) : null}
                         <button
                           type="button"
-                          disabled={pending || !!rowSyncing}
+                          disabled={!!rowSyncing}
                           onClick={() => void syncRow(r)}
                           data-testid="mismatch-row-sync"
                           className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-deep-navy hover:bg-pale-cream disabled:opacity-50"
@@ -349,18 +394,24 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
             </tbody>
           </table>
           <p className="px-4 py-3 text-xs text-charcoal/50 border-t border-border">
-            Push Available when Studio is correct. Sync after fixing Shopify Admin. Aligned rows
-            drop off this list.
+            {scanning
+              ? `Still reading Shopify (${variantsRead} so far) — you can Push Available / Sync rows above while it continues.`
+              : "Push Available when Studio is correct. Sync after fixing Shopify Admin. Aligned rows drop off this list."}
           </p>
         </div>
-      ) : rows.length > 0 ? (
+      ) : scanning ? (
+        <p className="text-sm text-charcoal/55 rounded-xl border border-border bg-white px-4 py-6">
+          Scanning Shopify… {variantsRead > 0 ? `${variantsRead} variants read so far.` : "first page loading."}{" "}
+          Mismatches will show here as soon as any are found.
+        </p>
+      ) : rows.length > 0 || variantsRead > 0 ? (
         <p className="text-sm text-charcoal/55 rounded-xl border border-border bg-white px-4 py-6">
           No mismatches — Studio and Shopify available are aligned for linked variants.
         </p>
       ) : (
         <p className="text-sm text-charcoal/55">
-          Click <strong>Show mismatches</strong> to load the table. Empty means everything matched
-          (or catalog is not Shopify-linked yet).
+          Click <strong>Show mismatches</strong> to start. The table fills page by page — you do not
+          wait for the full catalog.
         </p>
       )}
 
@@ -378,13 +429,13 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               Prefer per-row Push Available or Sync. Bulk tools are for catch-up only.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" disabled={pending} onClick={() => run("push")}>
+              <Button size="sm" variant="outline" disabled={scanning} onClick={() => run("push")}>
                 Push all Studio → Shopify
               </Button>
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={pending}
+                disabled={scanning}
                 onClick={() => run("pull")}
               >
                 Pull all Shopify → Aarla
