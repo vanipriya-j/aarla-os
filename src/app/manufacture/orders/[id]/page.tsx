@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import {
@@ -32,9 +32,13 @@ function daysOverdue(date: string | null): number | null {
   return d > 0 ? d : null;
 }
 
-export default function VendorOrderDetailPage() {
+function VendorOrderDetailInner() {
   const params = useParams<{ id: string }>();
+  const search = useSearchParams();
   const orderNumber = decodeURIComponent(params.id);
+  const prefillProduct = search.get("addProduct") || search.get("make");
+  const prefillVariant = search.get("variant");
+  const prefillQty = Number(search.get("qty") ?? "20");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<VendorOrder | null>(null);
@@ -62,9 +66,9 @@ export default function VendorOrderDetailPage() {
       variants: Array<{ id: string; label: string; sku: string }>;
     }>
   >([]);
-  const [addProductId, setAddProductId] = useState("");
-  const [addVariantId, setAddVariantId] = useState("");
-  const [addQty, setAddQty] = useState(20);
+  const [addProductId, setAddProductId] = useState(prefillProduct ?? "");
+  const [addVariantId, setAddVariantId] = useState(prefillVariant ?? "");
+  const [addQty, setAddQty] = useState(Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20);
 
   const load = () => {
     startTransition(async () => {

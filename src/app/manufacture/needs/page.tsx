@@ -7,10 +7,12 @@ import { Suspense } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import {
+  addVendorOrderItemsAction,
   createVendorOrderAction,
   getNeedsMakingAction,
   listManufactureVendorsAction,
   listProductsForManufactureAction,
+  listVendorOrdersAction,
 } from "@/app/actions/manufacture-actions";
 
 type NeedItem = {
@@ -64,14 +66,20 @@ function NeedsInner() {
   const [filter, setFilter] = useState<"all" | "zero" | "low">(
     makeFilter === "zero" || makeFilter === "low" ? makeFilter : "all",
   );
+  const [openOrders, setOpenOrders] = useState<
+    Array<{ orderNumber: string; vendorId: string; status: string; lineCount: number }>
+  >([]);
+  const [targetOrder, setTargetOrder] = useState("");
+  const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
 
   const load = () => {
     startTransition(async () => {
       setError(null);
-      const [n, v, p] = await Promise.all([
+      const [n, v, p, o] = await Promise.all([
         getNeedsMakingAction(),
         listManufactureVendorsAction(),
         listProductsForManufactureAction(),
+        listVendorOrdersAction(),
       ]);
       if (!n.ok) setError(n.error);
       else setBoard(n.data);
@@ -80,6 +88,18 @@ function NeedsInner() {
         setVendorCode((prev) => prev || v.data[0]?.id || "");
       }
       if (p.ok) setProducts(p.data);
+      if (o.ok) {
+        const open = o.data
+          .filter((ord) => ord.status === "draft" || ord.status === "ready_to_send")
+          .map((ord) => ({
+            orderNumber: ord.orderNumber,
+            vendorId: ord.vendorId,
+            status: ord.status,
+            lineCount: ord.items.length,
+          }));
+        setOpenOrders(open);
+        setTargetOrder((prev) => prev || open[0]?.orderNumber || "");
+      }
     });
   };
 
@@ -167,6 +187,31 @@ function NeedsInner() {
     });
   }
 
+  function addToOpenOrder() {
+    if (!makeProductId) return;
+    if (!targetOrder) {
+      setError("Pick an open PO to add this product to.");
+      return;
+    }
+    startTransition(async () => {
+      const r = await addVendorOrderItemsAction(targetOrder, [
+        {
+          productCode: makeProductId,
+          variantCode: makeVariantId,
+          title: makeLabel ?? makeProductId,
+          variantLabel: "",
+          quantity: qty,
+          sku: makeProductId,
+        },
+      ]);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      router.push(`/manufacture/orders/${encodeURIComponent(r.data.orderNumber)}`);
+    });
+  }
+
   function createFromPicker() {
     if (!pickProduct) {
       setError("Choose a product to make.");
@@ -188,40 +233,89 @@ function NeedsInner() {
       {pending && !board ? <p className="text-sm text-charcoal/50">Loading…</p> : null}
 
       {makeProductId ? (
-        <div className="card-surface p-4 border-aarla-red/25 space-y-3">
-          <p className="font-medium text-deep-navy">Create vendor order · {makeLabel}</p>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="text-xs text-charcoal/60">
-              Quantity
-              <input
-                type="number"
-                min={1}
-                value={qty}
-                onChange={(e) => setQty(Number(e.target.value))}
-                className="mt-1 block w-24 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="text-xs text-charcoal/60">
-              Vendor
-              <select
-                value={vendorCode}
-                onChange={(e) => setVendorCode(e.target.value)}
-                className="mt-1 block min-w-[14rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-              >
-                {vendors.length === 0 ? <option value="">No vendors yet</option> : null}
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button onClick={createFromQuery} disabled={pending || !vendorCode}>
-              {pending ? "Creating…" : "Create order"}
-            </Button>
-            <Link href="/manufacture/needs">
-              <Button variant="ghost">Cancel</Button>
-            </Link>
+        <div className="card-surface p-4 border-aarla-red/25 space-y-4">
+          <div>
+            <p className="font-medium text-deep-navy">Reorder · {makeLabel}</p>
+            <p className="text-xs text-charcoal/55 mt-1">
+              Add this SKU to an open PO, or start a new one for a vendor.
+            </p>
+          </div>
+
+          {openOrders.length > 0 ? (
+            <div className="rounded-xl border border-border bg-white p-3 space-y-3">
+              <p className="text-sm font-medium text-deep-navy">Add to open PO</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-xs text-charcoal/60">
+                  Quantity
+                  <input
+                    type="number"
+                    min={1}
+                    value={qty}
+                    onChange={(e) => setQty(Number(e.target.value))}
+                    className="mt-1 block w-24 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-charcoal/60">
+                  Open PO
+                  <select
+                    value={targetOrder}
+                    onChange={(e) => setTargetOrder(e.target.value)}
+                    className="mt-1 block min-w-[18rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                  >
+                    {openOrders.map((o) => (
+                      <option key={o.orderNumber} value={o.orderNumber}>
+                        {o.orderNumber} · {vendorName(o.vendorId)} · {o.status} · {o.lineCount}{" "}
+                        line{o.lineCount === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button onClick={addToOpenOrder} disabled={pending || !targetOrder}>
+                  {pending ? "Adding…" : "Add to PO"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-charcoal/55">
+              No open draft POs yet — create a new one below.
+            </p>
+          )}
+
+          <div className="rounded-xl border border-dashed border-border p-3 space-y-3">
+            <p className="text-sm font-medium text-deep-navy">Or create a new PO</p>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-xs text-charcoal/60">
+                Quantity
+                <input
+                  type="number"
+                  min={1}
+                  value={qty}
+                  onChange={(e) => setQty(Number(e.target.value))}
+                  className="mt-1 block w-24 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="text-xs text-charcoal/60">
+                Vendor
+                <select
+                  value={vendorCode}
+                  onChange={(e) => setVendorCode(e.target.value)}
+                  className="mt-1 block min-w-[14rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                >
+                  {vendors.length === 0 ? <option value="">No vendors yet</option> : null}
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button onClick={createFromQuery} disabled={pending || !vendorCode} variant="outline">
+                {pending ? "Creating…" : "Create new order"}
+              </Button>
+              <Link href="/manufacture/needs">
+                <Button variant="ghost">Cancel</Button>
+              </Link>
+            </div>
           </div>
         </div>
       ) : null}
