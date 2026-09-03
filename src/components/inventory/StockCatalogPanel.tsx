@@ -139,17 +139,26 @@ export function StockCatalogPanel({
         return;
       }
       const bits: string[] = [];
-      if (res.data.pulled) {
+      if (res.data.pulled && res.data.row) {
         bits.push(
-          `Studio set to ${res.data.row?.shopifyAvailable ?? "Shopify Available"}`,
+          `Studio set to ${res.data.row.shopifyAvailable} from ${res.data.locationName ?? "Aarla Office"}`,
         );
-      } else if (res.data.aligned) {
-        bits.push("Studio ↔ Shopify already aligned");
+        if (
+          res.data.shopTotal != null &&
+          res.data.shopTotal !== res.data.row.shopifyAvailable
+        ) {
+          bits.push(`shop total ${res.data.shopTotal} ignored`);
+        }
+      } else if (res.data.aligned && res.data.row) {
+        bits.push(
+          `Studio ↔ ${res.data.locationName ?? "Aarla Office"} aligned at ${res.data.row.shopifyAvailable}`,
+        );
       } else if (res.data.row) {
         bits.push(
-          `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
+          `Studio ${res.data.row.aarlaStudio} / Office ${res.data.row.shopifyAvailable}`,
         );
       }
+      if (res.data.levelSummary) bits.push(res.data.levelSummary);
       if (res.data.errors.length) bits.push(res.data.errors[0]!);
       setRowSyncMsg(bits.join(" · ") || "Synced");
       onShopifyRowSynced?.();

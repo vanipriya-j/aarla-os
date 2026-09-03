@@ -314,6 +314,10 @@ async function compareLinkedShopifyInventory(
       skippedUnmatched += 1;
       continue;
     }
+    if (!shopify.locationId || !shopify.locationName) {
+      skippedUnmatched += 1;
+      continue;
+    }
     const aarlaStudio = studioByKey.get(`${row.product_code}:${row.variant_code}`) ?? 0;
     draftRows.push({
       productId: row.product_code,
@@ -325,7 +329,7 @@ async function compareLinkedShopifyInventory(
       sku: row.sku || shopify.sku,
       shopifyVariantId: shopify.externalVariantId,
       inventoryItemId: row.shopify_inventory_item_id ?? shopify.inventoryItemId ?? null,
-      locationId: shopify.locationId ?? officeLocationId,
+      locationId: shopify.locationId,
       aarlaStudio,
       shopifyAvailable: shopify.available,
     });
@@ -616,6 +620,12 @@ export type InventoryRowRefreshResult = {
   aligned: boolean;
   catalogUpdated: boolean;
   errors: string[];
+  /** Aarla Office location name used for Available */
+  locationName?: string | null;
+  /** Store-wide inventoryQuantity (diagnostics only) */
+  shopTotal?: number | null;
+  /** Per-location Available breakdown from Shopify */
+  levelSummary?: string | null;
 };
 
 export function shopifyVariantSearchQuery(input: {
@@ -737,6 +747,17 @@ export async function refreshShopifyInventoryRow(input: {
   const draftRows: Parameters<typeof compareInventoryDrift>[0]["rows"] = [];
 
   for (const v of page.variants) {
+    result.shopTotal = v.shopTotal ?? result.shopTotal ?? null;
+    result.levelSummary = v.levelSummary ?? result.levelSummary ?? null;
+    result.locationName = v.locationName ?? result.locationName ?? null;
+
+    if (!v.locationId || !v.locationName) {
+      result.errors.push(
+        `No “Aarla Office” inventory level for this SKU — not using shop total ${v.shopTotal ?? "?"}. Levels: ${v.levelSummary || "(none)"}. Rename the Studio location to “Aarla Office” in Shopify, or activate inventory there.`,
+      );
+      continue;
+    }
+
     let match = await mapShopifyVariantToAarla(v.externalVariantId, v.sku);
     // Prefer the Aarla row the founder clicked when provided.
     if (input.productId && input.variantId) {
@@ -761,14 +782,16 @@ export async function refreshShopifyInventoryRow(input: {
       sku: match.sku || v.sku,
       shopifyVariantId: v.externalVariantId,
       inventoryItemId: v.inventoryItemId ?? null,
-      locationId: v.locationId ?? officeLocationId,
+      locationId: v.locationId,
       aarlaStudio,
       shopifyAvailable: v.available,
     });
   }
 
   if (!draftRows.length) {
-    result.errors.push("Shopify variant found but not linked to an Aarla catalog row.");
+    if (!result.errors.length) {
+      result.errors.push("Shopify variant found but not linked to an Aarla catalog row.");
+    }
     return result;
   }
 
@@ -785,6 +808,9 @@ export type InventoryRowPullResult = {
   row: InventoryDriftRow | null;
   aligned: boolean;
   errors: string[];
+  locationName?: string | null;
+  shopTotal?: number | null;
+  levelSummary?: string | null;
 };
 
 /**
@@ -816,11 +842,21 @@ export async function pullShopifyAvailableForRow(input: {
     shopifyProductId: input.shopifyProductId,
     connector: input.connector,
   });
+  result.locationName = refreshed.locationName ?? null;
+  result.shopTotal = refreshed.shopTotal ?? null;
+  result.levelSummary = refreshed.levelSummary ?? null;
   if (refreshed.errors.length) result.errors.push(...refreshed.errors);
   if (!refreshed.row) {
     if (!result.errors.length) {
       result.errors.push("Could not read Shopify available qty for this SKU.");
     }
+    return result;
+  }
+  if (!refreshed.locationName) {
+    result.errors.push(
+      `Refusing to pull shop total ${refreshed.shopTotal ?? "?"} — Aarla Office Available not found. Levels: ${refreshed.levelSummary || "(none)"}`,
+    );
+    result.row = refreshed.row;
     return result;
   }
 
@@ -839,7 +875,7 @@ export async function pullShopifyAvailableForRow(input: {
       systemQty: row.aarlaStudio,
       physicalQty: row.shopifyAvailable,
       reason: "count correction",
-      notes: `Shopify Aarla Office pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
+      notes: `Shopify ${refreshed.locationName} pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio}; shop total ${refreshed.shopTotal ?? "?"})`,
     });
     result.pulled = Boolean(mv);
   } catch (err) {
@@ -856,6 +892,9 @@ export async function pullShopifyAvailableForRow(input: {
     shopifyProductId: input.shopifyProductId,
     connector: input.connector,
   });
+  result.locationName = after.locationName ?? result.locationName;
+  result.shopTotal = after.shopTotal ?? result.shopTotal;
+  result.levelSummary = after.levelSummary ?? result.levelSummary;
   if (after.errors.length) result.errors.push(...after.errors);
   result.row = after.row ?? {
     ...row,

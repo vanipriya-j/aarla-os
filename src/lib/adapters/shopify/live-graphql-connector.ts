@@ -479,20 +479,59 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
 }
 
 /**
- * Read Available at one Shopify location (Aarla Office) — not store-wide inventoryQuantity.
- * Needs read_inventory on the live token (same as Push inventoryItem).
+ * Read Available per Shopify location — never use store-wide inventoryQuantity for sync.
+ * Needs read_inventory on the live token.
  */
 const VARIANT_INVENTORY_QUERY = `
-query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $locationId: ID!) {
+query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
   productVariants(first: $pageSize, after: $cursor, query: $query) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
         id
         sku
+        inventoryQuantity
         inventoryItem {
           id
-          inventoryLevel(locationId: $locationId) {
+          inventoryLevels(first: 25) {
+            nodes {
+              location {
+                id
+                name
+                isActive
+                fulfillsOnlineOrders
+              }
+              quantities(names: ["available"]) {
+                name
+                quantity
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+/** Aarla-first compare — Available at Aarla Office for linked variants only. */
+const VARIANT_NODES_INVENTORY_QUERY = `
+query VariantNodesInventory($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on ProductVariant {
+      id
+      sku
+      inventoryQuantity
+      inventoryItem {
+        id
+        inventoryLevels(first: 25) {
+          nodes {
+            location {
+              id
+              name
+              isActive
+              fulfillsOnlineOrders
+            }
             quantities(names: ["available"]) {
               name
               quantity
@@ -505,30 +544,19 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $lo
 }
 `;
 
-/** Aarla-first compare — Available at Aarla Office for linked variants only. */
-const VARIANT_NODES_INVENTORY_QUERY = `
-query VariantNodesInventory($ids: [ID!]!, $locationId: ID!) {
-  nodes(ids: $ids) {
-    ... on ProductVariant {
-      id
-      sku
-      inventoryItem {
-        id
-        inventoryLevel(locationId: $locationId) {
-          quantities(names: ["available"]) {
-            name
-            quantity
-          }
-        }
-      }
-    }
-  }
-}
-`;
-
 type InventoryLevelQuantities = {
   quantities?: Array<{ name: string; quantity: number }> | null;
 } | null;
+
+type InventoryLevelNode = {
+  location?: {
+    id?: string;
+    name?: string | null;
+    isActive?: boolean;
+    fulfillsOnlineOrders?: boolean;
+  } | null;
+  quantities?: Array<{ name: string; quantity: number }> | null;
+};
 
 function availableFromInventoryLevel(
   level: InventoryLevelQuantities | undefined,
@@ -547,25 +575,94 @@ export function pickShopifyOfficeLocation(
   }>,
 ): string | null {
   const active = nodes.filter((n) => n.isActive);
-  const aarlaOffice = active.find((n) => /aarla\s*office/i.test(n.name));
+  const aarlaOffice = active.find((n) => isAarlaOfficeLocationName(n.name));
   const online = active.find((n) => n.fulfillsOnlineOrders);
   return aarlaOffice?.id ?? online?.id ?? active[0]?.id ?? null;
+}
+
+export function isAarlaOfficeLocationName(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim();
+  if (!n) return false;
+  // Match Admin location "Aarla Office" (and close variants).
+  return /aarla\s*office/i.test(n) || /^office$/i.test(n);
+}
+
+export type PickedOfficeInventory = {
+  available: number;
+  locationId: string | null;
+  locationName: string | null;
+  shopTotal: number;
+  levelCount: number;
+  levelSummary: string;
+};
+
+/**
+ * Pick Available at Aarla Office from inventoryLevels — never the store-wide total.
+ * Requires an Aarla Office level when levels exist; does not fall back to another
+ * location's qty (that was returning partner/warehouse totals as "14").
+ */
+export function pickAarlaOfficeAvailable(input: {
+  levels: InventoryLevelNode[];
+  shopTotal?: number | null;
+  preferredLocationId?: string | null;
+}): PickedOfficeInventory {
+  const shopTotal = Math.max(0, Math.floor(Number(input.shopTotal ?? 0)));
+  const levels = input.levels.filter((l) => l.location?.id);
+  const summary = levels
+    .map((l) => {
+      const name = (l.location?.name ?? "?").trim() || "?";
+      const qty = availableFromInventoryLevel(l);
+      return `${name}=${qty}`;
+    })
+    .join(", ");
+
+  const byName = levels.find((l) => isAarlaOfficeLocationName(l.location?.name)) ?? null;
+  const byPreferredId = input.preferredLocationId
+    ? levels.find(
+        (l) =>
+          l.location?.id === input.preferredLocationId &&
+          isAarlaOfficeLocationName(l.location?.name),
+      ) ?? null
+    : null;
+  const chosen = byName ?? byPreferredId;
+
+  if (chosen?.location?.id) {
+    return {
+      available: availableFromInventoryLevel(chosen),
+      locationId: chosen.location.id,
+      locationName: (chosen.location.name ?? "").trim() || "Aarla Office",
+      shopTotal,
+      levelCount: levels.length,
+      levelSummary: summary,
+    };
+  }
+
+  // No Aarla Office level on this item — do not use another location or shop total.
+  return {
+    available: 0,
+    locationId: null,
+    locationName: null,
+    shopTotal,
+    levelCount: levels.length,
+    levelSummary: summary || "(no inventory levels)",
+  };
 }
 
 type VariantNodesInventoryData = {
   nodes: Array<{
     id?: string;
     sku?: string | null;
+    inventoryQuantity?: number | null;
     inventoryItem?: {
       id?: string;
-      inventoryLevel?: InventoryLevelQuantities;
+      inventoryLevels?: { nodes?: InventoryLevelNode[] | null } | null;
     } | null;
   } | null>;
 };
 
 const LOCATIONS_QUERY = `
 query SyncInventoryLocations {
-  locations(first: 25, includeInactive: false) {
+  locations(first: 50, includeInactive: false) {
     edges {
       node {
         id
@@ -593,9 +690,10 @@ type VariantInventoryQueryData = {
       node: {
         id: string;
         sku: string | null;
+        inventoryQuantity?: number | null;
         inventoryItem?: {
           id?: string;
-          inventoryLevel?: InventoryLevelQuantities;
+          inventoryLevels?: { nodes?: InventoryLevelNode[] | null } | null;
         } | null;
       };
     }>;
@@ -932,13 +1030,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyVariantInventoryPage> {
     assertServerOnly();
-    const locationId =
-      options.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
-    if (!locationId) {
-      throw new Error(
-        "No Shopify inventory location found — need an active Aarla Office location (read_locations).",
-      );
-    }
+    const preferredLocationId = options.locationId?.trim() || null;
 
     const variants: ShopifyVariantInventoryRecord[] = [];
     let cursor: string | null = options.cursor ?? null;
@@ -957,7 +1049,6 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
             cursor,
             pageSize,
             query,
-            locationId,
           },
         );
 
@@ -965,12 +1056,20 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const externalVariantId = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
           const sku =
             (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
+          const picked = pickAarlaOfficeAvailable({
+            levels: edge.node.inventoryItem?.inventoryLevels?.nodes ?? [],
+            shopTotal: edge.node.inventoryQuantity,
+            preferredLocationId,
+          });
           variants.push({
             externalVariantId,
             sku,
-            available: availableFromInventoryLevel(edge.node.inventoryItem?.inventoryLevel),
+            available: picked.available,
             inventoryItemId: edge.node.inventoryItem?.id ?? null,
-            locationId,
+            locationId: picked.locationId,
+            locationName: picked.locationName,
+            shopTotal: picked.shopTotal,
+            levelSummary: picked.levelSummary,
           });
         }
         hasNext = data.productVariants.pageInfo.hasNextPage;
@@ -1001,14 +1100,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     const unique = [...new Set(externalVariantIds.map((id) => id.trim()).filter(Boolean))];
     if (!unique.length) return [];
 
-    const locationId =
-      options?.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
-    if (!locationId) {
-      throw new Error(
-        "No Shopify inventory location found — need an active Aarla Office location (read_locations).",
-      );
-    }
-
+    const preferredLocationId = options?.locationId?.trim() || null;
     const out: ShopifyVariantInventoryRecord[] = [];
     try {
       // Shopify nodes() caps around 250 ids per call.
@@ -1019,17 +1111,24 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
         );
         const data = await this.graphql<VariantNodesInventoryData>(VARIANT_NODES_INVENTORY_QUERY, {
           ids: gids,
-          locationId,
         });
         for (const node of data.nodes ?? []) {
           if (!node?.id) continue;
           const externalVariantId = shopifyGidToExternalId(node.id) ?? node.id;
+          const picked = pickAarlaOfficeAvailable({
+            levels: node.inventoryItem?.inventoryLevels?.nodes ?? [],
+            shopTotal: node.inventoryQuantity,
+            preferredLocationId,
+          });
           out.push({
             externalVariantId,
             sku: (node.sku ?? "").trim() || `shopify-${externalVariantId}`,
-            available: availableFromInventoryLevel(node.inventoryItem?.inventoryLevel),
+            available: picked.available,
             inventoryItemId: node.inventoryItem?.id ?? null,
-            locationId,
+            locationId: picked.locationId,
+            locationName: picked.locationName,
+            shopTotal: picked.shopTotal,
+            levelSummary: picked.levelSummary,
           });
         }
       }

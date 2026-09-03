@@ -177,6 +177,12 @@ export interface ShopifyVariantInventoryRecord {
   inventoryItemId?: string | null;
   /** Shopify location gid the Available qty was read from / pushed to */
   locationId?: string | null;
+  /** Location name used for Available (e.g. "Aarla Office") */
+  locationName?: string | null;
+  /** Store-wide inventoryQuantity — diagnostics only; never write this to Studio */
+  shopTotal?: number | null;
+  /** Per-location Available summary, e.g. "Aarla Office=9, Partner=5" */
+  levelSummary?: string | null;
 }
 
 export type ShopifyVariantInventoryPage = {
