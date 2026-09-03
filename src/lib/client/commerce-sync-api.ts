@@ -130,6 +130,62 @@ export async function syncShopifyOpeningInventoryChunkViaApi(
   });
 }
 
+export async function syncShopifyInventoryChunkViaApi(
+  cursor: string | null,
+  lockToken: string,
+  action: "compare" | "push" | "pull" = "compare",
+  driftedOnly = true,
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventorySyncSummary>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    cursor,
+    lockToken,
+    action,
+    driftedOnly,
+  });
+}
+
+export async function refreshShopifyInventoryRowViaApi(
+  lockToken: string,
+  input: {
+    shopifyVariantId?: string | null;
+    sku?: string | null;
+    productId?: string | null;
+    variantId?: string | null;
+    shopifyProductId?: string | null;
+  },
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventoryRowRefreshResult>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    lockToken,
+    action: "refresh",
+    ...input,
+  });
+}
+
+/** Push Studio ATP → Shopify Available for one mismatch row (Studio is truth). */
+export async function pushShopifyAvailableRowViaApi(
+  lockToken: string,
+  input: {
+    productId: string;
+    variantId: string;
+    shopifyVariantId?: string | null;
+    sku?: string | null;
+    inventoryItemId?: string | null;
+    locationId?: string | null;
+  },
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventoryRowPushResult>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    lockToken,
+    action: "push-available",
+    ...input,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

@@ -19,6 +19,7 @@ import {
 import { AdjustStockModal, type AdjustStockSubmitInput } from "@/components/inventory/AdjustStockModal";
 import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
 import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogSyncButton";
+import { InventoryShopifySyncPanel } from "@/components/inventory/InventoryShopifySyncPanel";
 import { DEFAULT_INVENTORY_LOC, computeReplenishment } from "@/lib/domain";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
 import {
@@ -26,16 +27,23 @@ import {
   suggestedReorderQty,
 } from "@/lib/domain/manufacture-reorder-link";
 
-type Tab = "stock" | "replenishment" | "locations" | "movements";
+type Tab = "stock" | "sync" | "replenishment" | "locations" | "movements";
 
 const TAB_ALIASES: Record<string, Tab> = {
   products: "stock",
   batches: "locations",
+  drift: "sync",
 };
 
 function tabFromParam(value: string | null): Tab {
   if (!value) return "stock";
-  if (value === "stock" || value === "replenishment" || value === "locations" || value === "movements") {
+  if (
+    value === "stock" ||
+    value === "sync" ||
+    value === "replenishment" ||
+    value === "locations" ||
+    value === "movements"
+  ) {
     return value;
   }
   return TAB_ALIASES[value] ?? "stock";
@@ -84,6 +92,7 @@ function InventoryInner() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "stock", label: "Stock" },
+    { id: "sync", label: "Mismatches" },
     { id: "replenishment", label: "Replenishment" },
     { id: "locations", label: "Locations" },
     { id: "movements", label: "Movement Ledger" },
@@ -231,7 +240,8 @@ function InventoryInner() {
                 <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
                 <p>
                   1) Sync catalog from Shopify. 2) Import base inventory once (Shopify available →
-                  Studio opening receipts). After that manage with Receive / Transfer.
+                  Studio opening receipts). After that manage with Receive / Transfer and use Shopify
+                  sync to keep ATP aligned.
                 </p>
                 <ShopifyCatalogSyncButton onDone={reload} />
               </div>
@@ -242,10 +252,13 @@ function InventoryInner() {
                 locations={locations}
                 reorderRules={reorderRules}
                 onSelectVariant={openDetail}
+                onShopifyRowSynced={reload}
               />
             )}
           </div>
         ) : null}
+
+        {tab === "sync" ? <InventoryShopifySyncPanel onDone={reload} /> : null}
 
         {tab === "replenishment" ? (
           <div className="space-y-8">

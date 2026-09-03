@@ -524,12 +524,60 @@ export class FixtureShopifyConnector implements ShopifyConnector {
           externalVariantId: v.externalVariantId,
           sku: v.sku,
           available: i === 0 ? 12 : 5,
+          inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
+          locationId: "gid://shopify/Location/fixture-primary",
         })),
       ),
       hasMore: false,
       nextCursor: null,
       pagesFetched: 1,
     };
+  }
+
+  async fetchVariantsInventoryByIds(
+    externalVariantIds: string[],
+  ): Promise<
+    Array<{
+      externalVariantId: string;
+      sku: string;
+      available: number;
+      inventoryItemId: string | null;
+      locationId: string | null;
+    }>
+  > {
+    if (this.options.failHard) {
+      throw new Error(this.options.partialError || "Shopify Admin API unavailable");
+    }
+    const want = new Set(
+      externalVariantIds.map((id) => id.replace(/^gid:\/\/shopify\/ProductVariant\//, "")),
+    );
+    return FIXTURE_PRODUCTS.flatMap((p) =>
+      p.variants
+        .filter(
+          (v) =>
+            !!v.externalVariantId &&
+            (want.has(v.externalVariantId) ||
+              want.has(`gid://shopify/ProductVariant/${v.externalVariantId}`)),
+        )
+        .map((v, i) => ({
+          externalVariantId: v.externalVariantId!,
+          sku: v.sku,
+          available: i === 0 ? 12 : 5,
+          inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
+          locationId: "gid://shopify/Location/fixture-primary",
+        })),
+    );
+  }
+
+  async fetchPrimaryInventoryLocationId(): Promise<string | null> {
+    return "gid://shopify/Location/fixture-primary";
+  }
+
+  async setInventoryQuantities(
+    quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number }>,
+  ) {
+    void quantities;
+    return { ok: true, errors: [] as string[] };
   }
 }
 

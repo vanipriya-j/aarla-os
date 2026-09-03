@@ -52,6 +52,8 @@ export interface ProductVariant {
   sku: string;
   /** Structured attributes for category matrices — e.g. { Size: "M", Colour: "Black" } or { Format: "8x10" }. */
   options?: Record<string, string>;
+  /** Shopify variant id when linked from catalog sync. */
+  shopifyVariantId?: string | null;
 }
 
 /** Inventory screen presentation hint — "auto" infers from category/options. */

@@ -51,6 +51,7 @@ function ReceivePageInner() {
   const [barcodeAttached, setBarcodeAttached] = useState(false);
   const [shelf, setShelf] = useState("A-12-C");
   const [done, setDone] = useState(false);
+  const [shopifyPushNote, setShopifyPushNote] = useState<string | null>(null);
   const [refundType, setRefundType] = useState("replacement");
 
   const selectPo = (id: string) => {
@@ -64,6 +65,7 @@ function ReceivePageInner() {
       setDamaged(0);
       setMissing(0);
       setDone(false);
+      setShopifyPushNote(null);
     }
   };
 
@@ -83,14 +85,36 @@ function ReceivePageInner() {
       missing,
       notes: qcNotes || `QC receive on shelf ${shelf}`,
     });
-    if (result) setDone(true);
+    if (result) {
+      setDone(true);
+      const push = result.shopifyPush;
+      if (!push) {
+        setShopifyPushNote(null);
+      } else if (push.pushed > 0) {
+        setShopifyPushNote(
+          `Shopify Available updated for ${push.pushed} linked variant${push.pushed === 1 ? "" : "s"} at Aarla Office.`,
+        );
+      } else if (push.skippedUnlinked > 0 && !push.attempted) {
+        setShopifyPushNote(
+          "Product not linked to Shopify — ledger only. Link the catalog SKU to auto-push Available next time.",
+        );
+      } else if (push.errors.length) {
+        setShopifyPushNote(
+          `Ledger saved. Shopify Available push skipped: ${push.errors[0]}`,
+        );
+      } else {
+        setShopifyPushNote(
+          "Ledger saved. No Shopify Available change (missing inventory item ids or scopes).",
+        );
+      }
+    }
   };
 
   return (
     <>
       <Header
         title="Receive Stock"
-        subtitle="QC inbound stock and post Purchase Receipt / Damage movements to the ledger."
+        subtitle="QC inbound stock, post Purchase Receipt to the ledger, and push Shopify Available at Aarla Office for linked SKUs."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-4xl">
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
@@ -290,18 +314,36 @@ function ReceivePageInner() {
                   <p className="text-sm text-charcoal/70 mt-1">
                     Purchase Receipt (+{accepted}) and Damage (+{damaged}) written. Shelf {shelf}.
                   </p>
-                  <div className="mt-2 flex gap-2">
+                  {shopifyPushNote ? (
+                    <p className="text-sm text-charcoal/70 mt-2">{shopifyPushNote}</p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <StatusChip label="Ledger updated" tone="success" />
-                    <StatusChip label="Ready for Shopify" tone="info" />
+                    <StatusChip
+                      label={
+                        shopifyPushNote?.includes("Available updated")
+                          ? "Shopify Available pushed"
+                          : "Shopify Available"
+                      }
+                      tone={
+                        shopifyPushNote?.includes("Available updated") ? "success" : "info"
+                      }
+                    />
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(4)}>
-                  Back
-                </Button>
-                <Button onClick={postToLedger}>Confirm receive & write ledger</Button>
+              <div className="space-y-3">
+                <p className="text-xs text-charcoal/55">
+                  Confirming receive writes Studio stock and best-effort sets Shopify{" "}
+                  <em>Available</em> at Aarla Office for linked variants (not Incoming / Committed).
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setStep(4)}>
+                    Back
+                  </Button>
+                  <Button onClick={postToLedger}>Confirm receive & write ledger</Button>
+                </div>
               </div>
             )}
           </FormSection>

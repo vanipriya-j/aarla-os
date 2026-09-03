@@ -72,7 +72,7 @@ export default function ManufactureHomePage() {
     <>
       <Header
         title="Manufacture / Reorder"
-        subtitle="Need → vendor → structured order → PDF → send → execute → receive. The order in Aarla is the source of truth."
+        subtitle="Need → vendor → multi-line PO → PDF → send → receive. Stock stays Aarla WIP until Receive, then Shopify Available at Aarla Office."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link href="/manufacture/needs">

@@ -102,25 +102,54 @@ function createProductRepo(q: QueryFn): ProductRepository {
         [ORG_ID],
       );
       if (!products.length) return [];
-      const variants = await q<{
+      let variants: Array<{
         product_id: string;
         code: string;
         label: string;
         sku: string;
         options: Record<string, string> | null;
-      }>(
-        `select product_id, code, label, sku, options from product_variants
-         where organization_id = $1 order by sku`,
-        [ORG_ID],
-      );
+        shopify_variant_id: string | null;
+      }>;
+      try {
+        variants = await q(
+          `select product_id, code, label, sku, options, shopify_variant_id from product_variants
+           where organization_id = $1 order by sku`,
+          [ORG_ID],
+        );
+      } catch {
+        const legacy = await q<{
+          product_id: string;
+          code: string;
+          label: string;
+          sku: string;
+          options: Record<string, string> | null;
+        }>(
+          `select product_id, code, label, sku, options from product_variants
+           where organization_id = $1 order by sku`,
+          [ORG_ID],
+        );
+        variants = legacy.map((v) => ({ ...v, shopify_variant_id: null }));
+      }
       const byProduct = new Map<
         string,
-        { id: string; label: string; sku: string; options?: Record<string, string> }[]
+        {
+          id: string;
+          label: string;
+          sku: string;
+          options?: Record<string, string>;
+          shopifyVariantId?: string | null;
+        }[]
       >();
       for (const v of variants) {
         const list = byProduct.get(v.product_id) ?? [];
         const options = v.options && Object.keys(v.options).length ? v.options : undefined;
-        list.push({ id: v.code, label: v.label, sku: v.sku, options });
+        list.push({
+          id: v.code,
+          label: v.label,
+          sku: v.sku,
+          options,
+          shopifyVariantId: v.shopify_variant_id ?? null,
+        });
         byProduct.set(v.product_id, list);
       }
       return products.map((p) => {
