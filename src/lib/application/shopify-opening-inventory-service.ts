@@ -1,5 +1,5 @@
 /**
- * One-time legacy base inventory from Shopify inventoryQuantity.
+ * One-time legacy base inventory from Shopify Available at Aarla Office.
  * Writes Purchase Receipt External→Studio. Not continuous sync.
  */
 import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
@@ -104,6 +104,26 @@ export async function syncShopifyOpeningInventory(
 
   await ensureCoreInventoryLocations();
 
+  let locationId: string | null = null;
+  if (typeof connector.fetchPrimaryInventoryLocationId === "function") {
+    try {
+      locationId = await connector.fetchPrimaryInventoryLocationId();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        /ACCESS_DENIED|locations|read_locations|not authorized|permission/i.test(message)
+          ? `${message} — grant read_locations so we can read Available at Aarla Office.`
+          : message,
+      );
+    }
+  }
+  if (!locationId) {
+    summary.errors.push(
+      "No Shopify Aarla Office location found — grant read_locations and ensure the location exists.",
+    );
+    return summary;
+  }
+
   let page;
   try {
     page = await connector.fetchVariantInventoryPage({
@@ -111,6 +131,7 @@ export async function syncShopifyOpeningInventory(
       maxPages: deps.maxPages ?? 1,
       // Small pages: each variant can do matching queries + receipt write.
       pageSize: 15,
+      locationId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify inventory fetch failed";
@@ -144,7 +165,7 @@ export async function syncShopifyOpeningInventory(
       productId: match.productCode,
       variantId: match.variantCode,
       quantity: v.available,
-      notes: `Legacy opening balance from Shopify inventory (${v.available} available)`,
+      notes: `Legacy opening balance from Shopify Aarla Office available (${v.available})`,
     });
   }
 

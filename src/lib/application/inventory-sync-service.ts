@@ -148,16 +148,12 @@ async function persistInventoryItemId(
   ).catch(() => undefined);
 }
 
-async function resolvePushLocationId(
+async function resolveShopifyOfficeLocationId(
   connector: ShopifyConnector,
-  preferredFromVariant: string | null,
+  preferredFromVariant: string | null = null,
 ): Promise<string | null> {
   if (preferredFromVariant) return preferredFromVariant;
-  const stored = await query<{ primary_location_id: string | null }>(
-    `select primary_location_id from shopify_inventory_settings where organization_id = $1`,
-    [ORG_ID],
-  ).catch(() => [] as { primary_location_id: string | null }[]);
-  if (stored[0]?.primary_location_id) return stored[0].primary_location_id;
+  // Prefer live resolution so we pick "Aarla Office" by name (not a stale stored id).
   if (typeof connector.fetchPrimaryInventoryLocationId === "function") {
     try {
       const loc = await connector.fetchPrimaryInventoryLocationId();
@@ -174,12 +170,24 @@ async function resolvePushLocationId(
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
         /ACCESS_DENIED|locations|read_locations|not authorized|permission/i.test(message)
-          ? `${message} — Push needs read_locations on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`
+          ? `${message} — Inventory sync needs read_locations on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`
           : message,
       );
     }
   }
-  return null;
+  const stored = await query<{ primary_location_id: string | null }>(
+    `select primary_location_id from shopify_inventory_settings where organization_id = $1`,
+    [ORG_ID],
+  ).catch(() => [] as { primary_location_id: string | null }[]);
+  return stored[0]?.primary_location_id ?? null;
+}
+
+/** @deprecated use resolveShopifyOfficeLocationId */
+async function resolvePushLocationId(
+  connector: ShopifyConnector,
+  preferredFromVariant: string | null,
+): Promise<string | null> {
+  return resolveShopifyOfficeLocationId(connector, preferredFromVariant);
 }
 
 async function studioQtyMap(): Promise<Map<string, number>> {
@@ -242,6 +250,13 @@ async function compareLinkedShopifyInventory(
 
   await ensureInventorySyncSchema();
 
+  const officeLocationId = await resolveShopifyOfficeLocationId(connector);
+  if (!officeLocationId) {
+    throw new Error(
+      "No Shopify Aarla Office location found — grant read_locations and ensure the location exists.",
+    );
+  }
+
   const offset = Math.max(0, Number.parseInt(String(deps.cursor ?? "0"), 10) || 0);
   const pageSize = LINKED_COMPARE_PAGE;
 
@@ -282,6 +297,7 @@ async function compareLinkedShopifyInventory(
     linked.length > 0
       ? await connector.fetchVariantsInventoryByIds(
           linked.map((r) => r.shopify_variant_id),
+          { locationId: officeLocationId },
         )
       : [];
   const shopifyById = new Map(
@@ -308,8 +324,8 @@ async function compareLinkedShopifyInventory(
           : row.title,
       sku: row.sku || shopify.sku,
       shopifyVariantId: shopify.externalVariantId,
-      inventoryItemId: row.shopify_inventory_item_id,
-      locationId: shopify.locationId ?? null,
+      inventoryItemId: row.shopify_inventory_item_id ?? shopify.inventoryItemId ?? null,
+      locationId: shopify.locationId ?? officeLocationId,
       aarlaStudio,
       shopifyAvailable: shopify.available,
     });
@@ -355,6 +371,13 @@ async function buildDriftPage(
 
   await ensureInventorySyncSchema();
 
+  const officeLocationId = await resolveShopifyOfficeLocationId(connector);
+  if (!officeLocationId) {
+    throw new Error(
+      "No Shopify Aarla Office location found — grant read_locations and ensure the location exists.",
+    );
+  }
+
   let page;
   try {
     page = await connector.fetchVariantInventoryPage({
@@ -362,6 +385,7 @@ async function buildDriftPage(
       maxPages: deps.maxPages ?? 2,
       pageSize: 25,
       includeInventoryItems: deps.includeInventoryItems === true,
+      locationId: officeLocationId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify inventory fetch failed";
@@ -446,7 +470,7 @@ async function buildDriftPage(
       sku: match.sku || v.sku,
       shopifyVariantId: v.externalVariantId,
       inventoryItemId,
-      locationId: v.locationId ?? null,
+      locationId: v.locationId ?? officeLocationId,
       aarlaStudio,
       shopifyAvailable: v.available,
     });
@@ -455,14 +479,10 @@ async function buildDriftPage(
   const allRows = compareInventoryDrift({ rows: draftRows });
   const stats = summarizeInventoryDrift(allRows);
   const rows = deps.driftedOnly ? allRows.filter((r) => r.status !== "match") : allRows;
-  // Compare/Pull never need Shopify locations — only Push does.
-  const primaryLocationId =
-    deps.resolveShopifyLocation === true
-      ? await resolvePushLocationId(
-          connector,
-          page.variants.find((v) => v.locationId)?.locationId ?? null,
-        )
-      : null;
+  const primaryLocationId = await resolveShopifyOfficeLocationId(
+    connector,
+    page.variants.find((v) => v.locationId)?.locationId ?? officeLocationId,
+  );
 
   return {
     connector,
@@ -575,7 +595,7 @@ export async function pullShopifyInventoryToAarla(
         systemQty: row.aarlaStudio,
         physicalQty: row.shopifyAvailable,
         reason: "count correction",
-        notes: `Shopify inventory pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
+        notes: `Shopify Aarla Office pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
       });
       if (mv) summary.pulled += 1;
     } catch (err) {
@@ -648,6 +668,20 @@ export async function refreshShopifyInventoryRow(input: {
 
   await ensureCoreInventoryLocations();
 
+  let officeLocationId: string | null = null;
+  try {
+    officeLocationId = await resolveShopifyOfficeLocationId(connector);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
+  if (!officeLocationId) {
+    result.errors.push(
+      "No Shopify Aarla Office location found — grant read_locations and ensure the location exists.",
+    );
+    return result;
+  }
+
   // Best-effort: refresh catalog metadata for the parent Shopify product first.
   if (
     input.shopifyProductId &&
@@ -686,7 +720,8 @@ export async function refreshShopifyInventoryRow(input: {
       query: search,
       maxPages: 1,
       pageSize: 25,
-      includeInventoryItems: false,
+      includeInventoryItems: true,
+      locationId: officeLocationId,
     });
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
@@ -726,7 +761,7 @@ export async function refreshShopifyInventoryRow(input: {
       sku: match.sku || v.sku,
       shopifyVariantId: v.externalVariantId,
       inventoryItemId: v.inventoryItemId ?? null,
-      locationId: v.locationId ?? null,
+      locationId: v.locationId ?? officeLocationId,
       aarlaStudio,
       shopifyAvailable: v.available,
     });
@@ -804,7 +839,7 @@ export async function pullShopifyAvailableForRow(input: {
       systemQty: row.aarlaStudio,
       physicalQty: row.shopifyAvailable,
       reason: "count correction",
-      notes: `Shopify inventory pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
+      notes: `Shopify Aarla Office pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
     });
     result.pulled = Boolean(mv);
   } catch (err) {

@@ -122,7 +122,9 @@ export function StockCatalogPanel({
   const syncShopifyRow = async (r: StockTableRow) => {
     if (!r.shopifyVariantId && !r.variantSku && !r.product.shopifyProductId) return;
     setRowSyncing(r.key);
-    setRowSyncMsg(`Pulling Shopify Available → Studio for ${r.variantSku || r.productTitle}…`);
+    setRowSyncMsg(
+      `Pulling Aarla Office Available → Studio for ${r.variantSku || r.productTitle}…`,
+    );
     const token = newCommerceSyncLockToken();
     try {
       const res = await pullShopifyAvailableRowViaApi(token, {

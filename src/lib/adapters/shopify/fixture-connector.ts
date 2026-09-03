@@ -536,6 +536,7 @@ export class FixtureShopifyConnector implements ShopifyConnector {
 
   async fetchVariantsInventoryByIds(
     externalVariantIds: string[],
+    options?: { locationId?: string | null },
   ): Promise<
     Array<{
       externalVariantId: string;
@@ -548,6 +549,7 @@ export class FixtureShopifyConnector implements ShopifyConnector {
     if (this.options.failHard) {
       throw new Error(this.options.partialError || "Shopify Admin API unavailable");
     }
+    void options;
     const want = new Set(
       externalVariantIds.map((id) => id.replace(/^gid:\/\/shopify\/ProductVariant\//, "")),
     );
@@ -564,7 +566,7 @@ export class FixtureShopifyConnector implements ShopifyConnector {
           sku: v.sku,
           available: i === 0 ? 12 : 5,
           inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
-          locationId: "gid://shopify/Location/fixture-primary",
+          locationId: options?.locationId ?? "gid://shopify/Location/fixture-primary",
         })),
     );
   }

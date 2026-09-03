@@ -407,8 +407,9 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               <ArrowDownUp className="h-5 w-5" /> Stock mismatches
             </h2>
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
-              Compares <strong>linked</strong> Aarla variants only (not the whole Shopify catalog).
-              Rows appear as batches load — <strong>Pull Available</strong> when Shopify is truth,
+              Compares <strong>linked</strong> Aarla variants only — Shopify qty is{" "}
+              <em>Available at Aarla Office</em> (not store-wide total). Rows appear as batches
+              load — <strong>Pull Available</strong> when Shopify is truth,
               <strong> Push Available</strong> when Studio is truth, or <strong>Sync</strong> after
               an Admin fix.
             </p>
@@ -453,7 +454,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">SKU</th>
                 <th className="px-4 py-3">Aarla Studio</th>
-                <th className="px-4 py-3">Shopify available</th>
+                <th className="px-4 py-3">Shopify Available (Aarla Office)</th>
                 <th className="px-4 py-3">One-time fix</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
