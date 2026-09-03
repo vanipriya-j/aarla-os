@@ -374,39 +374,15 @@ export function StockCatalogPanel({
           {
             key: "total",
             header: "Total",
-            render: (r) => {
-              const isZero = r.total <= 0;
-              const suggested = suggestedReorderQty(r.total);
-              const label =
-                r.variantLabel && r.variantLabel !== "Default"
-                  ? `${r.productTitle} / ${r.variantLabel}`
-                  : r.productTitle;
-              return (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
-                  {isZero ? <StatusChip label="Zero stock" tone="danger" /> : null}
-                  {!isZero && r.lowStock ? (
-                    <StatusChip label="Low stock" tone="warning" />
-                  ) : null}
-                  {isZero || r.lowStock ? (
-                    <Link
-                      href={manufactureReorderHref({
-                        productId: r.productId,
-                        variantId: r.variantId,
-                        quantity: suggested,
-                        label,
-                      })}
-                      onClick={(e) => e.stopPropagation()}
-                      data-testid="stock-row-reorder-inline"
-                    >
-                      <Button size="sm" variant="outline">
-                        Reorder
-                      </Button>
-                    </Link>
-                  ) : null}
-                </div>
-              );
-            },
+            render: (r) => (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
+                {r.total <= 0 ? <StatusChip label="Zero stock" tone="danger" /> : null}
+                {r.total > 0 && r.lowStock ? (
+                  <StatusChip label="Low stock" tone="warning" />
+                ) : null}
+              </div>
+            ),
           },
           {
             key: "make",
