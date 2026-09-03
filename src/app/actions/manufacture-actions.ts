@@ -17,6 +17,7 @@ import {
   completeActiveWorkflowStep,
   createMfgVendor,
   createVendorOrder,
+  addVendorOrderItems,
   getMfgVendor,
   getVendorOrder,
   getWorkflowInstanceForOrder,
@@ -227,6 +228,29 @@ export async function createVendorOrderAction(input: {
     if (input.requirementCode) {
       await updateProductionRequirementStatus(input.requirementCode, "ordered");
     }
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Add more products to a draft vendor PO. */
+export async function addVendorOrderItemsAction(
+  orderNumber: string,
+  items: Array<{
+    productCode: string;
+    variantCode?: string | null;
+    title: string;
+    variantLabel?: string;
+    sku?: string;
+    quantity: number;
+    unitCost?: number | null;
+    colour?: string;
+    sizeLabel?: string;
+  }>,
+) {
+  try {
+    const order = await addVendorOrderItems(orderNumber, items);
     return { ok: true as const, data: order };
   } catch (e) {
     return fail(e);

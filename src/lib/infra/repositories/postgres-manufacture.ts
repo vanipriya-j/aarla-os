@@ -648,6 +648,93 @@ export async function createVendorOrder(input: {
   return order;
 }
 
+const EDITABLE_ORDER_STATUSES = new Set(["draft", "ready_to_send"]);
+
+/** Append line items to a draft / ready-to-send vendor order (multi-product PO). */
+export async function addVendorOrderItems(
+  orderNumber: string,
+  items: Array<{
+    productCode: string;
+    variantCode?: string | null;
+    title: string;
+    variantLabel?: string;
+    sku?: string;
+    quantity: number;
+    unitCost?: number | null;
+    colour?: string;
+    sizeLabel?: string;
+  }>,
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  if (!items.length) throw new Error("Add at least one line item.");
+
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot add lines when order is ${existing.status}. Add products while the PO is still draft.`,
+    );
+  }
+
+  const idRows = await query<{ id: string }>(
+    `select id from vendor_orders where organization_id = $1 and order_number = $2 limit 1`,
+    [ORG_ID, orderNumber],
+  );
+  const orderId = idRows[0]?.id;
+  if (!orderId) throw new Error("Order not found");
+
+  const maxLine = await query<{ m: number | string | null }>(
+    `select coalesce(max(line_number), 0) as m from vendor_order_items where vendor_order_id = $1`,
+    [orderId],
+  );
+  let line = Number(maxLine[0]?.m ?? 0);
+
+  for (const item of items) {
+    const qty = Math.max(1, Math.floor(item.quantity));
+    line += 1;
+    await query(
+      `insert into vendor_order_items (
+         vendor_order_id, line_number, product_code, variant_code, title, variant_label, sku,
+         quantity, unit_cost, line_total, colour, size_label, production_requirement_id
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        orderId,
+        line,
+        item.productCode,
+        item.variantCode ?? null,
+        item.title,
+        item.variantLabel ?? "",
+        item.sku ?? "",
+        qty,
+        item.unitCost ?? null,
+        item.unitCost != null ? item.unitCost * qty : null,
+        item.colour ?? "",
+        item.sizeLabel ?? "",
+        null,
+      ],
+    );
+  }
+
+  const all = await query<{
+    quantity: number;
+    unit_cost: string | number | null;
+  }>(`select quantity, unit_cost from vendor_order_items where vendor_order_id = $1`, [orderId]);
+  const priced = all.length > 0 && all.every((i) => i.unit_cost != null);
+  const subtotal = priced
+    ? all.reduce((s, i) => s + Number(i.unit_cost) * i.quantity, 0)
+    : null;
+  await query(
+    `update vendor_orders
+     set pricing_status = $2, subtotal = $3, total = $3, updated_at = now()
+     where id = $1`,
+    [orderId, priced ? "confirmed" : "pending", subtotal],
+  );
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
 async function instantiateWorkflow(vendorOrderUuid: string, templateUuid: string): Promise<void> {
   const inst = await query<{ id: string }>(
     `insert into workflow_instances (organization_id, workflow_template_id, vendor_order_id, status, current_step_sequence)

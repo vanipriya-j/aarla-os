@@ -6,9 +6,11 @@ import { useEffect, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import {
+  addVendorOrderItemsAction,
   advanceWorkflowAction,
   generateOrderPdfAction,
   getVendorOrderAction,
+  listProductsForManufactureAction,
   markOrderSentAction,
   markPaymentPaidAction,
   prepareReceiveStockAction,
@@ -52,11 +54,25 @@ export default function VendorOrderDetailPage() {
   const [confirmPrice, setConfirmPrice] = useState("");
   const [confirmNotes, setConfirmNotes] = useState("");
   const [editMessage, setEditMessage] = useState("");
+  const [products, setProducts] = useState<
+    Array<{
+      id: string;
+      title: string;
+      sku: string;
+      variants: Array<{ id: string; label: string; sku: string }>;
+    }>
+  >([]);
+  const [addProductId, setAddProductId] = useState("");
+  const [addVariantId, setAddVariantId] = useState("");
+  const [addQty, setAddQty] = useState(20);
 
   const load = () => {
     startTransition(async () => {
       setError(null);
-      const r = await getVendorOrderAction(orderNumber);
+      const [r, p] = await Promise.all([
+        getVendorOrderAction(orderNumber),
+        listProductsForManufactureAction(),
+      ]);
       if (!r.ok) {
         setError(r.error);
         return;
@@ -68,6 +84,10 @@ export default function VendorOrderDetailPage() {
       setComms(r.data.communications);
       if (r.data.order.vendorCommittedDate) {
         setConfirmDate(r.data.order.vendorCommittedDate);
+      }
+      if (p.ok) {
+        setProducts(p.data);
+        setAddProductId((prev) => prev || p.data[0]?.id || "");
       }
     });
   };
@@ -81,6 +101,36 @@ export default function VendorOrderDetailPage() {
   const outstanding = payments
     .filter((p) => p.status === "due")
     .reduce((s, p) => s + p.amount, 0);
+  const canEditLines = order?.status === "draft" || order?.status === "ready_to_send";
+  const addProduct = products.find((p) => p.id === addProductId);
+
+  function addLine() {
+    if (!addProduct) {
+      setError("Pick a product to add.");
+      return;
+    }
+    const variant = addProduct.variants.find((v) => v.id === addVariantId);
+    startTransition(async () => {
+      const r = await addVendorOrderItemsAction(orderNumber, [
+        {
+          productCode: addProduct.id,
+          variantCode: variant?.id ?? null,
+          title: addProduct.title,
+          variantLabel: variant?.label ?? "",
+          sku: variant?.sku || addProduct.sku,
+          quantity: addQty,
+        },
+      ]);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOrder(r.data);
+      setAddQty(20);
+      setAddVariantId("");
+      setError(null);
+    });
+  }
 
   function generatePdf() {
     startTransition(async () => {
@@ -277,6 +327,66 @@ export default function VendorOrderDetailPage() {
                   </div>
                 ))}
               </div>
+
+              {canEditLines ? (
+                <div className="card-surface p-4 space-y-3 border-dashed border-aarla-red/25">
+                  <p className="text-sm font-medium text-deep-navy">Add another product</p>
+                  <p className="text-xs text-charcoal/55">
+                    Same vendor PO — keep adding lines, then Preview / Send once.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="text-xs text-charcoal/60">
+                      Product
+                      <select
+                        value={addProductId}
+                        onChange={(e) => {
+                          setAddProductId(e.target.value);
+                          setAddVariantId("");
+                        }}
+                        className="mt-1 block min-w-[14rem] max-w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                      >
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-charcoal/60">
+                      Variant
+                      <select
+                        value={addVariantId}
+                        onChange={(e) => setAddVariantId(e.target.value)}
+                        className="mt-1 block min-w-[10rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                      >
+                        <option value="">—</option>
+                        {(addProduct?.variants ?? []).map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-charcoal/60">
+                      Qty
+                      <input
+                        type="number"
+                        min={1}
+                        value={addQty}
+                        onChange={(e) => setAddQty(Number(e.target.value))}
+                        className="mt-1 block w-20 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                      />
+                    </label>
+                    <Button size="sm" onClick={addLine} disabled={pending || !addProductId}>
+                      {pending ? "Adding…" : "Add to PO"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-charcoal/50">
+                  Lines are locked after send. Create a new order to reorder more SKUs.
+                </p>
+              )}
             </section>
 
             <section className="space-y-3">
