@@ -223,8 +223,8 @@ async function buildDriftPage(
   try {
     page = await connector.fetchVariantInventoryPage({
       cursor: deps.cursor ?? null,
-      maxPages: deps.maxPages ?? 1,
-      pageSize: 15,
+      maxPages: deps.maxPages ?? 2,
+      pageSize: 25,
       includeInventoryItems: deps.includeInventoryItems === true,
     });
   } catch (err) {
