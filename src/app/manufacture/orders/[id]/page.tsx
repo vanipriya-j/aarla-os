@@ -91,7 +91,8 @@ function VendorOrderDetailInner() {
       }
       if (p.ok) {
         setProducts(p.data);
-        setAddProductId((prev) => prev || p.data[0]?.id || "");
+        setAddProductId((prev) => prev || prefillProduct || p.data[0]?.id || "");
+        if (prefillVariant) setAddVariantId(prefillVariant);
       }
     });
   };
@@ -610,5 +611,13 @@ function VendorOrderDetailInner() {
         )}
       </main>
     </>
+  );
+}
+
+export default function VendorOrderDetailPage() {
+  return (
+    <Suspense fallback={<p className="px-8 py-6 text-sm text-charcoal/50">Loading order…</p>}>
+      <VendorOrderDetailInner />
+    </Suspense>
   );
 }
