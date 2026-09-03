@@ -186,6 +186,26 @@ export async function pushShopifyAvailableRowViaApi(
   });
 }
 
+/** Pull Shopify Available → Aarla Studio for one stock/mismatch row. */
+export async function pullShopifyAvailableRowViaApi(
+  lockToken: string,
+  input: {
+    shopifyVariantId?: string | null;
+    sku?: string | null;
+    productId?: string | null;
+    variantId?: string | null;
+    shopifyProductId?: string | null;
+  },
+): Promise<
+  ActionResult<import("@/lib/application/inventory-sync-service").InventoryRowPullResult>
+> {
+  return postJson("/api/commerce/sync/shopify-inventory", {
+    lockToken,
+    action: "pull-available",
+    ...input,
+  });
+}
+
 export async function syncDelhiveryChunkViaApi(
   offset: number | null,
   lockToken: string,

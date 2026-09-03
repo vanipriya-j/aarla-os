@@ -27,7 +27,7 @@ import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
 import { Button } from "@/components/ui/Button";
 import { newCommerceSyncLockToken } from "@/lib/client/commerce-sync-auto-retry";
 import {
-  refreshShopifyInventoryRowViaApi,
+  pullShopifyAvailableRowViaApi,
   unlockCommerceSyncLockViaApi,
 } from "@/lib/client/commerce-sync-api";
 
@@ -122,10 +122,10 @@ export function StockCatalogPanel({
   const syncShopifyRow = async (r: StockTableRow) => {
     if (!r.shopifyVariantId && !r.variantSku && !r.product.shopifyProductId) return;
     setRowSyncing(r.key);
-    setRowSyncMsg(`Syncing ${r.variantSku || r.productTitle} from Shopify…`);
+    setRowSyncMsg(`Pulling Shopify Available → Studio for ${r.variantSku || r.productTitle}…`);
     const token = newCommerceSyncLockToken();
     try {
-      const res = await refreshShopifyInventoryRowViaApi(token, {
+      const res = await pullShopifyAvailableRowViaApi(token, {
         shopifyVariantId: r.shopifyVariantId,
         sku: r.variantSku || r.productSku,
         productId: r.productId,
@@ -137,12 +137,15 @@ export function StockCatalogPanel({
         return;
       }
       const bits: string[] = [];
-      if (res.data.catalogUpdated) bits.push("catalog updated");
-      if (res.data.row) {
+      if (res.data.pulled) {
         bits.push(
-          res.data.aligned
-            ? "Studio ↔ Shopify aligned"
-            : `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
+          `Studio set to ${res.data.row?.shopifyAvailable ?? "Shopify Available"}`,
+        );
+      } else if (res.data.aligned) {
+        bits.push("Studio ↔ Shopify already aligned");
+      } else if (res.data.row) {
+        bits.push(
+          `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
         );
       }
       if (res.data.errors.length) bits.push(res.data.errors[0]!);
@@ -322,8 +325,8 @@ export function StockCatalogPanel({
                         void syncShopifyRow(r);
                       }}
                       disabled={!!rowSyncing}
-                      title="Sync this SKU from Shopify (after fixing Admin)"
-                      aria-label={`Sync ${r.productTitle} from Shopify`}
+                      title="Pull Shopify Available into Studio for this SKU"
+                      aria-label={`Pull Shopify stock for ${r.productTitle} into Studio`}
                       data-testid="stock-row-sync"
                       className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-deep-navy hover:bg-pale-cream disabled:opacity-50"
                     >

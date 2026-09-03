@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   compareShopifyInventoryDrift,
+  pullShopifyAvailableForRow,
   pullShopifyInventoryToAarla,
   pushAarlaInventoryToShopify,
   pushStudioAvailableForRow,
@@ -26,15 +27,21 @@ function toErrorMessage(err: unknown): string {
 
 /**
  * POST /api/commerce/sync/shopify-inventory
- * action: compare | push | pull | refresh | push-available
- * Chunked Shopify ↔ Aarla inventory sync, single-row refresh, or Push Available.
+ * action: compare | push | pull | refresh | push-available | pull-available
+ * Chunked Shopify ↔ Aarla inventory sync, single-row refresh/pull, or Push Available.
  */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       cursor?: string | null;
       lockToken?: string;
-      action?: "compare" | "push" | "pull" | "refresh" | "push-available";
+      action?:
+        | "compare"
+        | "push"
+        | "pull"
+        | "refresh"
+        | "push-available"
+        | "pull-available";
       driftedOnly?: boolean;
       shopifyVariantId?: string | null;
       sku?: string | null;
@@ -84,6 +91,17 @@ export async function POST(request: Request) {
         sku: body.sku,
         inventoryItemId: body.inventoryItemId,
         locationId: body.locationId,
+      });
+      return NextResponse.json({ ok: true, data });
+    }
+
+    if (action === "pull-available") {
+      const data = await pullShopifyAvailableForRow({
+        shopifyVariantId: body.shopifyVariantId,
+        sku: body.sku,
+        productId: body.productId,
+        variantId: body.variantId,
+        shopifyProductId: body.shopifyProductId,
       });
       return NextResponse.json({ ok: true, data });
     }

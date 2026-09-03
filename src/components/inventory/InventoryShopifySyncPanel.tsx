@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
   pushShopifyAvailableRowViaApi,
+  pullShopifyAvailableRowViaApi,
   refreshShopifyInventoryRowViaApi,
   syncShopifyInventoryChunkViaApi,
   unlockCommerceSyncLockViaApi,
@@ -17,7 +18,7 @@ import {
   mergeInventoryDriftPages,
   summarizeInventoryDrift,
 } from "@/lib/domain/inventory-drift";
-import { ArrowDownUp, RefreshCw, Upload } from "lucide-react";
+import { ArrowDownUp, Download, RefreshCw, Upload } from "lucide-react";
 
 type Action = "compare" | "push" | "pull";
 
@@ -283,6 +284,62 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
     }
   };
 
+  const pullAvailableRow = async (r: InventoryDriftRow) => {
+    const key = rowKey(r);
+    setRowSyncing(key);
+    setError(null);
+    setStatus(
+      `Pulling Shopify Available ${r.shopifyAvailable} → Studio for ${r.sku || r.label}…`,
+    );
+    const token = newCommerceSyncLockToken();
+    try {
+      const res = await pullShopifyAvailableRowViaApi(token, {
+        shopifyVariantId: r.shopifyVariantId,
+        sku: r.sku,
+        productId: r.productId,
+        variantId: r.variantId,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        setStatus("Pull Available failed.");
+        return;
+      }
+      if (res.data.errors.length) {
+        setError(res.data.errors.slice(0, 2).join(" · "));
+      }
+      if (res.data.aligned || !res.data.row || res.data.row.status === "match") {
+        dismissedKeysRef.current.add(key);
+        setRows((prev) => prev.filter((x) => rowKey(x) !== key));
+        setTotals((t) => ({
+          ...t,
+          drifted: Math.max(0, t.drifted - 1),
+          shopifyHigher: Math.max(0, t.shopifyHigher - 1),
+          matched: t.matched + 1,
+          pulled: t.pulled + (res.data.pulled ? 1 : 0),
+        }));
+        setStatus(
+          `${r.sku || r.label} — Studio set to Shopify Available ${r.shopifyAvailable}`,
+        );
+      } else if (res.data.row) {
+        setRows((prev) =>
+          prev.map((x) => (rowKey(x) === key ? res.data.row! : x)),
+        );
+        setStatus(
+          res.data.pulled
+            ? `${r.sku || r.label} pulled — still mismatched (Studio ${res.data.row.aarlaStudio} vs Shopify ${res.data.row.shopifyAvailable})`
+            : `${r.sku || r.label} pull incomplete`,
+        );
+      }
+      onDone?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus(null);
+    } finally {
+      setRowSyncing(null);
+      await unlockCommerceSyncLockViaApi().catch(() => undefined);
+    }
+  };
+
   const pushAvailableRow = async (r: InventoryDriftRow) => {
     const key = rowKey(r);
     setRowSyncing(key);
@@ -351,8 +408,9 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
             </h2>
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
               Compares <strong>linked</strong> Aarla variants only (not the whole Shopify catalog).
-              Rows appear as batches load — <strong>Push Available</strong> when Studio is truth,
-              or <strong>Sync</strong> after an Admin fix.
+              Rows appear as batches load — <strong>Pull Available</strong> when Shopify is truth,
+              <strong> Push Available</strong> when Studio is truth, or <strong>Sync</strong> after
+              an Admin fix.
             </p>
             <p className="text-xs text-charcoal/50 mt-2 max-w-2xl">
               <strong>Receive</strong> auto-pushes Shopify <em>Available</em> at Aarla Office for
@@ -406,6 +464,8 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                 const syncing = rowSyncing === key;
                 const canPush =
                   r.status === "aarla_higher" && r.shopifyLinkCount <= 1;
+                const canPull =
+                  r.status === "shopify_higher" && r.shopifyLinkCount <= 1;
                 return (
                   <tr key={key} className="border-b border-border/70">
                     <td className="px-4 py-3 font-medium text-deep-navy">{r.label}</td>
@@ -420,10 +480,23 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                         : ""}
                       {r.status === "aarla_higher"
                         ? `Studio is truth — Push Available to ${r.aarlaStudio}, or set it in Shopify Admin.`
-                        : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}.`}
+                        : `Shopify Available is ${r.shopifyAvailable}; Studio is ${r.aarlaStudio}. Pull Available to set Studio.`}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1.5">
+                        {canPull ? (
+                          <button
+                            type="button"
+                            disabled={!!rowSyncing}
+                            onClick={() => void pullAvailableRow(r)}
+                            data-testid="mismatch-row-pull-available"
+                            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-deep-navy hover:bg-pale-cream disabled:opacity-50"
+                            title="Set Aarla Studio = Shopify Available for this SKU"
+                          >
+                            <Download className={`h-3.5 w-3.5 ${syncing ? "animate-pulse" : ""}`} />
+                            {syncing ? "…" : "Pull Available"}
+                          </button>
+                        ) : null}
                         {canPush ? (
                           <button
                             type="button"
@@ -458,7 +531,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
           <p className="px-4 py-3 text-xs text-charcoal/50 border-t border-border">
             {scanning
               ? `Still comparing linked variants (${variantsRead}${linkedTotal != null ? ` / ${linkedTotal}` : ""} so far) — Push Available / Sync work on rows above.`
-              : "Push Available when Studio is correct. Sync after fixing Shopify Admin. Aligned rows drop off this list."}
+              : "Pull Available when Shopify is correct. Push Available when Studio is correct. Sync after fixing Admin. Aligned rows drop off this list."}
           </p>
         </div>
       ) : scanning ? (
@@ -491,7 +564,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
         {showAdvanced ? (
           <div className="space-y-2 pt-1">
             <p className="text-xs text-charcoal/55 max-w-2xl">
-              Prefer per-row Push Available or Sync. Bulk tools are for catch-up only.
+              Prefer per-row Pull Available / Push Available or Sync. Bulk tools are for catch-up only.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" disabled={scanning} onClick={() => run("push")}>

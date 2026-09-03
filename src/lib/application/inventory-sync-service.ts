@@ -5,9 +5,11 @@
  * - Sales pipeline remains Shopify (orders sync into Aarla).
  * - Manufacture / receive / transfer ops happen in Aarla.
  * - Receive → best-effort Push: Shopify Available = Studio ATP for linked variants.
- * - Mismatch board: fix in Admin + Sync, or Push Available when Studio is truth.
+ * - Mismatch board: Pull Available when Shopify is truth; Push Available when Studio is;
+ *   Sync re-reads after an Admin fix.
+ * - Stock table Sync → Pull Available for that SKU (Shopify Available → Studio).
  * - Manufacture → Shopify Incoming is deferred (API needs scheduled changes); WIP stays in Aarla.
- * - Pull remains optional advanced (sales/qty → ledger).
+ * - Bulk Pull remains optional advanced (sales/qty → ledger).
  */
 import "server-only";
 import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
@@ -739,6 +741,94 @@ export async function refreshShopifyInventoryRow(input: {
   const row = rows[0] ?? null;
   result.row = row;
   result.aligned = row?.status === "match";
+  return result;
+}
+
+export type InventoryRowPullResult = {
+  /** True when a Studio count-correction was written. */
+  pulled: boolean;
+  row: InventoryDriftRow | null;
+  aligned: boolean;
+  errors: string[];
+};
+
+/**
+ * Pull Shopify Available → Aarla Studio for one linked variant, then re-read.
+ * Used by stock-table Sync and mismatch "Pull Available".
+ */
+export async function pullShopifyAvailableForRow(input: {
+  shopifyVariantId?: string | null;
+  sku?: string | null;
+  productId?: string | null;
+  variantId?: string | null;
+  shopifyProductId?: string | null;
+  connector?: ShopifyConnector;
+}): Promise<InventoryRowPullResult> {
+  const result: InventoryRowPullResult = {
+    pulled: false,
+    row: null,
+    aligned: false,
+    errors: [],
+  };
+
+  await ensureCoreInventoryLocations();
+
+  const refreshed = await refreshShopifyInventoryRow({
+    shopifyVariantId: input.shopifyVariantId,
+    sku: input.sku,
+    productId: input.productId,
+    variantId: input.variantId,
+    shopifyProductId: input.shopifyProductId,
+    connector: input.connector,
+  });
+  if (refreshed.errors.length) result.errors.push(...refreshed.errors);
+  if (!refreshed.row) {
+    if (!result.errors.length) {
+      result.errors.push("Could not read Shopify available qty for this SKU.");
+    }
+    return result;
+  }
+
+  const row = refreshed.row;
+  if (row.aarlaStudio === row.shopifyAvailable) {
+    result.row = row;
+    result.aligned = true;
+    return result;
+  }
+
+  try {
+    const mv = await services.adjustStock({
+      productId: row.productId,
+      variantId: row.variantId,
+      locationId: LOC.studio,
+      systemQty: row.aarlaStudio,
+      physicalQty: row.shopifyAvailable,
+      reason: "count correction",
+      notes: `Shopify inventory pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
+    });
+    result.pulled = Boolean(mv);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    result.row = row;
+    return result;
+  }
+
+  const after = await refreshShopifyInventoryRow({
+    shopifyVariantId: row.shopifyVariantId,
+    sku: row.sku,
+    productId: row.productId,
+    variantId: row.variantId,
+    shopifyProductId: input.shopifyProductId,
+    connector: input.connector,
+  });
+  if (after.errors.length) result.errors.push(...after.errors);
+  result.row = after.row ?? {
+    ...row,
+    aarlaStudio: row.shopifyAvailable,
+    delta: 0,
+    status: "match",
+  };
+  result.aligned = result.row?.status === "match";
   return result;
 }
 
