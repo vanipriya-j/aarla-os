@@ -377,8 +377,7 @@ export function StockCatalogPanel({
             render: (r) => (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
-                {r.total <= 0 ? <StatusChip label="Zero stock" tone="danger" /> : null}
-                {r.total > 0 && r.lowStock ? (
+                {r.lowStock && r.total > 0 ? (
                   <StatusChip label="Low stock" tone="warning" />
                 ) : null}
               </div>
