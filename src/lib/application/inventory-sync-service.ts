@@ -40,6 +40,8 @@ export type InventorySyncSummary = {
   pagesFetched: number;
   complete: boolean;
   rows: InventoryDriftRow[];
+  /** Aarla-first compare: total Shopify-linked variants in catalog. */
+  linkedTotal?: number;
 };
 
 export type InventorySyncDeps = {
@@ -184,15 +186,157 @@ async function studioQtyMap(): Promise<Map<string, number>> {
     services.listMovements(),
     services.listLocations(),
   ]);
-  const { deriveVariantTotals } = await import("@/lib/domain/ledger");
+  const { deriveBalances, balanceAt } = await import("@/lib/domain/ledger");
+  // Derive once — calling per-variant would re-scan the full ledger each time.
+  const balances = deriveBalances(movements);
   const map = new Map<string, number>();
   for (const product of products) {
-    const cells = deriveVariantTotals(movements, product.id, product.variants, locations);
-    for (const cell of cells) {
-      map.set(`${product.id}:${cell.variantId}`, cell.studio);
+    for (const variant of product.variants) {
+      map.set(
+        `${product.id}:${variant.id}`,
+        Math.max(0, balanceAt(balances, product.id, LOC.studio, variant.id)),
+      );
     }
   }
+  void locations;
   return map;
+}
+
+const LINKED_COMPARE_PAGE = 40;
+let schemaReady = false;
+
+async function ensureInventorySyncSchema(): Promise<void> {
+  if (schemaReady) return;
+  await ensureCoreInventoryLocations();
+  await query(
+    `alter table product_variants add column if not exists shopify_inventory_item_id text`,
+  ).catch(() => undefined);
+  await query(`
+    create table if not exists shopify_inventory_settings (
+      organization_id uuid primary key references organizations(id) on delete cascade,
+      primary_location_id text,
+      updated_at timestamptz not null default now()
+    )`).catch(() => undefined);
+  schemaReady = true;
+}
+
+function normalizeShopifyVariantId(id: string): string {
+  const trimmed = id.trim();
+  if (trimmed.includes("/")) return trimmed.split("/").pop() || trimmed;
+  return trimmed;
+}
+
+/**
+ * Compare only Aarla variants already linked to Shopify — does not crawl the
+ * whole Shopify catalog (that path was taking hours on large stores).
+ */
+async function compareLinkedShopifyInventory(
+  deps: InventorySyncDeps,
+): Promise<InventorySyncSummary> {
+  const connector = resolveConnector(deps);
+  if (typeof connector.fetchVariantsInventoryByIds !== "function") {
+    throw new Error("Shopify connector does not support inventory-by-id lookup");
+  }
+
+  await ensureInventorySyncSchema();
+
+  const offset = Math.max(0, Number.parseInt(String(deps.cursor ?? "0"), 10) || 0);
+  const pageSize = LINKED_COMPARE_PAGE;
+
+  const countRows = await query<{ n: string | number }>(
+    `select count(*)::int as n
+     from product_variants pv
+     where pv.organization_id = $1
+       and pv.shopify_variant_id is not null
+       and trim(pv.shopify_variant_id) <> ''`,
+    [ORG_ID],
+  );
+  const linkedTotal = Number(countRows[0]?.n ?? 0);
+
+  const linked = await query<{
+    product_code: string;
+    variant_code: string;
+    title: string;
+    variant_label: string;
+    sku: string;
+    shopify_variant_id: string;
+    shopify_inventory_item_id: string | null;
+  }>(
+    `select p.code as product_code, pv.code as variant_code, p.title,
+            pv.label as variant_label, pv.sku, pv.shopify_variant_id,
+            pv.shopify_inventory_item_id
+     from product_variants pv
+     join products p on p.id = pv.product_id
+     where pv.organization_id = $1
+       and pv.shopify_variant_id is not null
+       and trim(pv.shopify_variant_id) <> ''
+     order by p.code asc, pv.code asc
+     limit $2 offset $3`,
+    [ORG_ID, pageSize, offset],
+  );
+
+  const studioByKey = await studioQtyMap();
+  const shopifyRows =
+    linked.length > 0
+      ? await connector.fetchVariantsInventoryByIds(
+          linked.map((r) => r.shopify_variant_id),
+        )
+      : [];
+  const shopifyById = new Map(
+    shopifyRows.map((v) => [normalizeShopifyVariantId(v.externalVariantId), v]),
+  );
+
+  const draftRows: Parameters<typeof compareInventoryDrift>[0]["rows"] = [];
+  let skippedUnmatched = 0;
+
+  for (const row of linked) {
+    const sid = normalizeShopifyVariantId(row.shopify_variant_id);
+    const shopify = shopifyById.get(sid);
+    if (!shopify) {
+      skippedUnmatched += 1;
+      continue;
+    }
+    const aarlaStudio = studioByKey.get(`${row.product_code}:${row.variant_code}`) ?? 0;
+    draftRows.push({
+      productId: row.product_code,
+      variantId: row.variant_code,
+      label:
+        row.variant_label && row.variant_label !== "Default"
+          ? `${row.title} / ${row.variant_label}`
+          : row.title,
+      sku: row.sku || shopify.sku,
+      shopifyVariantId: shopify.externalVariantId,
+      inventoryItemId: row.shopify_inventory_item_id,
+      locationId: shopify.locationId ?? null,
+      aarlaStudio,
+      shopifyAvailable: shopify.available,
+    });
+  }
+
+  const allRows = compareInventoryDrift({ rows: draftRows });
+  const stats = summarizeInventoryDrift(allRows);
+  const rows = deps.driftedOnly === false ? allRows : allRows.filter((r) => r.status !== "match");
+  const nextOffset = offset + linked.length;
+  const hasMore = nextOffset < linkedTotal;
+
+  return {
+    variantsRead: linked.length,
+    matched: stats.matched,
+    drifted: stats.drifted,
+    aarlaHigher: stats.aarlaHigher,
+    shopifyHigher: stats.shopifyHigher,
+    pushed: 0,
+    pulled: 0,
+    skippedUnmatched,
+    skippedNoInventoryItem: 0,
+    errors: [],
+    hasMore,
+    nextCursor: hasMore ? String(nextOffset) : null,
+    pagesFetched: 1,
+    complete: !hasMore,
+    rows,
+    linkedTotal,
+  };
 }
 
 async function buildDriftPage(
@@ -207,17 +351,7 @@ async function buildDriftPage(
     throw new Error("Shopify connector does not support inventory quantities");
   }
 
-  await ensureCoreInventoryLocations();
-  // Best-effort schema for inventory item id column / settings table.
-  await query(
-    `alter table product_variants add column if not exists shopify_inventory_item_id text`,
-  ).catch(() => undefined);
-  await query(`
-    create table if not exists shopify_inventory_settings (
-      organization_id uuid primary key references organizations(id) on delete cascade,
-      primary_location_id text,
-      updated_at timestamptz not null default now()
-    )`).catch(() => undefined);
+  await ensureInventorySyncSchema();
 
   let page;
   try {
@@ -240,23 +374,65 @@ async function buildDriftPage(
   const draftRows: Parameters<typeof compareInventoryDrift>[0]["rows"] = [];
   let skippedUnmatched = 0;
 
+  // Batch-map Shopify → Aarla (avoid 1–2 SQL queries per variant).
+  const byShopifyId = new Map<
+    string,
+    {
+      productCode: string;
+      variantCode: string;
+      title: string;
+      variantLabel: string;
+      sku: string;
+      inventoryItemId: string | null;
+    }
+  >();
+  const shopifyIds = page.variants.map((v) => v.externalVariantId);
+  if (shopifyIds.length) {
+    const mapped = await query<{
+      product_code: string;
+      variant_code: string;
+      title: string;
+      variant_label: string;
+      sku: string;
+      shopify_variant_id: string;
+      shopify_inventory_item_id: string | null;
+    }>(
+      `select p.code as product_code, pv.code as variant_code, p.title,
+              pv.label as variant_label, pv.sku, pv.shopify_variant_id,
+              pv.shopify_inventory_item_id
+       from product_variants pv
+       join products p on p.id = pv.product_id
+       where pv.organization_id = $1 and pv.shopify_variant_id = any($2::text[])`,
+      [ORG_ID, shopifyIds],
+    );
+    for (const m of mapped) {
+      byShopifyId.set(normalizeShopifyVariantId(m.shopify_variant_id), {
+        productCode: m.product_code,
+        variantCode: m.variant_code,
+        title: m.title,
+        variantLabel: m.variant_label,
+        sku: m.sku,
+        inventoryItemId: m.shopify_inventory_item_id,
+      });
+    }
+  }
+
   for (const v of page.variants) {
-    const match = await mapShopifyVariantToAarla(v.externalVariantId, v.sku);
+    let match = byShopifyId.get(normalizeShopifyVariantId(v.externalVariantId));
     if (!match) {
-      skippedUnmatched += 1;
-      continue;
+      // Unique-SKU fallback only (shared SKUs explode the mismatch table).
+      const fallback = await mapShopifyVariantToAarla(v.externalVariantId, v.sku);
+      if (!fallback) {
+        skippedUnmatched += 1;
+        continue;
+      }
+      match = { ...fallback, inventoryItemId: null };
     }
-    let inventoryItemId = v.inventoryItemId ?? null;
-    if (!inventoryItemId) {
-      const cached = await query<{ shopify_inventory_item_id: string | null }>(
-        `select shopify_inventory_item_id from product_variants
-         where organization_id = $1 and shopify_variant_id = $2
-         limit 1`,
-        [ORG_ID, v.externalVariantId],
-      ).catch(() => [] as { shopify_inventory_item_id: string | null }[]);
-      inventoryItemId = cached[0]?.shopify_inventory_item_id ?? null;
+    const inventoryItemId = v.inventoryItemId ?? match.inventoryItemId ?? null;
+    // Persist only when Push enriched an inventory item id — skip writes on Compare.
+    if (deps.includeInventoryItems && inventoryItemId) {
+      await persistInventoryItemId(v.externalVariantId, inventoryItemId);
     }
-    await persistInventoryItemId(v.externalVariantId, inventoryItemId);
     const aarlaStudio = studioByKey.get(`${match.productCode}:${match.variantCode}`) ?? 0;
     draftRows.push({
       productId: match.productCode,
@@ -309,10 +485,18 @@ async function buildDriftPage(
   };
 }
 
-/** Compare one page of Shopify inventory vs Aarla Studio (no writes). */
+/** Compare one page of linked Aarla ↔ Shopify inventory (no writes). */
 export async function compareShopifyInventoryDrift(
   deps: InventorySyncDeps = {},
 ): Promise<InventorySyncSummary> {
+  const connector = resolveConnector(deps);
+  // Prefer Aarla-first: only fetch Shopify qty for variants already linked in Aarla.
+  if (typeof connector.fetchVariantsInventoryByIds === "function") {
+    return compareLinkedShopifyInventory({
+      ...deps,
+      driftedOnly: deps.driftedOnly ?? true,
+    });
+  }
   const { summary } = await buildDriftPage({ ...deps, driftedOnly: deps.driftedOnly ?? true });
   return summary;
 }

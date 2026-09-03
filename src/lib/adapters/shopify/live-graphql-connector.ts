@@ -516,6 +516,27 @@ query SyncVariantInventoryItems($cursor: String, $query: String, $pageSize: Int!
 }
 `;
 
+/** Aarla-first compare — fetch only the variants we already linked. */
+const VARIANT_NODES_INVENTORY_QUERY = `
+query VariantNodesInventory($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on ProductVariant {
+      id
+      sku
+      inventoryQuantity
+    }
+  }
+}
+`;
+
+type VariantNodesInventoryData = {
+  nodes: Array<{
+    id?: string;
+    sku?: string | null;
+    inventoryQuantity?: number | null;
+  } | null>;
+};
+
 const LOCATIONS_QUERY = `
 query SyncInventoryLocations {
   locations(first: 25, includeInactive: false) {
@@ -954,6 +975,38 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       nextCursor: hasNext ? cursor : null,
       pagesFetched: pages,
     };
+  }
+
+  async fetchVariantsInventoryByIds(
+    externalVariantIds: string[],
+  ): Promise<ShopifyVariantInventoryRecord[]> {
+    assertServerOnly();
+    const unique = [...new Set(externalVariantIds.map((id) => id.trim()).filter(Boolean))];
+    if (!unique.length) return [];
+
+    const out: ShopifyVariantInventoryRecord[] = [];
+    // Shopify nodes() caps around 250 ids per call.
+    for (let i = 0; i < unique.length; i += 50) {
+      const slice = unique.slice(i, i + 50);
+      const gids = slice.map((id) =>
+        id.startsWith("gid://") ? id : `gid://shopify/ProductVariant/${id}`,
+      );
+      const data = await this.graphql<VariantNodesInventoryData>(VARIANT_NODES_INVENTORY_QUERY, {
+        ids: gids,
+      });
+      for (const node of data.nodes ?? []) {
+        if (!node?.id) continue;
+        const externalVariantId = shopifyGidToExternalId(node.id) ?? node.id;
+        out.push({
+          externalVariantId,
+          sku: (node.sku ?? "").trim() || `shopify-${externalVariantId}`,
+          available: Math.max(0, Math.floor(Number(node.inventoryQuantity ?? 0))),
+          inventoryItemId: null,
+          locationId: null,
+        });
+      }
+    }
+    return out;
   }
 
   async fetchPrimaryInventoryLocationId(): Promise<string | null> {

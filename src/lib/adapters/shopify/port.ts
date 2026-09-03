@@ -209,6 +209,13 @@ export interface ShopifyConnector {
   fetchVariantInventoryPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyVariantInventoryPage>;
+  /**
+   * Fetch inventoryQuantity for specific Shopify variant ids (numeric or GID).
+   * Used by Aarla-first mismatch compare — avoids paging the whole Shopify catalog.
+   */
+  fetchVariantsInventoryByIds?(
+    externalVariantIds: string[],
+  ): Promise<ShopifyVariantInventoryRecord[]>;
   /** Primary active Shopify location gid — required for inventorySetQuantities. */
   fetchPrimaryInventoryLocationId?(): Promise<string | null>;
   /** Set absolute available qty on Shopify for one or more inventory items. */
