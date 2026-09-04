@@ -166,6 +166,9 @@ async function resolveShopifyOfficeLocationId(
         ).catch(() => undefined);
         return loc;
       }
+      throw new Error(
+        'No Shopify location named "Aarla Office". Sync only uses that location — not shop-wide total. Check Settings → Locations in Shopify Admin.',
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(

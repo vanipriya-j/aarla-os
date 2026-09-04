@@ -479,11 +479,12 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
 }
 
 /**
- * Read Available per Shopify location — never use store-wide inventoryQuantity for sync.
- * Needs read_inventory on the live token.
+ * Read Available at Aarla Office only — never store-wide inventoryQuantity.
+ * Primary: inventoryLevel(locationId: office). Diagnostics: inventoryLevels edges.
+ * Needs read_inventory + read_locations on the live token.
  */
 const VARIANT_INVENTORY_QUERY = `
-query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
+query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $officeLocationId: ID!) {
   productVariants(first: $pageSize, after: $cursor, query: $query) {
     pageInfo { hasNextPage endCursor }
     edges {
@@ -493,17 +494,26 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
         inventoryQuantity
         inventoryItem {
           id
+          office: inventoryLevel(locationId: $officeLocationId) {
+            location { id name }
+            quantities(names: ["available", "on_hand", "committed"]) {
+              name
+              quantity
+            }
+          }
           inventoryLevels(first: 25) {
-            nodes {
-              location {
-                id
-                name
-                isActive
-                fulfillsOnlineOrders
-              }
-              quantities(names: ["available"]) {
-                name
-                quantity
+            edges {
+              node {
+                location {
+                  id
+                  name
+                  isActive
+                  fulfillsOnlineOrders
+                }
+                quantities(names: ["available"]) {
+                  name
+                  quantity
+                }
               }
             }
           }
@@ -516,7 +526,7 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
 
 /** Aarla-first compare — Available at Aarla Office for linked variants only. */
 const VARIANT_NODES_INVENTORY_QUERY = `
-query VariantNodesInventory($ids: [ID!]!) {
+query VariantNodesInventory($ids: [ID!]!, $officeLocationId: ID!) {
   nodes(ids: $ids) {
     ... on ProductVariant {
       id
@@ -524,17 +534,26 @@ query VariantNodesInventory($ids: [ID!]!) {
       inventoryQuantity
       inventoryItem {
         id
+        office: inventoryLevel(locationId: $officeLocationId) {
+          location { id name }
+          quantities(names: ["available", "on_hand", "committed"]) {
+            name
+            quantity
+          }
+        }
         inventoryLevels(first: 25) {
-          nodes {
-            location {
-              id
-              name
-              isActive
-              fulfillsOnlineOrders
-            }
-            quantities(names: ["available"]) {
-              name
-              quantity
+          edges {
+            node {
+              location {
+                id
+                name
+                isActive
+                fulfillsOnlineOrders
+              }
+              quantities(names: ["available"]) {
+                name
+                quantity
+              }
             }
           }
         }
@@ -558,15 +577,40 @@ type InventoryLevelNode = {
   quantities?: Array<{ name: string; quantity: number }> | null;
 };
 
+type InventoryLevelsConnection = {
+  nodes?: InventoryLevelNode[] | null;
+  edges?: Array<{ node?: InventoryLevelNode | null } | null> | null;
+} | null;
+
 function availableFromInventoryLevel(
-  level: InventoryLevelQuantities | undefined,
+  level: InventoryLevelQuantities | undefined | null,
 ): number {
-  const qty = level?.quantities?.find((q) => q.name === "available")?.quantity;
+  const qty = level?.quantities?.find(
+    (q) => (q.name ?? "").trim().toLowerCase() === "available",
+  )?.quantity;
   return Math.max(0, Math.floor(Number(qty ?? 0)));
 }
 
-/** Prefer Aarla Office by name, then online fulfilment, then first active. */
-export function pickShopifyOfficeLocation(
+/** Flatten inventoryLevels connection (Shopify docs use edges; some clients expose nodes). */
+export function flattenInventoryLevels(
+  conn: InventoryLevelsConnection | undefined,
+): InventoryLevelNode[] {
+  if (!conn) return [];
+  const out: InventoryLevelNode[] = [];
+  const seen = new Set<string>();
+  const push = (level: InventoryLevelNode | null | undefined) => {
+    const id = level?.location?.id;
+    if (!level || !id || seen.has(id)) return;
+    seen.add(id);
+    out.push(level);
+  };
+  for (const edge of conn.edges ?? []) push(edge?.node);
+  for (const node of conn.nodes ?? []) push(node);
+  return out;
+}
+
+/** Prefer Aarla Office by name only — no online/first fallback (that pulled shop totals). */
+export function pickShopifyOfficeLocationStrict(
   nodes: Array<{
     id: string;
     name: string;
@@ -575,16 +619,31 @@ export function pickShopifyOfficeLocation(
   }>,
 ): string | null {
   const active = nodes.filter((n) => n.isActive);
-  const aarlaOffice = active.find((n) => isAarlaOfficeLocationName(n.name));
-  const online = active.find((n) => n.fulfillsOnlineOrders);
-  return aarlaOffice?.id ?? online?.id ?? active[0]?.id ?? null;
+  return active.find((n) => isAarlaOfficeLocationName(n.name))?.id ?? null;
+}
+
+/** @deprecated Prefer pickShopifyOfficeLocationStrict for inventory reads. */
+export function pickShopifyOfficeLocation(
+  nodes: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+    fulfillsOnlineOrders: boolean;
+  }>,
+): string | null {
+  return (
+    pickShopifyOfficeLocationStrict(nodes) ??
+    nodes.filter((n) => n.isActive).find((n) => n.fulfillsOnlineOrders)?.id ??
+    nodes.filter((n) => n.isActive)[0]?.id ??
+    null
+  );
 }
 
 export function isAarlaOfficeLocationName(name: string | null | undefined): boolean {
   const n = (name ?? "").trim();
   if (!n) return false;
   // Match Admin location "Aarla Office" (and close variants).
-  return /aarla\s*office/i.test(n) || /^office$/i.test(n);
+  return /aarla\s*office/i.test(n);
 }
 
 export type PickedOfficeInventory = {
@@ -594,50 +653,81 @@ export type PickedOfficeInventory = {
   shopTotal: number;
   levelCount: number;
   levelSummary: string;
+  onHand?: number | null;
+  committed?: number | null;
 };
 
 /**
- * Pick Available at Aarla Office from inventoryLevels — never the store-wide total.
- * Requires an Aarla Office level when levels exist; does not fall back to another
- * location's qty (that was returning partner/warehouse totals as "14").
+ * Pick Available at Aarla Office — never the store-wide total.
+ * Prefer direct inventoryLevel(locationId: office), then levels matched by id/name.
  */
 export function pickAarlaOfficeAvailable(input: {
   levels: InventoryLevelNode[];
   shopTotal?: number | null;
   preferredLocationId?: string | null;
+  officeLevel?: InventoryLevelNode | null;
 }): PickedOfficeInventory {
   const shopTotal = Math.max(0, Math.floor(Number(input.shopTotal ?? 0)));
   const levels = input.levels.filter((l) => l.location?.id);
-  const summary = levels
-    .map((l) => {
-      const name = (l.location?.name ?? "?").trim() || "?";
-      const qty = availableFromInventoryLevel(l);
-      return `${name}=${qty}`;
-    })
-    .join(", ");
+  const summaryParts = levels.map((l) => {
+    const name = (l.location?.name ?? "?").trim() || "?";
+    const qty = availableFromInventoryLevel(l);
+    return `${name}=${qty}`;
+  });
+  if (input.officeLevel?.location?.id) {
+    const name = (input.officeLevel.location.name ?? "Aarla Office").trim();
+    const qty = availableFromInventoryLevel(input.officeLevel);
+    if (!summaryParts.some((p) => p.startsWith(`${name}=`))) {
+      summaryParts.unshift(`${name}=${qty}`);
+    }
+  }
+  const summary = summaryParts.join(", ");
 
-  const byName = levels.find((l) => isAarlaOfficeLocationName(l.location?.name)) ?? null;
+  const qtyNamed = (level: InventoryLevelNode, name: string) => {
+    const hit = level.quantities?.find(
+      (q) => (q.name ?? "").trim().toLowerCase() === name,
+    )?.quantity;
+    return hit == null ? null : Math.max(0, Math.floor(Number(hit)));
+  };
+
+  // 1) Direct office: inventoryLevel(locationId: Aarla Office)
+  if (input.officeLevel?.location?.id) {
+    return {
+      available: availableFromInventoryLevel(input.officeLevel),
+      locationId: input.officeLevel.location.id,
+      locationName: (input.officeLevel.location.name ?? "").trim() || "Aarla Office",
+      shopTotal,
+      levelCount: Math.max(levels.length, 1),
+      levelSummary: summary || "(office level only)",
+      onHand: qtyNamed(input.officeLevel, "on_hand"),
+      committed: qtyNamed(input.officeLevel, "committed"),
+    };
+  }
+
+  // 2) Match preferred Office location id (from locations query) — name optional
   const byPreferredId = input.preferredLocationId
-    ? levels.find(
-        (l) =>
-          l.location?.id === input.preferredLocationId &&
-          isAarlaOfficeLocationName(l.location?.name),
-      ) ?? null
+    ? levels.find((l) => l.location?.id === input.preferredLocationId) ?? null
     : null;
-  const chosen = byName ?? byPreferredId;
+  // 3) Match by location name on the level
+  const byName = levels.find((l) => isAarlaOfficeLocationName(l.location?.name)) ?? null;
+  const chosen = byPreferredId ?? byName;
 
   if (chosen?.location?.id) {
     return {
       available: availableFromInventoryLevel(chosen),
       locationId: chosen.location.id,
-      locationName: (chosen.location.name ?? "").trim() || "Aarla Office",
+      locationName:
+        (chosen.location.name ?? "").trim() ||
+        (isAarlaOfficeLocationName(chosen.location.name) ? "Aarla Office" : "Aarla Office"),
       shopTotal,
       levelCount: levels.length,
       levelSummary: summary,
+      onHand: qtyNamed(chosen, "on_hand"),
+      committed: qtyNamed(chosen, "committed"),
     };
   }
 
-  // No Aarla Office level on this item — do not use another location or shop total.
+  // No Aarla Office level — do not use another location or shop total.
   return {
     available: 0,
     locationId: null,
@@ -648,15 +738,18 @@ export function pickAarlaOfficeAvailable(input: {
   };
 }
 
+type VariantInventoryItemData = {
+  id?: string;
+  office?: InventoryLevelNode | null;
+  inventoryLevels?: InventoryLevelsConnection;
+} | null;
+
 type VariantNodesInventoryData = {
   nodes: Array<{
     id?: string;
     sku?: string | null;
     inventoryQuantity?: number | null;
-    inventoryItem?: {
-      id?: string;
-      inventoryLevels?: { nodes?: InventoryLevelNode[] | null } | null;
-    } | null;
+    inventoryItem?: VariantInventoryItemData;
   } | null>;
 };
 
@@ -691,10 +784,7 @@ type VariantInventoryQueryData = {
         id: string;
         sku: string | null;
         inventoryQuantity?: number | null;
-        inventoryItem?: {
-          id?: string;
-          inventoryLevels?: { nodes?: InventoryLevelNode[] | null } | null;
-        } | null;
+        inventoryItem?: VariantInventoryItemData;
       };
     }>;
   };
@@ -1030,7 +1120,13 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyVariantInventoryPage> {
     assertServerOnly();
-    const preferredLocationId = options.locationId?.trim() || null;
+    const officeLocationId =
+      options.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
+    if (!officeLocationId) {
+      throw new Error(
+        'No Shopify location named "Aarla Office" found. Rename the Studio location in Shopify Admin → Settings → Locations, then retry Sync.',
+      );
+    }
 
     const variants: ShopifyVariantInventoryRecord[] = [];
     let cursor: string | null = options.cursor ?? null;
@@ -1049,6 +1145,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
             cursor,
             pageSize,
             query,
+            officeLocationId,
           },
         );
 
@@ -1056,16 +1153,18 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const externalVariantId = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
           const sku =
             (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
+          const item = edge.node.inventoryItem;
           const picked = pickAarlaOfficeAvailable({
-            levels: edge.node.inventoryItem?.inventoryLevels?.nodes ?? [],
+            levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: edge.node.inventoryQuantity,
-            preferredLocationId,
+            preferredLocationId: officeLocationId,
+            officeLevel: item?.office ?? null,
           });
           variants.push({
             externalVariantId,
             sku,
             available: picked.available,
-            inventoryItemId: edge.node.inventoryItem?.id ?? null,
+            inventoryItemId: item?.id ?? null,
             locationId: picked.locationId,
             locationName: picked.locationName,
             shopTotal: picked.shopTotal,
@@ -1100,7 +1199,14 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     const unique = [...new Set(externalVariantIds.map((id) => id.trim()).filter(Boolean))];
     if (!unique.length) return [];
 
-    const preferredLocationId = options?.locationId?.trim() || null;
+    const officeLocationId =
+      options?.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
+    if (!officeLocationId) {
+      throw new Error(
+        'No Shopify location named "Aarla Office" found. Rename the Studio location in Shopify Admin → Settings → Locations, then retry Sync.',
+      );
+    }
+
     const out: ShopifyVariantInventoryRecord[] = [];
     try {
       // Shopify nodes() caps around 250 ids per call.
@@ -1111,20 +1217,23 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
         );
         const data = await this.graphql<VariantNodesInventoryData>(VARIANT_NODES_INVENTORY_QUERY, {
           ids: gids,
+          officeLocationId,
         });
         for (const node of data.nodes ?? []) {
           if (!node?.id) continue;
           const externalVariantId = shopifyGidToExternalId(node.id) ?? node.id;
+          const item = node.inventoryItem;
           const picked = pickAarlaOfficeAvailable({
-            levels: node.inventoryItem?.inventoryLevels?.nodes ?? [],
+            levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: node.inventoryQuantity,
-            preferredLocationId,
+            preferredLocationId: officeLocationId,
+            officeLevel: item?.office ?? null,
           });
           out.push({
             externalVariantId,
             sku: (node.sku ?? "").trim() || `shopify-${externalVariantId}`,
             available: picked.available,
-            inventoryItemId: node.inventoryItem?.id ?? null,
+            inventoryItemId: item?.id ?? null,
             locationId: picked.locationId,
             locationName: picked.locationName,
             shopTotal: picked.shopTotal,
@@ -1147,7 +1256,8 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     assertServerOnly();
     const data = await this.graphql<LocationsQueryData>(LOCATIONS_QUERY, {});
     const nodes = data.locations.edges.map((e) => e.node);
-    return pickShopifyOfficeLocation(nodes);
+    // Inventory sync must use Aarla Office only — never fall back to another location.
+    return pickShopifyOfficeLocationStrict(nodes);
   }
 
   async setInventoryQuantities(

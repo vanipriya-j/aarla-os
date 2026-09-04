@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  flattenInventoryLevels,
   isAarlaOfficeLocationName,
   pickAarlaOfficeAvailable,
-  pickShopifyOfficeLocation,
+  pickShopifyOfficeLocationStrict,
 } from "@/lib/adapters/shopify/live-graphql-connector";
 
-describe("pickShopifyOfficeLocation", () => {
-  it("prefers Aarla Office by name over other online locations", () => {
+describe("pickShopifyOfficeLocationStrict", () => {
+  it("returns only Aarla Office — no online fallback", () => {
     expect(
-      pickShopifyOfficeLocation([
+      pickShopifyOfficeLocationStrict([
         {
           id: "gid://shopify/Location/partner",
           name: "Partner Warehouse",
@@ -25,56 +26,88 @@ describe("pickShopifyOfficeLocation", () => {
     ).toBe("gid://shopify/Location/office");
   });
 
-  it("falls back to online fulfilment when Aarla Office is missing", () => {
+  it("returns null when Aarla Office is missing (do not use shop total location)", () => {
     expect(
-      pickShopifyOfficeLocation([
+      pickShopifyOfficeLocationStrict([
         {
           id: "gid://shopify/Location/online",
           name: "Online Store",
           isActive: true,
           fulfillsOnlineOrders: true,
         },
-        {
-          id: "gid://shopify/Location/other",
-          name: "Backup",
-          isActive: true,
-          fulfillsOnlineOrders: false,
-        },
       ]),
-    ).toBe("gid://shopify/Location/online");
+    ).toBeNull();
+  });
+});
+
+describe("flattenInventoryLevels", () => {
+  it("reads Shopify edges shape", () => {
+    const levels = flattenInventoryLevels({
+      edges: [
+        {
+          node: {
+            location: { id: "loc-1", name: "Aarla Office" },
+            quantities: [{ name: "available", quantity: 9 }],
+          },
+        },
+        {
+          node: {
+            location: { id: "loc-2", name: "Partner" },
+            quantities: [{ name: "available", quantity: 5 }],
+          },
+        },
+      ],
+    });
+    expect(levels).toHaveLength(2);
+    expect(levels[0]?.location?.name).toBe("Aarla Office");
   });
 });
 
 describe("pickAarlaOfficeAvailable", () => {
-  it("uses Aarla Office Available and ignores shop total / other locations", () => {
+  it("uses direct office inventoryLevel and ignores shop total", () => {
     const picked = pickAarlaOfficeAvailable({
       shopTotal: 14,
+      preferredLocationId: "gid://shopify/Location/office",
+      officeLevel: {
+        location: { id: "gid://shopify/Location/office", name: "Aarla Office" },
+        quantities: [
+          { name: "available", quantity: 9 },
+          { name: "on_hand", quantity: 9 },
+          { name: "committed", quantity: 0 },
+        ],
+      },
       levels: [
         {
           location: {
             id: "gid://shopify/Location/partner",
             name: "Partner Stock",
-            isActive: true,
-            fulfillsOnlineOrders: false,
           },
           quantities: [{ name: "available", quantity: 5 }],
-        },
-        {
-          location: {
-            id: "gid://shopify/Location/office",
-            name: "Aarla Office",
-            isActive: true,
-            fulfillsOnlineOrders: true,
-          },
-          quantities: [{ name: "available", quantity: 9 }],
         },
       ],
     });
     expect(picked.available).toBe(9);
-    expect(picked.locationName).toBe("Aarla Office");
     expect(picked.shopTotal).toBe(14);
-    expect(picked.levelSummary).toContain("Aarla Office=9");
-    expect(picked.levelSummary).toContain("Partner Stock=5");
+    expect(picked.locationName).toBe("Aarla Office");
+  });
+
+  it("matches preferred Office location id even without name on the level", () => {
+    const picked = pickAarlaOfficeAvailable({
+      shopTotal: 14,
+      preferredLocationId: "gid://shopify/Location/office",
+      levels: [
+        {
+          location: { id: "gid://shopify/Location/office", name: null },
+          quantities: [{ name: "available", quantity: 9 }],
+        },
+        {
+          location: { id: "gid://shopify/Location/partner", name: "Partner" },
+          quantities: [{ name: "available", quantity: 5 }],
+        },
+      ],
+    });
+    expect(picked.available).toBe(9);
+    expect(picked.locationId).toBe("gid://shopify/Location/office");
   });
 
   it("does not fall back to another location when Aarla Office is missing", () => {
@@ -101,5 +134,6 @@ describe("pickAarlaOfficeAvailable", () => {
     expect(isAarlaOfficeLocationName("Aarla Office")).toBe(true);
     expect(isAarlaOfficeLocationName("aarla  office")).toBe(true);
     expect(isAarlaOfficeLocationName("Partner Hub")).toBe(false);
+    expect(isAarlaOfficeLocationName("Office")).toBe(false);
   });
 });

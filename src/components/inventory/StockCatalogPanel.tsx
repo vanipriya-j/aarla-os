@@ -153,6 +153,12 @@ export function StockCatalogPanel({
         bits.push(
           `Studio ↔ ${res.data.locationName ?? "Aarla Office"} aligned at ${res.data.row.shopifyAvailable}`,
         );
+        if (
+          res.data.shopTotal != null &&
+          res.data.shopTotal !== res.data.row.shopifyAvailable
+        ) {
+          bits.push(`shop total ${res.data.shopTotal}`);
+        }
       } else if (res.data.row) {
         bits.push(
           `Studio ${res.data.row.aarlaStudio} / Office ${res.data.row.shopifyAvailable}`,
@@ -160,6 +166,12 @@ export function StockCatalogPanel({
       }
       if (res.data.levelSummary) bits.push(res.data.levelSummary);
       if (res.data.errors.length) bits.push(res.data.errors[0]!);
+      if (!res.data.pulled && !res.data.aligned && res.data.errors.length) {
+        setRowSyncMsg(
+          [res.data.errors[0], res.data.levelSummary].filter(Boolean).join(" · "),
+        );
+        return;
+      }
       setRowSyncMsg(bits.join(" · ") || "Synced");
       onShopifyRowSynced?.();
     } catch (err) {
