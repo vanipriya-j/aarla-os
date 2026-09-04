@@ -1131,8 +1131,8 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
     const out: ShopifyVariantInventoryRecord[] = [];
     try {
-      for (let i = 0; i < unique.length; i += 50) {
-        const slice = unique.slice(i, i + 50);
+      for (let i = 0; i < unique.length; i += 100) {
+        const slice = unique.slice(i, i + 100);
         const gids = slice.map((id) =>
           id.startsWith("gid://") ? id : `gid://shopify/ProductVariant/${id}`,
         );

@@ -243,7 +243,8 @@ async function studioQtyMap(): Promise<Map<string, number>> {
   return map;
 }
 
-const LINKED_COMPARE_PAGE = 40;
+/** Linked variants per serverless compare chunk. Shop-total reads are cheap — prefer larger pages. */
+const LINKED_COMPARE_PAGE = 200;
 let schemaReady = false;
 
 async function ensureInventorySyncSchema(): Promise<void> {
