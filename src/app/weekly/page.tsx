@@ -142,11 +142,11 @@ export default function WeeklyBoardPage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <MetricStatusCard
                 card={board.metrics.orders}
-                sourceHint="Shopify synced orders (valid)"
+                sourceHint="All valid Shopify sales this week (incl. fulfilled)"
               />
               <MetricStatusCard
                 card={board.metrics.revenue}
-                sourceHint="Shopify synced revenue (INR)"
+                sourceHint="Valid Shopify revenue INR (not open-to-ship)"
               />
               <MetricStatusCard card={board.metrics.followers} sourceHint="Source: manual" />
               <MetricStatusCard card={board.metrics.views} sourceHint="Source: manual" />
