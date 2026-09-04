@@ -5,6 +5,7 @@ import { projectProductJourney } from "@/lib/domain/journey";
 import type {
   AdjustmentReason,
   InventorySnapshot,
+  Partner,
   Person,
   Product,
   ProductRegistration,
@@ -186,6 +187,30 @@ export async function establishOpeningBalances(
   }>,
 ) {
   return engine().establishOpeningBalances(rows);
+}
+
+export async function createPartner(input: {
+  name: string;
+  partnerType?: Partner["partnerType"];
+  locationLabel?: string;
+  contact?: string;
+  margin?: number;
+  merchandisingNotes?: string;
+  code?: string;
+}) {
+  return engine().createPartner(input);
+}
+
+export async function establishPartnerOpeningBalances(
+  partnerId: string,
+  rows: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    notes?: string;
+  }>,
+) {
+  return engine().establishPartnerOpeningBalances(partnerId, rows);
 }
 
 export async function listReorderRules(): Promise<ReorderRule[]> {

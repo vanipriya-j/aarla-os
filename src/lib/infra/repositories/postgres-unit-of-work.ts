@@ -284,6 +284,63 @@ function createPartnerRepo(q: QueryFn): PartnerRepository {
       const all = await this.list();
       return all.find((p) => p.id === code) ?? null;
     },
+    async create(input: {
+      name: string;
+      partnerType?: Partner["partnerType"];
+      locationLabel?: string;
+      contact?: string;
+      margin?: number;
+      merchandisingNotes?: string;
+      code?: string;
+    }): Promise<Partner> {
+      const baseSlug =
+        (input.code?.trim() ||
+          input.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .slice(0, 40)) ||
+        `partner-${Date.now().toString(36)}`;
+      let code = baseSlug.startsWith("partner-") ? baseSlug : `partner-${baseSlug}`;
+      if (await this.getByCode(code)) {
+        code = `${code}-${Date.now().toString(36).slice(-4)}`;
+      }
+      // Matches seed pattern: partner-freshly → loc-partner-freshly
+      const locationCode = `loc-${code}`;
+      const partnerType = input.partnerType ?? "Retail Partner";
+      const locationLabel = input.locationLabel?.trim() || input.name.trim();
+      const partnerUuid = stableId(code);
+      const locationUuid = stableId(locationCode);
+
+      await q(
+        `insert into partners (
+           id, organization_id, code, name, partner_type, location_label, contact,
+           payment_status, margin, merchandising_notes, products_sold,
+           replenishment_history, display_photos
+         ) values ($1,$2,$3,$4,$5,$6,$7,'Current',$8,$9,0,'[]'::jsonb,'[]'::jsonb)`,
+        [
+          partnerUuid,
+          ORG_ID,
+          code,
+          input.name.trim(),
+          partnerType,
+          locationLabel,
+          input.contact?.trim() ?? "",
+          input.margin ?? 0,
+          input.merchandisingNotes?.trim() ?? "",
+        ],
+      );
+
+      await q(
+        `insert into locations (id, organization_id, code, name, kind, partner_id)
+         values ($1,$2,$3,$4,'Partner',$5)`,
+        [locationUuid, ORG_ID, locationCode, locationLabel, partnerUuid],
+      );
+
+      const created = await this.getByCode(code);
+      if (!created) throw new Error("Partner create failed");
+      return created;
+    },
   };
 }
 

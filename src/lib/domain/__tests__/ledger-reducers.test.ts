@@ -131,6 +131,23 @@ describe("ledger reducers / projectors (Phase 0–1 invariants)", () => {
     expect(kolam?.quantity).toBe(6);
   });
 
+  it("5b. Partner legacy opening (External → Partner) increases partner stock without Studio", () => {
+    const movements = [
+      buildStockMovement({
+        quantity: 12,
+        fromLocationId: LOC.external,
+        toLocationId: LOC.freshly,
+        movementType: "Purchase Receipt",
+        reference: "OPEN-PARTNER-partner-freshly-var-kol-cream",
+        notes: "Partner legacy opening stock",
+      }),
+    ];
+    const stock = partnerStockFor(movements, "partner-freshly", locations);
+    expect(stock.find((s) => s.productId === "prod-kolam-bottle")?.quantity).toBe(12);
+    const bal = deriveBalances(movements);
+    expect(balanceAt(bal, "prod-kolam-bottle", LOC.studio)).toBe(0);
+  });
+
   it("6. inventory positions are derived only from Stock Movements", () => {
     const fromSeed = deriveInventorySnapshots(
       movementsSeed,
