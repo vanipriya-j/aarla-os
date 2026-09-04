@@ -76,12 +76,56 @@ export async function getCommittedShopifyOrdersWatermark(): Promise<string | nul
 /**
  * Watermark used for incremental sync — committed value only.
  *
- * Never bootstrap from max(order_date): a timed-out newest-first chunk would
- * freeze incremental sync at ~one page of customers forever.
- * No committed watermark → incremental walks like full until a run completes.
+ * Never bootstrap from max(order_date) on a partial newest-first walk: that would
+ * freeze incremental at ~one page forever. Use {@link seedShopifyOrdersWatermarkFromDbIfCaughtUp}
+ * only when local order count already matches the Shopify catalog.
  */
 export async function getShopifyOrdersWatermark(): Promise<string | null> {
   return getCommittedShopifyOrdersWatermark();
+}
+
+/**
+ * If tip watermark was wiped (e.g. old Clear stuck lock) but Aarla already holds
+ * ~all Shopify orders, restore incremental from max(order_date) so Sync All does
+ * not re-walk the full catalog.
+ */
+export async function seedShopifyOrdersWatermarkFromDbIfCaughtUp(
+  shopifyOrderTotal: number | null | undefined,
+): Promise<string | null> {
+  const committed = await getCommittedShopifyOrdersWatermark();
+  if (committed) return committed;
+  if (await getShopifyOrdersResumeCursor()) return null;
+  if (shopifyOrderTotal == null || !Number.isFinite(shopifyOrderTotal) || shopifyOrderTotal < 1) {
+    return null;
+  }
+
+  const countRows = await query<{ c: string }>(
+    `select count(*)::text as c from external_orders
+     where organization_id = $1 and provider = 'shopify'`,
+    [ORG_ID],
+  );
+  const dbCount = Number(countRows[0]?.c ?? 0);
+  // Require local store ≈ Shopify catalog (allow small lag / deletes).
+  if (dbCount < 20 || dbCount < shopifyOrderTotal * 0.9) return null;
+
+  const maxRows = await query<{ max_at: Date | string | null }>(
+    `select max(order_date) as max_at from external_orders
+     where organization_id = $1 and provider = 'shopify'`,
+    [ORG_ID],
+  );
+  const maxAt = toIso(maxRows[0]?.max_at ?? null);
+  if (!maxAt) return null;
+
+  await query(
+    `insert into commerce_sync_watermarks as w (
+       channel, organization_id, watermark_at, updated_at
+     ) values ($1, $2, $3::timestamptz, now())
+     on conflict (channel) do update set
+       watermark_at = excluded.watermark_at,
+       updated_at = now()`,
+    [CHANNEL, ORG_ID, maxAt],
+  );
+  return maxAt;
 }
 
 /** Resume cursor for an interrupted catalog walk (survives Vercel timeouts). */

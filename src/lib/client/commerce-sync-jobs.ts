@@ -15,6 +15,7 @@ import {
   formatAwbsTracked,
   formatCheckoutsLoaded,
   formatOrdersLoaded,
+  formatOrdersSyncMode,
 } from "@/lib/client/commerce-sync-progress";
 import {
   emptyShopifyAbandonedSyncSummary,
@@ -111,9 +112,7 @@ export async function runCommerceSyncAllJob(
         return;
       }
       shopifyTotal = mergeShopifySyncSummaries(shopifyTotal, res.data);
-      const since = shopifyTotal.incrementalFrom
-        ? ` (new since ${new Date(shopifyTotal.incrementalFrom).toLocaleString()})`
-        : "";
+      const since = formatOrdersSyncMode(shopifyTotal.incrementalFrom);
       cb.setStatus(
         `${formatOrdersLoaded(shopifyTotal.ordersRead, shopifyTotal.ordersTotal)}${since}` +
           (res.data.hasMore ? "…" : " — Shopify done"),
@@ -212,14 +211,14 @@ export async function runCommerceSyncAllJob(
       cb.setError(queues.error);
       cb.setStatus(
         `Done — ${formatOrdersLoaded(shopifyTotal.ordersRead, shopifyTotal.ordersTotal)}` +
-          `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+          `${formatOrdersSyncMode(shopifyTotal.incrementalFrom)}, ` +
           `${formatCheckoutsLoaded(abandonedTotal.checkoutsRead)}, ` +
           `${formatAwbsTracked(delhiveryTotal.awbsProcessed ?? 0, delhiveryTotal.uniqueAwbsTracked || null)}. Queue rebuild failed.`,
       );
     } else {
       cb.setStatus(
         `Done — ${formatOrdersLoaded(shopifyTotal.ordersRead, shopifyTotal.ordersTotal)}` +
-          `${shopifyTotal.mode === "incremental" ? " (incremental)" : " (full)"}, ` +
+          `${formatOrdersSyncMode(shopifyTotal.incrementalFrom)}, ` +
           `${formatCheckoutsLoaded(abandonedTotal.checkoutsRead)}, ` +
           `${formatAwbsTracked(delhiveryTotal.awbsProcessed ?? 0, delhiveryTotal.uniqueAwbsTracked || null)}, ` +
           `queues: ${queues.data.deliveryCandidates} delivery · ` +
