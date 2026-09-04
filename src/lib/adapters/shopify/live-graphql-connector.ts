@@ -479,12 +479,12 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
 }
 
 /**
- * Read Available at Aarla Office only — never store-wide inventoryQuantity.
- * Primary: inventoryLevel(locationId: office). Diagnostics: inventoryLevels edges.
- * Needs read_inventory + read_locations on the live token.
+ * Read Available at Aarla Office from inventoryLevels — never store-wide inventoryQuantity.
+ * Does NOT query root `locations` (that needs read_locations on the live token even when
+ * the Dev Dashboard lists the scope). Needs read_inventory.
  */
 const VARIANT_INVENTORY_QUERY = `
-query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $officeLocationId: ID!) {
+query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
   productVariants(first: $pageSize, after: $cursor, query: $query) {
     pageInfo { hasNextPage endCursor }
     edges {
@@ -494,13 +494,6 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $of
         inventoryQuantity
         inventoryItem {
           id
-          office: inventoryLevel(locationId: $officeLocationId) {
-            location { id name }
-            quantities(names: ["available", "on_hand", "committed"]) {
-              name
-              quantity
-            }
-          }
           inventoryLevels(first: 25) {
             edges {
               node {
@@ -510,7 +503,7 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $of
                   isActive
                   fulfillsOnlineOrders
                 }
-                quantities(names: ["available"]) {
+                quantities(names: ["available", "on_hand", "committed"]) {
                   name
                   quantity
                 }
@@ -526,7 +519,7 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!, $of
 
 /** Aarla-first compare — Available at Aarla Office for linked variants only. */
 const VARIANT_NODES_INVENTORY_QUERY = `
-query VariantNodesInventory($ids: [ID!]!, $officeLocationId: ID!) {
+query VariantNodesInventory($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on ProductVariant {
       id
@@ -534,13 +527,6 @@ query VariantNodesInventory($ids: [ID!]!, $officeLocationId: ID!) {
       inventoryQuantity
       inventoryItem {
         id
-        office: inventoryLevel(locationId: $officeLocationId) {
-          location { id name }
-          quantities(names: ["available", "on_hand", "committed"]) {
-            name
-            quantity
-          }
-        }
         inventoryLevels(first: 25) {
           edges {
             node {
@@ -550,7 +536,7 @@ query VariantNodesInventory($ids: [ID!]!, $officeLocationId: ID!) {
                 isActive
                 fulfillsOnlineOrders
               }
-              quantities(names: ["available"]) {
+              quantities(names: ["available", "on_hand", "committed"]) {
                 name
                 quantity
               }
@@ -1120,13 +1106,9 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyVariantInventoryPage> {
     assertServerOnly();
-    const officeLocationId =
-      options.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
-    if (!officeLocationId) {
-      throw new Error(
-        'No Shopify location named "Aarla Office" found. Rename the Studio location in Shopify Admin → Settings → Locations, then retry Sync.',
-      );
-    }
+    // Optional hint only — Sync must not call root `locations` (read_locations).
+    // Aarla Office is picked from inventoryLevels by name.
+    const preferredLocationId = options.locationId?.trim() || null;
 
     const variants: ShopifyVariantInventoryRecord[] = [];
     let cursor: string | null = options.cursor ?? null;
@@ -1145,7 +1127,6 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
             cursor,
             pageSize,
             query,
-            officeLocationId,
           },
         );
 
@@ -1157,8 +1138,8 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const picked = pickAarlaOfficeAvailable({
             levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: edge.node.inventoryQuantity,
-            preferredLocationId: officeLocationId,
-            officeLevel: item?.office ?? null,
+            preferredLocationId,
+            officeLevel: null,
           });
           variants.push({
             externalVariantId,
@@ -1199,14 +1180,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     const unique = [...new Set(externalVariantIds.map((id) => id.trim()).filter(Boolean))];
     if (!unique.length) return [];
 
-    const officeLocationId =
-      options?.locationId?.trim() || (await this.fetchPrimaryInventoryLocationId());
-    if (!officeLocationId) {
-      throw new Error(
-        'No Shopify location named "Aarla Office" found. Rename the Studio location in Shopify Admin → Settings → Locations, then retry Sync.',
-      );
-    }
-
+    const preferredLocationId = options?.locationId?.trim() || null;
     const out: ShopifyVariantInventoryRecord[] = [];
     try {
       // Shopify nodes() caps around 250 ids per call.
@@ -1217,7 +1191,6 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
         );
         const data = await this.graphql<VariantNodesInventoryData>(VARIANT_NODES_INVENTORY_QUERY, {
           ids: gids,
-          officeLocationId,
         });
         for (const node of data.nodes ?? []) {
           if (!node?.id) continue;
@@ -1226,8 +1199,8 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const picked = pickAarlaOfficeAvailable({
             levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: node.inventoryQuantity,
-            preferredLocationId: officeLocationId,
-            officeLevel: item?.office ?? null,
+            preferredLocationId,
+            officeLevel: null,
           });
           out.push({
             externalVariantId,
@@ -1254,9 +1227,10 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
   async fetchPrimaryInventoryLocationId(): Promise<string | null> {
     assertServerOnly();
+    // Root `locations` needs read_locations on the *live* token (reinstall / clear stale shpat).
+    // Prefer inventoryLevels-by-name for Sync; this is mainly for Push when needed.
     const data = await this.graphql<LocationsQueryData>(LOCATIONS_QUERY, {});
     const nodes = data.locations.edges.map((e) => e.node);
-    // Inventory sync must use Aarla Office only — never fall back to another location.
     return pickShopifyOfficeLocationStrict(nodes);
   }
 

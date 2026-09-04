@@ -104,24 +104,14 @@ export async function syncShopifyOpeningInventory(
 
   await ensureCoreInventoryLocations();
 
+  // Optional hint only — opening import picks Aarla Office from inventoryLevels by name.
   let locationId: string | null = null;
   if (typeof connector.fetchPrimaryInventoryLocationId === "function") {
     try {
       locationId = await connector.fetchPrimaryInventoryLocationId();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        /ACCESS_DENIED|locations|read_locations|not authorized|permission/i.test(message)
-          ? `${message} — grant read_locations so we can read Available at Aarla Office.`
-          : message,
-      );
+    } catch {
+      locationId = null;
     }
-  }
-  if (!locationId) {
-    summary.errors.push(
-      "No Shopify Aarla Office location found — grant read_locations and ensure the location exists.",
-    );
-    return summary;
   }
 
   let page;
