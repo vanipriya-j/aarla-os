@@ -281,7 +281,7 @@ async function compareLinkedShopifyInventory(
 
   await ensureInventorySyncSchema();
 
-  // Optional — Sync picks Aarla Office from inventoryLevels by name when this is null.
+  // Prefer env/stored Office GID — qty-only inventoryLevel(locationId:) needs no read_locations.
   const officeLocationId = await resolveShopifyOfficeLocationId(connector);
 
   const offset = Math.max(0, Number.parseInt(String(deps.cursor ?? "0"), 10) || 0);
