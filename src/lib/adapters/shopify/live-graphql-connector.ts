@@ -643,6 +643,30 @@ export function flattenInventoryLevels(
   return out;
 }
 
+/** Clearer Sync errors — distinguish missing Office GID vs missing read_inventory. */
+function shopifyInventoryAccessHint(
+  message: string,
+  usedOfficeGid: boolean,
+): string {
+  if (
+    !/ACCESS_DENIED|not authorized|permission|read_inventory|read_locations|inventoryLevel/i.test(
+      message,
+    )
+  ) {
+    return message;
+  }
+  if (/inventoryLevels|inventoryLevel/i.test(message)) {
+    if (usedOfficeGid) {
+      return `${message} — Live token lacks read_inventory (required for inventoryLevel). Reinstall/approve the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN so client credentials are used.`;
+    }
+    return `${message} — This deploy did not see SHOPIFY_AARLA_OFFICE_LOCATION_ID, so it fell back to inventoryLevels (needs read_inventory + read_locations). Fix: set SHOPIFY_AARLA_OFFICE_LOCATION_ID=gid://shopify/Location/<digits> on the same Vercel env as this Preview/Production, redeploy, then confirm Diagnostics shows “Office location ID set (env)”.`;
+  }
+  if (/locations|read_locations/i.test(message)) {
+    return `${message} — Location fields need read_locations on the live token. Set SHOPIFY_AARLA_OFFICE_LOCATION_ID to skip that query, or reinstall/approve the app / clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN.`;
+  }
+  return message;
+}
+
 /** Prefer Aarla Office by name only — no online/first fallback (that pulled shop totals). */
 export function pickShopifyOfficeLocationStrict(
   nodes: Array<{
@@ -1254,13 +1278,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        /ACCESS_DENIED|location|read_locations|read_inventory|not authorized|permission/i.test(
-          message,
-        )
-          ? `${message} — Since API 2024-07 Location fields need read_locations on the live token (not only in the Dev Dashboard). Fix: remove stale SHOPIFY_ADMIN_API_ACCESS_TOKEN so client credentials are used, reinstall/approve the app, or set SHOPIFY_AARLA_OFFICE_LOCATION_ID to the Aarla Office GID.`
-          : message,
-      );
+      throw new Error(shopifyInventoryAccessHint(message, Boolean(officeLocationId)));
     }
 
     return {
@@ -1353,13 +1371,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        /ACCESS_DENIED|location|read_locations|read_inventory|not authorized|permission/i.test(
-          message,
-        )
-          ? `${message} — Since API 2024-07 Location fields need read_locations on the live token (not only in the Dev Dashboard). Fix: remove stale SHOPIFY_ADMIN_API_ACCESS_TOKEN so client credentials are used, reinstall/approve the app, or set SHOPIFY_AARLA_OFFICE_LOCATION_ID to the Aarla Office GID.`
-          : message,
-      );
+      throw new Error(shopifyInventoryAccessHint(message, Boolean(officeLocationId)));
     }
     return out;
   }

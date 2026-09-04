@@ -48,6 +48,11 @@ export function shopSubdomain(storeDomain: string): string {
   return host.replace(/\.myshopify\.com$/i, "");
 }
 
+/**
+ * Aarla Office location GID for inventory Sync.
+ * Rejects empty / placeholder values (e.g. literal "…" from docs) so we do not
+ * silently fall back to inventoryLevels (needs read_locations + read_inventory).
+ */
 export function readShopifyOfficeLocationIdFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
@@ -56,9 +61,17 @@ export function readShopifyOfficeLocationIdFromEnv(
     env.SHOPIFY_PRIMARY_LOCATION_ID?.trim() ||
     "";
   if (!raw) return null;
-  if (raw.startsWith("gid://")) return raw;
+  // Docs sometimes use an ellipsis placeholder — treat as unset.
+  if (/[….]{1,}$/.test(raw) || /Location\/(\.\.\.|…)$/i.test(raw) || raw.includes("…")) {
+    return null;
+  }
+  if (raw.startsWith("gid://shopify/Location/")) {
+    const id = raw.slice("gid://shopify/Location/".length);
+    if (!/^\d+$/.test(id)) return null;
+    return raw;
+  }
   if (/^\d+$/.test(raw)) return `gid://shopify/Location/${raw}`;
-  return raw;
+  return null;
 }
 
 export function readShopifyAuthConfigFromEnv(

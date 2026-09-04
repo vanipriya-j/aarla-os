@@ -40,6 +40,11 @@ describe("Shopify auth (Dev Dashboard client credentials)", () => {
       } as NodeJS.ProcessEnv),
     ).toBe("gid://shopify/Location/12345");
     expect(readShopifyOfficeLocationIdFromEnv({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(
+      readShopifyOfficeLocationIdFromEnv({
+        SHOPIFY_AARLA_OFFICE_LOCATION_ID: "gid://shopify/Location/…",
+      } as NodeJS.ProcessEnv),
+    ).toBeNull();
   });
 
   it("reads client credentials from env", () => {
