@@ -52,9 +52,9 @@ Cloud agents cannot complete `shopify auth login` for you (interactive browser +
 | `shop_not_permitted` | App and store must be in the same Dev Dashboard organization |
 | HTTP 401 on GraphQL | App not installed, or scopes not approved |
 | Empty / short order history | Add `read_all_orders` and re-approve install |
-| `Access denied for locations field` | Since API 2024-07, Location fields need `read_locations` on the **live** token. Reinstall/approve the app, remove stale `SHOPIFY_ADMIN_API_ACCESS_TOKEN`, or set `SHOPIFY_AARLA_OFFICE_LOCATION_ID` and use the qty-only path |
+| `Access denied for locations field` | Only needed for Push location resolve by name. Set `SHOPIFY_AARLA_OFFICE_LOCATION_ID`, or reinstall/approve with `read_locations` |
 | Dashboard shows scope but probe does not | Token was minted before the scope was added — use client credentials or reinstall |
 
-## Verify inventory scopes
+## Verify inventory
 
-Diagnostics → **Probe Shopify** — check live `accessScopes` includes `read_locations`, and that the locations query succeeds. Or set `SHOPIFY_AARLA_OFFICE_LOCATION_ID` so Sync never needs that query.
+Diagnostics → **Probe Shopify** — confirm live scopes include `read_inventory`. Sync/Pull use store-wide `inventoryQuantity` (no Location fields).
