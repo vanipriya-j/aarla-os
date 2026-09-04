@@ -28,11 +28,18 @@ export type DiagnosticsReport = {
     clientIdSet: boolean;
     clientSecretSet: boolean;
     staticTokenSet: boolean;
+    /** True when both CC and static token are set — CC is preferred; static is fallback only. */
+    staticTokenIgnoredWhileClientCredentials?: boolean;
+    officeLocationIdSet: boolean;
     apiVersion: string;
     probe?: {
       ok: boolean;
       error: string | null;
       latencyMs: number | null;
+      scopes?: string[];
+      hasReadLocations?: boolean;
+      locationsOk?: boolean;
+      locationsError?: string | null;
     };
   };
   delhivery: {
@@ -137,11 +144,15 @@ export async function getDiagnosticsReport(
   );
 
   let authMode: DiagnosticsReport["shopify"]["authMode"] = "missing";
-  if (staticTokenSet) authMode = "static_token";
-  else if (clientIdSet && clientSecretSet) authMode = "client_credentials";
+  if (clientIdSet && clientSecretSet) authMode = "client_credentials";
+  else if (staticTokenSet) authMode = "static_token";
 
   const delhiveryCfg = readLiveDelhiveryConfigFromEnv();
   const fixtureMode = process.env.DELHIVERY_USE_FIXTURE === "1";
+  const officeLocationIdSet = Boolean(
+    process.env.SHOPIFY_AARLA_OFFICE_LOCATION_ID?.trim() ||
+      process.env.SHOPIFY_PRIMARY_LOCATION_ID?.trim(),
+  );
 
   const shopify: DiagnosticsReport["shopify"] = {
     configured: Boolean(shopifyCfg),
@@ -150,6 +161,8 @@ export async function getDiagnosticsReport(
     clientIdSet,
     clientSecretSet,
     staticTokenSet,
+    staticTokenIgnoredWhileClientCredentials: staticTokenSet && clientIdSet && clientSecretSet,
+    officeLocationIdSet,
     apiVersion: process.env.SHOPIFY_API_VERSION?.trim() || "2025-01",
   };
 
@@ -157,7 +170,6 @@ export async function getDiagnosticsReport(
     const started = Date.now();
     try {
       const token = await resolveShopifyAccessToken(shopifyCfg);
-      // Tiny GraphQL ping — shop name only
       const domain = shopifyCfg.storeDomain;
       const res = await fetch(
         `https://${domain}/admin/api/${shopifyCfg.apiVersion}/graphql.json`,
@@ -167,7 +179,17 @@ export async function getDiagnosticsReport(
             "Content-Type": "application/json",
             "X-Shopify-Access-Token": token,
           },
-          body: JSON.stringify({ query: "{ shop { name } }" }),
+          body: JSON.stringify({
+            query: `{
+              shop { name }
+              currentAppInstallation {
+                accessScopes { handle }
+              }
+              locations(first: 5) {
+                edges { node { id name } }
+              }
+            }`,
+          }),
         },
       );
       if (!res.ok) {
@@ -178,20 +200,45 @@ export async function getDiagnosticsReport(
         };
       } else {
         const body = (await res.json()) as {
-          data?: { shop?: { name?: string } };
-          errors?: Array<{ message: string }>;
+          data?: {
+            shop?: { name?: string };
+            currentAppInstallation?: {
+              accessScopes?: Array<{ handle?: string }>;
+            };
+            locations?: {
+              edges?: Array<{ node?: { id?: string; name?: string } }>;
+            };
+          };
+          errors?: Array<{ message: string; path?: unknown }>;
         };
-        if (body.errors?.length) {
+        const scopes = (body.data?.currentAppInstallation?.accessScopes ?? [])
+          .map((s) => s.handle)
+          .filter((h): h is string => Boolean(h));
+        const hasReadLocations = scopes.includes("read_locations");
+        const locationsError =
+          body.errors?.find((e) =>
+            /locations|read_locations|ACCESS_DENIED/i.test(e.message),
+          )?.message ?? null;
+        const locationsOk = Boolean(body.data?.locations?.edges?.length) && !locationsError;
+        if (body.errors?.length && !body.data?.shop) {
           shopify.probe = {
             ok: false,
             error: body.errors[0]?.message ?? "GraphQL error",
             latencyMs: Date.now() - started,
+            scopes,
+            hasReadLocations,
+            locationsOk,
+            locationsError,
           };
         } else {
           shopify.probe = {
             ok: true,
-            error: null,
+            error: locationsError,
             latencyMs: Date.now() - started,
+            scopes,
+            hasReadLocations,
+            locationsOk,
+            locationsError,
           };
         }
       }

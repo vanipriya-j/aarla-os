@@ -1,347 +1,238 @@
 "use client";
 
-import { useAppLedger } from "@/lib/client/use-app-data";
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
-import { Field, FormSection, inputClass, selectClass } from "@/components/ui/FormSection";
-import { Modal } from "@/components/ui/Modal";
-import { StepWorkflow } from "@/components/ui/StepWorkflow";
-import { StatusChip } from "@/components/ui/StatusChip";
-import { CheckCircle2, FileText, Mail, MessageSquare, Paperclip } from "lucide-react";
+import {
+  getNeedsMakingAction,
+  listVendorOrdersAction,
+} from "@/app/actions/manufacture-actions";
+import type { ProductionRequirement, VendorOrder } from "@/lib/domain/manufacture-types";
+import { AlertTriangle, ArrowRight, Factory, Package } from "lucide-react";
 
-type OrderMode = "new" | "reorder" | "quick";
-type VendorForm = "bottle" | "magnet";
+type NeedsBoard = {
+  persisted: ProductionRequirement[];
+  fromInventory: Array<{
+    productId: string;
+    variantId: string | null;
+    label: string;
+    quantityToProduce: number;
+    reason: string;
+    available: number;
+    kind: string;
+  }>;
+  zeroCount?: number;
+  lowCount?: number;
+};
 
-const steps = [
-  { id: "mode", label: "Order type" },
-  { id: "vendor", label: "Vendor form" },
-  { id: "preview", label: "Previews" },
-  { id: "send", label: "Approve & send" },
-];
+function daysOverdue(date: string | null): number | null {
+  if (!date) return null;
+  const d = Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
+  return d > 0 ? d : null;
+}
 
-export default function ManufacturePage() {
-  const { purchaseOrders, createManufacturingPO, products, vendors, error } = useAppLedger();
-  const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
-  const getVendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
-  const [step, setStep] = useState(0);
-  const [mode, setMode] = useState<OrderMode>("new");
-  const [formType, setFormType] = useState<VendorForm>("bottle");
-  const [productId, setProductId] = useState("prod-muruga-bottle");
-  const [vendorId, setVendorId] = useState("vendor-velan");
-  const [quantity, setQuantity] = useState(200);
-  const [unitCost, setUnitCost] = useState(320);
-  const [requiredDate, setRequiredDate] = useState("2026-08-10");
-  const [preview, setPreview] = useState<"po" | "spec" | "email" | "wa" | "attach" | null>(null);
-  const [sentPoId, setSentPoId] = useState<string | null>(null);
+export default function ManufactureHomePage() {
+  const [pending, startTransition] = useTransition();
+  const [needs, setNeeds] = useState<NeedsBoard | null>(null);
+  const [orders, setOrders] = useState<VendorOrder[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const bottleVendors = useMemo(
-    () => vendors.filter((v) => v.category.toLowerCase().includes("bottle")),
-    [vendors],
-  );
-  const magnetVendors = useMemo(
-    () => vendors.filter((v) => v.category.toLowerCase().includes("magnet") || v.id === "vendor-pondy"),
-    [vendors],
-  );
-
-  const approve = async () => {
-    const po = await createManufacturingPO({
-      vendorId,
-      productId,
-      quantity,
-      unitCost,
-      requiredDate,
+  const load = () => {
+    startTransition(async () => {
+      setError(null);
+      const [n, o] = await Promise.all([getNeedsMakingAction(), listVendorOrdersAction()]);
+      if (!n.ok) setError(n.error);
+      else setNeeds(n.data);
+      if (!o.ok) setError(o.error);
+      else setOrders(o.data);
     });
-    setSentPoId(po.id);
   };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const inProduction = orders.filter((o) =>
+    ["confirmed", "in_production", "awaiting_payment", "awaiting_dispatch", "sent", "awaiting_confirmation"].includes(
+      o.status,
+    ),
+  );
+  const overdue = orders.filter((o) => {
+    const d = daysOverdue(o.vendorCommittedDate);
+    return d != null && d > 0 && !["received", "closed", "cancelled"].includes(o.status);
+  });
+  const awaiting = orders.filter((o) =>
+    ["awaiting_confirmation", "awaiting_payment", "ready_to_receive", "draft", "ready_to_send"].includes(
+      o.status,
+    ),
+  );
 
   return (
     <>
       <Header
         title="Manufacture / Reorder"
-        subtitle="Raises a canonical Purchase Order. Stock enters the ledger when you Receive."
+        subtitle="Need → vendor → multi-line PO → PDF → send → receive. Stock stays Aarla WIP until Receive, then Shopify Available (studio stock)."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link href="/manufacture/needs">
+              <Button size="sm" variant="outline">
+                Needs Making
+              </Button>
+            </Link>
+            <Link href="/manufacture/orders">
+              <Button size="sm" variant="outline">
+                Orders
+              </Button>
+            </Link>
+            <Link href="/manufacture/vendors">
+              <Button size="sm" variant="primary">
+                Vendors
+              </Button>
+            </Link>
+          </div>
+        }
       />
-      <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-5xl">
+      <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-8 max-w-6xl">
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
-        <div className="card-surface p-4">
-          <StepWorkflow steps={steps} current={step} onStepClick={setStep} />
+        {pending && !needs ? <p className="text-sm text-charcoal/50">Loading…</p> : null}
+
+        <div className="flex flex-wrap gap-2 text-sm">
+          {[
+            ["needs", "Needs", "/manufacture/needs"],
+            ["orders", "Orders", "/manufacture/orders"],
+            ["vendors", "Vendors", "/manufacture/vendors"],
+            ["workflows", "Workflows", "/manufacture/workflows"],
+            ["history", "History", "/manufacture/history"],
+          ].map(([id, label, href]) => (
+            <Link
+              key={id}
+              href={href}
+              className="rounded-full border border-border bg-white px-3 py-1.5 text-charcoal/70 hover:border-aarla-red/40"
+            >
+              {label}
+            </Link>
+          ))}
         </div>
 
-        {step === 0 ? (
-          <FormSection title="Choose order type">
-            <div className="grid sm:grid-cols-3 gap-3">
-              {(
-                [
-                  ["new", "New manufacturing order", "Fresh SKU or colourway"],
-                  ["reorder", "Reorder existing product", "Restock a known SKU"],
-                  ["quick", "Quick order", "Minimal fields for trusted vendors"],
-                ] as const
-              ).map(([id, label, desc]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setMode(id)}
-                  className={`rounded-xl border p-4 text-left ${
-                    mode === id ? "border-aarla-red bg-aarla-red/5" : "border-border bg-pale-cream"
-                  }`}
-                >
-                  <p className="font-medium text-deep-navy text-sm">{label}</p>
-                  <p className="text-xs text-charcoal/60 mt-1">{desc}</p>
-                </button>
-              ))}
-            </div>
-            <Field label="Product">
-              <select
-                className={selectClass}
-                value={productId}
-                onChange={(e) => {
-                  setProductId(e.target.value);
-                  const p = products.find((x) => x.id === e.target.value);
-                  if (p) setUnitCost(p.cost);
-                }}
-              >
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title} · {p.sku}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Button onClick={() => setStep(1)}>Continue to vendor form</Button>
-          </FormSection>
-        ) : null}
-
-        {step === 1 ? (
-          <div className="space-y-4">
-            <FormSection title="Vendor" description="Unified vendor catalog.">
-              <div className="flex flex-wrap gap-2 mb-2">
-                <Button
-                  variant={formType === "bottle" ? "primary" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    setFormType("bottle");
-                    setVendorId(bottleVendors[0]?.id ?? "vendor-velan");
-                  }}
-                >
-                  Bottle vendor form
-                </Button>
-                <Button
-                  variant={formType === "magnet" ? "primary" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    setFormType("magnet");
-                    setVendorId(magnetVendors[0]?.id ?? "vendor-pondy");
-                  }}
-                >
-                  Magnet vendor form
-                </Button>
-              </div>
-              <Field label="Vendor">
-                <select
-                  className={selectClass}
-                  value={vendorId}
-                  onChange={(e) => setVendorId(e.target.value)}
-                >
-                  {(formType === "bottle" ? bottleVendors : magnetVendors).concat(vendors).filter(
-                    (v, i, arr) => arr.findIndex((x) => x.id === v.id) === i,
-                  ).map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} · {v.city} · MOQ {v.moq}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </FormSection>
-
-            <FormSection title={formType === "bottle" ? "Bottle specification" : "Magnet specification"}>
-              <div className="grid md:grid-cols-2 gap-4">
-                {formType === "bottle" ? (
-                  <>
-                    <Field label="Bottle model">
-                      <input className={inputClass} defaultValue="Aarla Dual-Wall Classic" />
-                    </Field>
-                    <Field label="Capacity">
-                      <select className={selectClass} defaultValue="750">
-                        <option value="500">500ml</option>
-                        <option value="750">750ml</option>
-                        <option value="1000">1000ml</option>
-                      </select>
-                    </Field>
-                    <Field label="Body colour">
-                      <input className={inputClass} defaultValue="Deep indigo" />
-                    </Field>
-                    <Field label="Print colour">
-                      <input className={inputClass} defaultValue="Warm cream #F6EEDC" />
-                    </Field>
-                    <Field label="Artwork">
-                      <input className={inputClass} defaultValue="Muruga_line_v3.pdf" />
-                    </Field>
-                    <Field label="Print position">
-                      <select className={selectClass} defaultValue="front-center">
-                        <option value="front-center">Front centre</option>
-                        <option value="wrap">Wrap</option>
-                        <option value="front-back">Front + back</option>
-                      </select>
-                    </Field>
-                  </>
-                ) : (
-                  <>
-                    <Field label="Material">
-                      <select className={selectClass} defaultValue="tin">
-                        <option value="tin">Tin plate</option>
-                        <option value="acrylic">Acrylic</option>
-                        <option value="wood">Wood laminate</option>
-                      </select>
-                    </Field>
-                    <Field label="Size">
-                      <input className={inputClass} defaultValue="50 × 50 mm" />
-                    </Field>
-                    <Field label="Shape">
-                      <select className={selectClass} defaultValue="rounded-square">
-                        <option value="circle">Circle</option>
-                        <option value="rounded-square">Rounded square</option>
-                        <option value="custom">Custom die-cut</option>
-                      </select>
-                    </Field>
-                    <Field label="Finish">
-                      <input className={inputClass} defaultValue="Soft-touch laminate" />
-                    </Field>
-                    <Field label="Artwork">
-                      <input className={inputClass} defaultValue="Navarathri_set_9.pdf" />
-                    </Field>
-                    <Field label="Packaging">
-                      <input className={inputClass} defaultValue="Kraft sleeve · set of 9" />
-                    </Field>
-                  </>
-                )}
-                <Field label="Quantity">
-                  <input
-                    className={inputClass}
-                    type="number"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                  />
-                </Field>
-                <Field label="Unit cost (₹)">
-                  <input
-                    className={inputClass}
-                    type="number"
-                    value={unitCost}
-                    onChange={(e) => setUnitCost(Number(e.target.value))}
-                  />
-                </Field>
-                <Field label="Required date">
-                  <input
-                    className={inputClass}
-                    type="date"
-                    value={requiredDate}
-                    onChange={(e) => setRequiredDate(e.target.value)}
-                  />
-                </Field>
-              </div>
-            </FormSection>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep(0)}>
-                Back
-              </Button>
-              <Button onClick={() => setStep(2)}>Generate previews</Button>
-            </div>
-          </div>
-        ) : null}
-
-        {step === 2 ? (
-          <FormSection title="Document previews">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(
-                [
-                  ["po", "Purchase order", FileText],
-                  ["spec", "Specification sheet", FileText],
-                  ["email", "Email preview", Mail],
-                  ["wa", "WhatsApp preview", MessageSquare],
-                  ["attach", "Attachment checklist", Paperclip],
-                ] as const
-              ).map(([id, label, Icon]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setPreview(id)}
-                  className="rounded-xl border border-border bg-pale-cream p-4 text-left hover:border-aarla-red/40 flex items-center gap-3"
-                >
-                  <Icon className="h-5 w-5 text-aarla-red" />
-                  <span className="text-sm font-medium text-deep-navy">{label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                Back
-              </Button>
-              <Button onClick={() => setStep(3)}>Continue to approve</Button>
-            </div>
-          </FormSection>
-        ) : null}
-
-        {step === 3 ? (
-          <FormSection title="Approve and send" description="Creates a Purchase Order in the shared domain store.">
-            {sentPoId ? (
-              <div className="rounded-xl bg-muted-green/25 border border-muted-green/40 p-6 flex gap-3">
-                <CheckCircle2 className="h-6 w-6 text-[#4a5c3a] shrink-0" />
+        <section className="space-y-3">
+          <h2 className="font-display text-xl text-deep-navy flex items-center gap-2">
+            <Package className="h-5 w-5" /> Needs Making
+          </h2>
+          <p className="text-sm text-charcoal/60">
+            Zero stock: {needs?.zeroCount ?? "—"} · Below minimum: {needs?.lowCount ?? "—"}
+          </p>
+          <div className="space-y-3">
+            {(needs?.fromInventory ?? []).slice(0, 8).map((n) => (
+              <div key={`${n.productId}-${n.variantId}`} className="card-surface p-4 flex flex-wrap justify-between gap-3">
                 <div>
-                  <p className="font-display text-xl text-deep-navy">Order approved & marked sent</p>
-                  <p className="text-sm text-charcoal/70 mt-1">
-                    {sentPoId} created for {getVendorName(vendorId)} · {getProductTitle(productId)}.
-                    Stock will enter the ledger when you Receive against this PO.
+                  <p className="font-medium text-deep-navy">{n.label}</p>
+                  <p className="text-sm text-charcoal/65">
+                    Required: {n.quantityToProduce} · ATP: {n.available} · {n.reason}
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <StatusChip label={sentPoId} tone="info" />
-                    <StatusChip label="Status: Sent" tone="success" />
-                  </div>
                 </div>
+                <Link
+                  href={`/manufacture/needs?make=${encodeURIComponent(n.productId)}${
+                    n.variantId ? `&variant=${encodeURIComponent(n.variantId)}` : ""
+                  }&qty=${n.quantityToProduce}&label=${encodeURIComponent(n.label)}`}
+                >
+                  <Button size="sm">Make</Button>
+                </Link>
               </div>
-            ) : (
-              <>
-                <p className="text-sm text-charcoal/70">
-                  {getProductTitle(productId)} · qty {quantity} · ₹{unitCost} · {getVendorName(vendorId)}
-                </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setStep(2)}>
-                    Back
-                  </Button>
-                  <Button onClick={approve}>Approve and Send</Button>
-                </div>
-              </>
-            )}
-          </FormSection>
-        ) : null}
-
-        <section className="card-surface p-5">
-          <h2 className="font-display text-xl text-deep-navy mb-3">Purchase orders</h2>
-          <ul className="space-y-2">
-            {purchaseOrders.map((po) => (
-              <li
-                key={po.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm font-medium text-deep-navy">
-                    {po.id} · {getProductTitle(po.productId)}
-                  </p>
-                  <p className="text-xs text-charcoal/55">
-                    {getVendorName(po.vendorId)} · qty {po.quantityOrdered} · due {po.requiredDate}
-                  </p>
-                </div>
-                <StatusChip label={po.status} tone="info" />
-              </li>
             ))}
-          </ul>
+            {(needs?.persisted ?? []).slice(0, 3).map((n) => (
+              <div key={n.code} className="card-surface p-4 flex flex-wrap justify-between gap-3">
+                <div>
+                  <p className="font-medium text-deep-navy">{n.productId}{n.variantId ? ` / ${n.variantId}` : ""}</p>
+                  <p className="text-sm text-charcoal/65">
+                    Required: {n.quantityToProduce} · {n.reason}
+                  </p>
+                </div>
+                <Link href={`/manufacture/needs?req=${encodeURIComponent(n.code)}`}>
+                  <Button size="sm" variant="outline">
+                    Open
+                  </Button>
+                </Link>
+              </div>
+            ))}
+            {!needs?.fromInventory.length && !needs?.persisted.length ? (
+              <p className="text-sm text-charcoal/55">
+                No open manufacturing needs. Use Needs Making → Make any product to reorder anything.
+              </p>
+            ) : null}
+            <Link href="/manufacture/needs" className="text-sm text-aarla-red inline-flex items-center gap-1">
+              Open Needs Making <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-display text-xl text-deep-navy flex items-center gap-2">
+            <Factory className="h-5 w-5" /> In Production
+          </h2>
+          <div className="space-y-3">
+            {inProduction.slice(0, 6).map((o) => (
+              <Link
+                key={o.orderNumber}
+                href={`/manufacture/orders/${encodeURIComponent(o.orderNumber)}`}
+                className="card-surface p-4 block hover:border-aarla-red/30"
+              >
+                <div className="flex flex-wrap justify-between gap-2">
+                  <p className="font-medium text-deep-navy">{o.orderNumber}</p>
+                  <span className="text-xs uppercase tracking-wide text-charcoal/50">{o.status.replaceAll("_", " ")}</span>
+                </div>
+                <p className="text-sm text-charcoal/65 mt-1">
+                  Vendor: {o.vendorId} · Committed: {o.vendorCommittedDate ?? "—"} · Internal:{" "}
+                  {o.internalExpectedDate ?? "—"}
+                </p>
+              </Link>
+            ))}
+            {!inProduction.length ? (
+              <p className="text-sm text-charcoal/55">No open vendor orders.</p>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-display text-xl text-deep-navy flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-aarla-red" /> Overdue
+          </h2>
+          <div className="space-y-3">
+            {overdue.map((o) => (
+              <Link
+                key={o.orderNumber}
+                href={`/manufacture/orders/${encodeURIComponent(o.orderNumber)}`}
+                className="card-surface p-4 block border-aarla-red/30"
+              >
+                <p className="font-medium text-deep-navy">{o.orderNumber}</p>
+                <p className="text-sm text-aarla-red">
+                  Vendor committed {o.vendorCommittedDate} · overdue {daysOverdue(o.vendorCommittedDate)} days
+                </p>
+              </Link>
+            ))}
+            {!overdue.length ? <p className="text-sm text-charcoal/55">Nothing overdue.</p> : null}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-display text-xl text-deep-navy">Awaiting Action</h2>
+          <div className="space-y-2">
+            {awaiting.slice(0, 8).map((o) => (
+              <Link
+                key={o.orderNumber}
+                href={`/manufacture/orders/${encodeURIComponent(o.orderNumber)}`}
+                className="flex items-center justify-between rounded-xl border border-border bg-white px-4 py-3 text-sm hover:border-aarla-red/40"
+              >
+                <span className="text-deep-navy font-medium">{o.orderNumber}</span>
+                <span className="text-charcoal/55 flex items-center gap-1">
+                  {o.status.replaceAll("_", " ")} <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+              </Link>
+            ))}
+            {!awaiting.length ? <p className="text-sm text-charcoal/55">No actions waiting.</p> : null}
+          </div>
         </section>
       </main>
-
-      <Modal open={preview !== null} onClose={() => setPreview(null)} title="Preview" wide>
-        <p className="text-sm text-charcoal/70">
-          Mock document for {getProductTitle(productId)} → {getVendorName(vendorId)} · qty {quantity}.
-        </p>
-      </Modal>
     </>
   );
 }

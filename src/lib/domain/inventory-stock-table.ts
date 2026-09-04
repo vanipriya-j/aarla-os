@@ -36,6 +36,7 @@ export type StockTableRow = {
   cell: VariantStockCell;
   product: Product;
   shopifyAdminUrl: string | null;
+  shopifyVariantId: string | null;
 };
 
 function minQtyFor(rules: ReorderRule[], productId: string, variantId: string): number | undefined {
@@ -83,6 +84,7 @@ export function buildStockTableRows(input: {
         cell,
         product,
         shopifyAdminUrl: product.shopifyAdminUrl ?? null,
+        shopifyVariantId: variant?.shopifyVariantId ?? null,
       });
     }
   }

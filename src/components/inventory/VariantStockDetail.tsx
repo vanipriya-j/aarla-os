@@ -33,6 +33,7 @@ interface VariantStockDetailProps {
   cell: VariantStockCell | null;
   onTransfer: () => void;
   onAdjust: () => void;
+  reorderHref?: string | null;
 }
 
 /** Read-only drawer showing a single variant's stock breakdown across every location. */
@@ -44,6 +45,7 @@ export function VariantStockDetail({
   cell,
   onTransfer,
   onAdjust,
+  reorderHref,
 }: VariantStockDetailProps) {
   return (
     <Modal
@@ -52,6 +54,11 @@ export function VariantStockDetail({
       title={`${productTitle} — ${variantLabel}`}
       footer={
         <>
+          {reorderHref ? (
+            <a href={reorderHref}>
+              <Button variant="outline">Reorder</Button>
+            </a>
+          ) : null}
           <Button variant="outline" onClick={onTransfer}>
             Transfer
           </Button>

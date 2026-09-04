@@ -1,5 +1,5 @@
 /**
- * One-time legacy base inventory from Shopify inventoryQuantity.
+ * One-time legacy base inventory from Shopify store-wide Available (inventoryQuantity).
  * Writes Purchase Receipt External→Studio. Not continuous sync.
  */
 import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
@@ -144,7 +144,7 @@ export async function syncShopifyOpeningInventory(
       productId: match.productCode,
       variantId: match.variantCode,
       quantity: v.available,
-      notes: `Legacy opening balance from Shopify inventory (${v.available} available)`,
+      notes: `Legacy opening balance from Shopify available (${v.available})`,
     });
   }
 

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { DataTable } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/Button";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
+import {
+  manufactureReorderHref,
+  suggestedReorderQty,
+} from "@/lib/domain/manufacture-reorder-link";
 
 interface ReplenishmentPanelProps {
   title: string;
@@ -11,6 +15,8 @@ interface ReplenishmentPanelProps {
   items: ReplenishmentItem[];
   onTransfer: (item: ReplenishmentItem) => void;
   emptyMessage?: string;
+  /** Optional Needs Making filter deep-link (zero / low). */
+  needsFilter?: "zero" | "low";
 }
 
 /** One replenishment section (Aarla Low / Partner Need / Global Low) as an actionable worklist. */
@@ -20,12 +26,22 @@ export function ReplenishmentPanel({
   items,
   onTransfer,
   emptyMessage,
+  needsFilter,
 }: ReplenishmentPanelProps) {
   return (
     <section className="space-y-3">
-      <div>
-        <h3 className="font-display text-lg text-deep-navy">{title}</h3>
-        {description ? <p className="text-sm text-charcoal/60 mt-0.5">{description}</p> : null}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-display text-lg text-deep-navy">{title}</h3>
+          {description ? <p className="text-sm text-charcoal/60 mt-0.5">{description}</p> : null}
+        </div>
+        {needsFilter ? (
+          <Link href={manufactureReorderHref({ productId: "", filter: needsFilter })}>
+            <Button size="sm" variant="outline">
+              Reorder {needsFilter === "zero" ? "zero stock" : "low stock"}
+            </Button>
+          </Link>
+        ) : null}
       </div>
       <DataTable
         rows={items}
@@ -55,9 +71,17 @@ export function ReplenishmentPanel({
             header: "",
             render: (i) =>
               i.suggestedAction === "Manufacture" || i.suggestedAction === "Reorder / Manufacture" ? (
-                <Link href="/manufacture">
+                <Link
+                  href={manufactureReorderHref({
+                    productId: i.productId,
+                    variantId: i.variantId,
+                    quantity: suggestedReorderQty(i.total, i.minQuantity),
+                    label: i.label,
+                  })}
+                  data-testid="replenishment-reorder"
+                >
                   <Button size="sm" variant="outline">
-                    {i.suggestedAction}
+                    Reorder
                   </Button>
                 </Link>
               ) : (

@@ -89,7 +89,7 @@ export function ShopifyCatalogSyncButton({ onDone }: { onDone?: () => void }) {
         setStatus(
           productsRead === 0 && mode === "incremental"
             ? "Catalog up to date — no product changes since last sync."
-            : `Catalog sync complete — ${added} added, ${updated} updated (${productsRead} read). Next: import base inventory (one-time) if needed, then manage via Receive/Transfer.`,
+            : `Catalog sync complete — ${added} added, ${updated} updated (${productsRead} read). Use Inventory → Shopify sync to align quantities.`,
         );
         onDone?.();
       } catch (err) {

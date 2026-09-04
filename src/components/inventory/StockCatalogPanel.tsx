@@ -18,8 +18,18 @@ import {
   type StockTableRow,
 } from "@/lib/domain/inventory-stock-table";
 import type { Location, Product, ReorderRule, StockMovement } from "@/lib/domain/types";
-import { Search } from "lucide-react";
+import {
+  manufactureReorderHref,
+  suggestedReorderQty,
+} from "@/lib/domain/manufacture-reorder-link";
+import { Search, RefreshCw } from "lucide-react";
 import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
+import { Button } from "@/components/ui/Button";
+import { newCommerceSyncLockToken } from "@/lib/client/commerce-sync-auto-retry";
+import {
+  pullShopifyAvailableRowViaApi,
+  unlockCommerceSyncLockViaApi,
+} from "@/lib/client/commerce-sync-api";
 
 export type StockCatalogSelection = {
   product: Product;
@@ -33,6 +43,8 @@ type Props = {
   locations: Location[];
   reorderRules: ReorderRule[];
   onSelectVariant: (selection: StockCatalogSelection) => void;
+  /** Called after a per-row Shopify pull so the parent can show a toast and soft-refresh. */
+  onShopifyRowSynced?: (message?: string) => void;
 };
 
 const STOCK_FILTERS: { id: StockStockFilter; label: string }[] = [
@@ -66,12 +78,15 @@ export function StockCatalogPanel({
   locations,
   reorderRules,
   onSelectVariant,
+  onShopifyRowSynced,
 }: Props) {
   const [category, setCategory] = useState<string | "all">("all");
   const [stockFilter, setStockFilter] = useState<StockStockFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<StockSortKey>("title-asc");
   const [page, setPage] = useState(1);
+  const [rowSyncing, setRowSyncing] = useState<string | null>(null);
+  const [rowSyncMsg, setRowSyncMsg] = useState<string | null>(null);
 
   const allRows = useMemo(
     () => buildStockTableRows({ products, movements, locations, reorderRules }),
@@ -104,8 +119,81 @@ export function StockCatalogPanel({
 
   const resetPage = () => setPage(1);
 
+  const syncShopifyRow = async (r: StockTableRow) => {
+    if (!r.shopifyVariantId && !r.variantSku && !r.product.shopifyProductId) return;
+    setRowSyncing(r.key);
+    setRowSyncMsg(
+      `Pulling Shopify Available → Studio for ${r.variantSku || r.productTitle}…`,
+    );
+    const token = newCommerceSyncLockToken();
+    try {
+      const res = await pullShopifyAvailableRowViaApi(token, {
+        shopifyVariantId: r.shopifyVariantId,
+        sku: r.variantSku || r.productSku,
+        productId: r.productId,
+        variantId: r.variantId,
+        shopifyProductId: r.product.shopifyProductId,
+      });
+      if (!res.ok) {
+        setRowSyncMsg(res.error);
+        return;
+      }
+      const bits: string[] = [];
+      if (res.data.pulled && res.data.row) {
+        bits.push(
+          `Studio set to ${res.data.row.shopifyAvailable} from ${res.data.locationName ?? "Shopify"}`,
+        );
+        if (
+          res.data.shopTotal != null &&
+          res.data.shopTotal !== res.data.row.shopifyAvailable
+        ) {
+          bits.push(`shop total ${res.data.shopTotal}`);
+        }
+      } else if (res.data.aligned && res.data.row) {
+        bits.push(
+          `Studio ↔ ${res.data.locationName ?? "Shopify"} aligned at ${res.data.row.shopifyAvailable}`,
+        );
+        if (
+          res.data.shopTotal != null &&
+          res.data.shopTotal !== res.data.row.shopifyAvailable
+        ) {
+          bits.push(`shop total ${res.data.shopTotal}`);
+        }
+      } else if (res.data.row) {
+        bits.push(
+          `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
+        );
+      }
+      if (res.data.levelSummary) bits.push(res.data.levelSummary);
+      if (res.data.errors.length) bits.push(res.data.errors[0]!);
+      if (!res.data.pulled && !res.data.aligned && res.data.errors.length) {
+        const failMsg = [res.data.errors[0], res.data.levelSummary]
+          .filter(Boolean)
+          .join(" · ");
+        setRowSyncMsg(failMsg);
+        onShopifyRowSynced?.(failMsg);
+        return;
+      }
+      const msg = bits.join(" · ") || "Synced";
+      setRowSyncMsg(msg);
+      onShopifyRowSynced?.(msg);
+    } catch (err) {
+      const failMsg = err instanceof Error ? err.message : String(err);
+      setRowSyncMsg(failMsg);
+      onShopifyRowSynced?.(failMsg);
+    } finally {
+      setRowSyncing(null);
+      await unlockCommerceSyncLockViaApi().catch(() => undefined);
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="stock-catalog-panel">
+      {rowSyncMsg ? (
+        <p className="text-sm text-deep-navy rounded-lg border border-border bg-white px-3 py-2">
+          {rowSyncMsg}
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Product type">
         <button
           type="button"
@@ -183,7 +271,7 @@ export function StockCatalogPanel({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2" aria-label="Stock filter">
+      <div className="flex flex-wrap items-center gap-2" aria-label="Stock filter">
         {STOCK_FILTERS.map((f) => (
           <button
             key={f.id}
@@ -197,6 +285,18 @@ export function StockCatalogPanel({
             {f.label}
           </button>
         ))}
+        {stockFilter === "zero" || stockFilter === "low" ? (
+          <Link
+            href={manufactureReorderHref({
+              productId: "",
+              filter: stockFilter === "zero" ? "zero" : "low",
+            })}
+            className="text-sm text-aarla-red hover:underline underline-offset-2 ml-1"
+            data-testid="stock-filter-reorder-link"
+          >
+            Reorder {stockFilter === "zero" ? "zero-stock" : "low-stock"} →
+          </Link>
+        ) : null}
       </div>
 
       <DataTable
@@ -245,6 +345,24 @@ export function StockCatalogPanel({
                       <ShopifyIcon className="h-4 w-4" />
                     </a>
                   ) : null}
+                  {r.shopifyVariantId || r.product.shopifyProductId || r.variantSku ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void syncShopifyRow(r);
+                      }}
+                      disabled={!!rowSyncing}
+                      title="Pull Shopify Available into Studio for this SKU"
+                      aria-label={`Pull Shopify stock for ${r.productTitle} into Studio`}
+                      data-testid="stock-row-sync"
+                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-deep-navy hover:bg-pale-cream disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${rowSyncing === r.key ? "animate-spin" : ""}`}
+                      />
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ),
@@ -288,11 +406,40 @@ export function StockCatalogPanel({
             key: "total",
             header: "Total",
             render: (r) => (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
-                {r.lowStock ? <StatusChip label="Low stock" tone="danger" /> : null}
+                {r.lowStock && r.total > 0 ? (
+                  <StatusChip label="Low stock" tone="warning" />
+                ) : null}
               </div>
             ),
+          },
+          {
+            key: "make",
+            header: "Reorder",
+            render: (r) => {
+              const suggested = suggestedReorderQty(r.total);
+              const label =
+                r.variantLabel && r.variantLabel !== "Default"
+                  ? `${r.productTitle} / ${r.variantLabel}`
+                  : r.productTitle;
+              return (
+                <Link
+                  href={manufactureReorderHref({
+                    productId: r.productId,
+                    variantId: r.variantId,
+                    quantity: suggested,
+                    label,
+                  })}
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="stock-row-reorder"
+                >
+                  <Button size="sm" variant={r.total <= 0 || r.lowStock ? "primary" : "outline"}>
+                    Reorder
+                  </Button>
+                </Link>
+              );
+            },
           },
         ]}
       />
@@ -307,8 +454,9 @@ export function StockCatalogPanel({
       />
 
       <p className="text-xs text-charcoal/50">
-        One row per variant. Click a row for location breakdown, transfer, or adjust. Open the
-        product name for the Aarla product page, or the Shopify icon to edit in Admin.
+        One row per variant. Click a row for location breakdown, transfer, or adjust.{" "}
+        <strong>Reorder</strong> opens Needs Making to add the SKU to a vendor PO (multi-product
+        orders supported). Filter Zero / Low stock for restock candidates.
       </p>
     </div>
   );

@@ -48,6 +48,19 @@ export function shopSubdomain(storeDomain: string): string {
   return host.replace(/\.myshopify\.com$/i, "");
 }
 
+export function readShopifyOfficeLocationIdFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const raw =
+    env.SHOPIFY_AARLA_OFFICE_LOCATION_ID?.trim() ||
+    env.SHOPIFY_PRIMARY_LOCATION_ID?.trim() ||
+    "";
+  if (!raw) return null;
+  if (raw.startsWith("gid://")) return raw;
+  if (/^\d+$/.test(raw)) return `gid://shopify/Location/${raw}`;
+  return raw;
+}
+
 export function readShopifyAuthConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): ShopifyAuthConfig | null {
@@ -77,8 +90,10 @@ export function readShopifyAuthConfigFromEnv(
 
 /**
  * Resolve an Admin API access token.
- * Prefers static token when set; otherwise exchanges client credentials.
- * Tokens from client credentials expire ~24h and are cached in-memory.
+ * Prefers Dev Dashboard client credentials when configured — a stale
+ * SHOPIFY_ADMIN_API_ACCESS_TOKEN often lacks newly added scopes (e.g. read_locations)
+ * even when the Dashboard version lists them. Static token is used only when
+ * client credentials are not set.
  */
 export async function resolveShopifyAccessToken(
   config: ShopifyAuthConfig,
@@ -86,61 +101,65 @@ export async function resolveShopifyAccessToken(
 ): Promise<string> {
   assertServerOnly();
 
+  if (config.clientId && config.clientSecret) {
+    const cacheKey = `${config.storeDomain}|${config.clientId}`;
+    const cached = tokenCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAtMs - 60_000) {
+      return cached.accessToken;
+    }
+
+    const shop = shopSubdomain(config.storeDomain);
+    const res = await fetchImpl(`https://${shop}.myshopify.com/admin/oauth/access_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+      }),
+    });
+
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: string; error_description?: string };
+        if (body.error || body.error_description) {
+          detail = [body.error, body.error_description].filter(Boolean).join(": ");
+        }
+      } catch {
+        /* ignore parse */
+      }
+      // Fall back to static token if CC fails (e.g. shop_not_permitted) and one is set.
+      if (config.adminApiAccessToken) {
+        return config.adminApiAccessToken;
+      }
+      throw new Error(`Shopify token request failed (${detail})`);
+    }
+
+    const body = (await res.json()) as {
+      access_token?: string;
+      expires_in?: number;
+    };
+    if (!body.access_token) {
+      throw new Error("Shopify token response missing access_token");
+    }
+
+    const expiresInSec = typeof body.expires_in === "number" ? body.expires_in : 86_399;
+    tokenCache.set(cacheKey, {
+      accessToken: body.access_token,
+      expiresAtMs: Date.now() + expiresInSec * 1000,
+    });
+
+    return body.access_token;
+  }
+
   if (config.adminApiAccessToken) {
     return config.adminApiAccessToken;
   }
 
-  if (!config.clientId || !config.clientSecret) {
-    throw new Error(
-      "Shopify credentials incomplete. Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_API_ACCESS_TOKEN.",
-    );
-  }
-
-  const cacheKey = `${config.storeDomain}|${config.clientId}`;
-  const cached = tokenCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAtMs - 60_000) {
-    return cached.accessToken;
-  }
-
-  const shop = shopSubdomain(config.storeDomain);
-  const res = await fetchImpl(`https://${shop}.myshopify.com/admin/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-    }),
-  });
-
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: string; error_description?: string };
-      if (body.error || body.error_description) {
-        detail = [body.error, body.error_description].filter(Boolean).join(": ");
-      }
-    } catch {
-      /* ignore parse */
-    }
-    throw new Error(`Shopify token request failed (${detail})`);
-  }
-
-  const body = (await res.json()) as {
-    access_token?: string;
-    expires_in?: number;
-  };
-  if (!body.access_token) {
-    throw new Error("Shopify token response missing access_token");
-  }
-
-  const expiresInSec = typeof body.expires_in === "number" ? body.expires_in : 86_399;
-  tokenCache.set(cacheKey, {
-    accessToken: body.access_token,
-    expiresAtMs: Date.now() + expiresInSec * 1000,
-  });
-
-  return body.access_token;
+  throw new Error(
+    "Shopify credentials incomplete. Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_API_ACCESS_TOKEN.",
+  );
 }
 
 /** Test helper — clear in-memory token cache. */
