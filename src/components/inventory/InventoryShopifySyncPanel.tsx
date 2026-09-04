@@ -407,16 +407,15 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
               <ArrowDownUp className="h-5 w-5" /> Stock mismatches
             </h2>
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
-              Compares <strong>linked</strong> Aarla variants only — Shopify qty is{" "}
-              <em>Available at Aarla Office</em> (not store-wide total). Rows appear as batches
-              load — <strong>Pull Available</strong> when Shopify is truth,
+              Compares <strong>linked</strong> Aarla variants only — Shopify qty is store-wide{" "}
+              <em>inventoryQuantity</em> (studio stock on Shopify; partner stock stays in Aarla).{" "}
+              <strong>Pull Available</strong> when Shopify is truth,
               <strong> Push Available</strong> when Studio is truth, or <strong>Sync</strong> after
               an Admin fix.
             </p>
             <p className="text-xs text-charcoal/50 mt-2 max-w-2xl">
-              <strong>Receive</strong> auto-pushes Shopify <em>Available</em> at Aarla Office for
-              linked SKUs. Manufacture WIP stays in Aarla for now — Shopify <em>Incoming</em>{" "}
-              needs scheduled changes (later). Do not use Committed for WIP.
+              <strong>Receive</strong> auto-pushes Shopify <em>Available</em> for linked SKUs.
+              Manufacture WIP stays in Aarla for now.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -454,7 +453,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">SKU</th>
                 <th className="px-4 py-3">Aarla Studio</th>
-                <th className="px-4 py-3">Shopify Available (Aarla Office)</th>
+                <th className="px-4 py-3">Shopify Available</th>
                 <th className="px-4 py-3">One-time fix</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>

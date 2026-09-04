@@ -1,5 +1,5 @@
 /**
- * Inventory sync — Aarla Studio ↔ Shopify Available (Aarla Office).
+ * Inventory sync — Aarla Studio ↔ Shopify store-wide Available (inventoryQuantity).
  *
  * Policy (weekend tighten):
  * - Sales pipeline remains Shopify (orders sync into Aarla).
@@ -281,7 +281,7 @@ async function compareLinkedShopifyInventory(
 
   await ensureInventorySyncSchema();
 
-  // Prefer env/stored Office GID — qty-only inventoryLevel(locationId:) needs no read_locations.
+  // Push location only — reads use store-wide inventoryQuantity.
   const officeLocationId = await resolveShopifyOfficeLocationId(connector);
 
   const offset = Math.max(0, Number.parseInt(String(deps.cursor ?? "0"), 10) || 0);
@@ -338,10 +338,6 @@ async function compareLinkedShopifyInventory(
     const sid = normalizeShopifyVariantId(row.shopify_variant_id);
     const shopify = shopifyById.get(sid);
     if (!shopify) {
-      skippedUnmatched += 1;
-      continue;
-    }
-    if (!shopify.locationId || !shopify.locationName) {
       skippedUnmatched += 1;
       continue;
     }
@@ -470,10 +466,6 @@ async function buildDriftPage(
   }
 
   for (const v of page.variants) {
-    if (!v.locationId || !v.locationName) {
-      skippedUnmatched += 1;
-      continue;
-    }
     let match = byShopifyId.get(normalizeShopifyVariantId(v.externalVariantId));
     if (!match) {
       // Unique-SKU fallback only (shared SKUs explode the mismatch table).
@@ -626,7 +618,7 @@ export async function pullShopifyInventoryToAarla(
         systemQty: row.aarlaStudio,
         physicalQty: row.shopifyAvailable,
         reason: "count correction",
-        notes: `Shopify Aarla Office pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
+        notes: `Shopify pull · available ${row.shopifyAvailable} (was Studio ${row.aarlaStudio})`,
       });
       if (mv) summary.pulled += 1;
     } catch (err) {
@@ -647,7 +639,7 @@ export type InventoryRowRefreshResult = {
   aligned: boolean;
   catalogUpdated: boolean;
   errors: string[];
-  /** Aarla Office location name used for Available */
+  /** Shopify source label (shop-wide Available) */
   locationName?: string | null;
   /** Store-wide inventoryQuantity (diagnostics only) */
   shopTotal?: number | null;
@@ -771,12 +763,6 @@ export async function refreshShopifyInventoryRow(input: {
     result.levelSummary = v.levelSummary ?? result.levelSummary ?? null;
     result.locationName = v.locationName ?? result.locationName ?? null;
 
-    if (!v.locationId || !v.locationName) {
-      result.errors.push(
-        `No “Aarla Office” inventory level for this SKU — not using shop total ${v.shopTotal ?? "?"}. Levels: ${v.levelSummary || "(none)"}. Rename the Studio location to “Aarla Office” in Shopify, or activate inventory there.`,
-      );
-      continue;
-    }
 
     let match = await mapShopifyVariantToAarla(v.externalVariantId, v.sku);
     // Prefer the Aarla row the founder clicked when provided.
@@ -871,13 +857,6 @@ export async function pullShopifyAvailableForRow(input: {
     if (!result.errors.length) {
       result.errors.push("Could not read Shopify available qty for this SKU.");
     }
-    return result;
-  }
-  if (!refreshed.locationName) {
-    result.errors.push(
-      `Refusing to pull shop total ${refreshed.shopTotal ?? "?"} — Aarla Office Available not found. Levels: ${refreshed.levelSummary || "(none)"}`,
-    );
-    result.row = refreshed.row;
     return result;
   }
 

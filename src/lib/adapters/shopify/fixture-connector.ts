@@ -526,9 +526,9 @@ export class FixtureShopifyConnector implements ShopifyConnector {
           available: i === 0 ? 12 : 5,
           inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
           locationId: "gid://shopify/Location/fixture-primary",
-          locationName: "Aarla Office",
+          locationName: "Shopify",
           shopTotal: i === 0 ? 12 : 5,
-          levelSummary: `Aarla Office=${i === 0 ? 12 : 5}`,
+          levelSummary: `Shopify=${i === 0 ? 12 : 5}`,
         })),
       ),
       hasMore: false,
@@ -570,9 +570,9 @@ export class FixtureShopifyConnector implements ShopifyConnector {
           available: i === 0 ? 12 : 5,
           inventoryItemId: `gid://shopify/InventoryItem/fixture-${v.externalVariantId}`,
           locationId: options?.locationId ?? "gid://shopify/Location/fixture-primary",
-          locationName: "Aarla Office",
+          locationName: "Shopify",
           shopTotal: i === 0 ? 12 : 5,
-          levelSummary: `Aarla Office=${i === 0 ? 12 : 5}`,
+          levelSummary: `Shopify=${i === 0 ? 12 : 5}`,
         })),
     );
   }

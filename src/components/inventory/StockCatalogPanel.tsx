@@ -123,7 +123,7 @@ export function StockCatalogPanel({
     if (!r.shopifyVariantId && !r.variantSku && !r.product.shopifyProductId) return;
     setRowSyncing(r.key);
     setRowSyncMsg(
-      `Pulling Aarla Office Available → Studio for ${r.variantSku || r.productTitle}…`,
+      `Pulling Shopify Available → Studio for ${r.variantSku || r.productTitle}…`,
     );
     const token = newCommerceSyncLockToken();
     try {
@@ -141,17 +141,17 @@ export function StockCatalogPanel({
       const bits: string[] = [];
       if (res.data.pulled && res.data.row) {
         bits.push(
-          `Studio set to ${res.data.row.shopifyAvailable} from ${res.data.locationName ?? "Aarla Office"}`,
+          `Studio set to ${res.data.row.shopifyAvailable} from ${res.data.locationName ?? "Shopify"}`,
         );
         if (
           res.data.shopTotal != null &&
           res.data.shopTotal !== res.data.row.shopifyAvailable
         ) {
-          bits.push(`shop total ${res.data.shopTotal} ignored`);
+          bits.push(`shop total ${res.data.shopTotal}`);
         }
       } else if (res.data.aligned && res.data.row) {
         bits.push(
-          `Studio ↔ ${res.data.locationName ?? "Aarla Office"} aligned at ${res.data.row.shopifyAvailable}`,
+          `Studio ↔ ${res.data.locationName ?? "Shopify"} aligned at ${res.data.row.shopifyAvailable}`,
         );
         if (
           res.data.shopTotal != null &&
@@ -161,7 +161,7 @@ export function StockCatalogPanel({
         }
       } else if (res.data.row) {
         bits.push(
-          `Studio ${res.data.row.aarlaStudio} / Office ${res.data.row.shopifyAvailable}`,
+          `Studio ${res.data.row.aarlaStudio} / Shopify ${res.data.row.shopifyAvailable}`,
         );
       }
       if (res.data.levelSummary) bits.push(res.data.levelSummary);

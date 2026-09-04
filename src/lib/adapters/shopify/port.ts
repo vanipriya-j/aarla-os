@@ -170,18 +170,19 @@ export interface ShopifyVariantInventoryRecord {
   externalVariantId: string;
   sku: string;
   /**
-   * Sellable Available at Aarla Office (Shopify location), not store-wide total.
+   * Store-wide sellable Available (Shopify inventoryQuantity).
+   * Partner stock is Aarla-only — not read from Shopify locations.
    */
   available: number;
   /** gid://shopify/InventoryItem/... when available from Admin API */
   inventoryItemId?: string | null;
-  /** Shopify location gid the Available qty was read from / pushed to */
+  /** Shopify push location gid when known; reads may leave null */
   locationId?: string | null;
-  /** Location name used for Available (e.g. "Aarla Office") */
+  /** Source label for Available (e.g. "Shopify") */
   locationName?: string | null;
-  /** Store-wide inventoryQuantity — diagnostics only; never write this to Studio */
+  /** Same as available for shop-total reads (diagnostics) */
   shopTotal?: number | null;
-  /** Per-location Available summary, e.g. "Aarla Office=9, Partner=5" */
+  /** Short qty summary for UI */
   levelSummary?: string | null;
 }
 
@@ -216,23 +217,22 @@ export interface ShopifyConnector {
   /** Chunked catalog products — optional; skipped when unimplemented. */
   fetchProductsPage?(options?: ShopifyFetchOptions): Promise<ShopifyProductsPage>;
   /**
-   * Chunked variant inventory at Aarla Office (Shopify location Available).
+   * Chunked variant inventory — store-wide inventoryQuantity (studio stock on Shopify).
    * Used for opening balances, drift compare, and sync.
    */
   fetchVariantInventoryPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyVariantInventoryPage>;
   /**
-   * Fetch Available at Aarla Office for specific Shopify variant ids.
-   * Pass options.locationId to pin the Shopify location (defaults to primary / Aarla Office).
+   * Fetch store-wide Available for specific Shopify variant ids.
    */
   fetchVariantsInventoryByIds?(
     externalVariantIds: string[],
     options?: { locationId?: string | null },
   ): Promise<ShopifyVariantInventoryRecord[]>;
   /**
-   * Preferred Shopify location for Studio ↔ Available (prefers "Aarla Office").
-   * Required for inventorySetQuantities and location-scoped reads.
+   * Preferred Shopify location for Push (inventorySetQuantities).
+   * Prefers "Aarla Office" / SHOPIFY_AARLA_OFFICE_LOCATION_ID when set.
    */
   fetchPrimaryInventoryLocationId?(): Promise<string | null>;
   /** Set absolute available qty on Shopify for one or more inventory items. */

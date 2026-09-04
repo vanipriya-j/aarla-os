@@ -1,5 +1,5 @@
 /**
- * One-time legacy base inventory from Shopify Available at Aarla Office.
+ * One-time legacy base inventory from Shopify store-wide Available (inventoryQuantity).
  * Writes Purchase Receipt External→Studio. Not continuous sync.
  */
 import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
@@ -104,16 +104,6 @@ export async function syncShopifyOpeningInventory(
 
   await ensureCoreInventoryLocations();
 
-  // Optional hint only — opening import picks Aarla Office from inventoryLevels by name.
-  let locationId: string | null = null;
-  if (typeof connector.fetchPrimaryInventoryLocationId === "function") {
-    try {
-      locationId = await connector.fetchPrimaryInventoryLocationId();
-    } catch {
-      locationId = null;
-    }
-  }
-
   let page;
   try {
     page = await connector.fetchVariantInventoryPage({
@@ -121,7 +111,6 @@ export async function syncShopifyOpeningInventory(
       maxPages: deps.maxPages ?? 1,
       // Small pages: each variant can do matching queries + receipt write.
       pageSize: 15,
-      locationId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Shopify inventory fetch failed";
@@ -142,15 +131,6 @@ export async function syncShopifyOpeningInventory(
     [];
 
   for (const v of page.variants) {
-    if (!v.locationId || !v.locationName) {
-      summary.skippedUnmatched += 1;
-      if (summary.errors.length < 3) {
-        summary.errors.push(
-          `${v.sku}: no Aarla Office level (shop total ${v.shopTotal ?? "?"}; ${v.levelSummary || "no levels"})`,
-        );
-      }
-      continue;
-    }
     if (v.available <= 0) {
       summary.skippedZero += 1;
       continue;
@@ -164,7 +144,7 @@ export async function syncShopifyOpeningInventory(
       productId: match.productCode,
       variantId: match.variantCode,
       quantity: v.available,
-      notes: `Legacy opening balance from Shopify ${v.locationName} available (${v.available}; shop total ${v.shopTotal ?? "?"})`,
+      notes: `Legacy opening balance from Shopify available (${v.available})`,
     });
   }
 

@@ -9,18 +9,18 @@ SHOPIFY_CLIENT_SECRET=…
 SHOPIFY_API_VERSION=2025-01
 ```
 
-Optional (recommended for inventory Sync): `SHOPIFY_AARLA_OFFICE_LOCATION_ID=gid://shopify/Location/…`
-(Aarla Office). With this set, qty reads use `inventoryLevel(locationId:)` and only need `read_inventory`.
+Optional (Push target): `SHOPIFY_AARLA_OFFICE_LOCATION_ID=gid://shopify/Location/…`
+Sync/Pull/Compare use store-wide `inventoryQuantity` (studio stock on Shopify). Partner stock stays in Aarla OS only.
 
 Optional legacy fallback: `SHOPIFY_ADMIN_API_ACCESS_TOKEN`. Prefer client credentials — a stale
-`shpat_` token often lacks newly added scopes (e.g. `read_locations`) even when the Dashboard lists them.
+`shpat_` token often lacks newly added scopes even when the Dashboard lists them.
 If both are set, Aarla uses client credentials first.
 
 ## Steps in the Dev Dashboard (you)
 
 1. Open [dev.shopify.com/dashboard](https://dev.shopify.com/dashboard/) → app **aarla-os**.
-2. Ensure scopes include `read_customers`, `read_orders`, `read_all_orders`, plus for inventory Sync:
-   `read_inventory` and `read_locations` (Location object fields require `read_locations` since Admin API 2024-07).
+2. Ensure scopes include `read_customers`, `read_orders`, `read_all_orders`, plus for inventory:
+   `read_inventory` and `write_inventory` (add `read_locations` if Push must resolve the location by name).
    - Match `shopify.app.toml` in this repo, or create a new version with those scopes and **Release**.
 3. On Overview, click **Install app** on the Aarla store (re-approve after scope changes).
    - Confirm **Installs ≥ 1**.
