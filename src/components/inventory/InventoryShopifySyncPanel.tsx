@@ -409,6 +409,7 @@ export function InventoryShopifySyncPanel({ onDone }: { onDone?: () => void }) {
             <p className="text-sm text-charcoal/65 mt-1 max-w-2xl">
               Compares <strong>linked</strong> Aarla variants only — Shopify qty is store-wide{" "}
               <em>inventoryQuantity</em> (studio stock on Shopify; partner stock stays in Aarla).{" "}
+              Scans in larger batches (~200 linked SKUs per request).{" "}
               <strong>Pull Available</strong> when Shopify is truth,
               <strong> Push Available</strong> when Studio is truth, or <strong>Sync</strong> after
               an Admin fix.
