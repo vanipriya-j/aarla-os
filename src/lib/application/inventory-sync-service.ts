@@ -158,17 +158,21 @@ async function persistOfficeLocationId(locationId: string | null | undefined): P
   ).catch(() => undefined);
 }
 
-/**
- * Best-effort Aarla Office location id for Push / preferred matching.
- * Sync/Pull can proceed without this — they pick Office from inventoryLevels by name.
- * Never hard-fail Compare/Pull on missing read_locations.
- */
 async function resolveShopifyOfficeLocationId(
   connector: ShopifyConnector,
   preferredFromVariant: string | null = null,
   opts: { required?: boolean } = {},
 ): Promise<string | null> {
   if (preferredFromVariant) return preferredFromVariant;
+
+  const { readShopifyOfficeLocationIdFromEnv } = await import(
+    "@/lib/adapters/shopify/auth"
+  );
+  const fromEnv = readShopifyOfficeLocationIdFromEnv();
+  if (fromEnv) {
+    await persistOfficeLocationId(fromEnv);
+    return fromEnv;
+  }
 
   const stored = await query<{ primary_location_id: string | null }>(
     `select primary_location_id from shopify_inventory_settings where organization_id = $1`,
@@ -180,21 +184,17 @@ async function resolveShopifyOfficeLocationId(
     try {
       const loc = await connector.fetchPrimaryInventoryLocationId();
       if (loc) {
-        await query(
-          `insert into shopify_inventory_settings (organization_id, primary_location_id)
-           values ($1,$2)
-           on conflict (organization_id) do update set primary_location_id = excluded.primary_location_id, updated_at = now()`,
-          [ORG_ID, loc],
-        ).catch(() => undefined);
+        await persistOfficeLocationId(loc);
         return loc;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Root `locations` needs read_locations on the live token. Sync can skip it.
+      // Root `locations` needs read_locations on the live token. Sync can skip it
+      // when SHOPIFY_AARLA_OFFICE_LOCATION_ID or a stored id is set.
       if (/ACCESS_DENIED|locations|read_locations|not authorized|permission/i.test(message)) {
         if (opts.required) {
           throw new Error(
-            `${message} — Push needs read_locations on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`,
+            `${message} — Since API 2024-07, Location fields need read_locations on the live token. Remove stale SHOPIFY_ADMIN_API_ACCESS_TOKEN (use client credentials), reinstall/approve the app with read_locations, or set SHOPIFY_AARLA_OFFICE_LOCATION_ID.`,
           );
         }
         return null;
@@ -205,7 +205,7 @@ async function resolveShopifyOfficeLocationId(
   }
   if (opts.required) {
     throw new Error(
-      'No Shopify location named "Aarla Office". Check Settings → Locations in Shopify Admin.',
+      'No Aarla Office location id. Set SHOPIFY_AARLA_OFFICE_LOCATION_ID (gid://shopify/Location/…) or grant read_locations on the live token.',
     );
   }
   return null;

@@ -34,6 +34,7 @@ import { shopifyGidToExternalId } from "./normalize";
 import {
   normalizeShopifyShopDomain,
   readShopifyAuthConfigFromEnv,
+  readShopifyOfficeLocationIdFromEnv,
   resolveShopifyAccessToken,
   type ShopifyAuthConfig,
 } from "./auth";
@@ -479,10 +480,57 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
 }
 
 /**
- * Read Available at Aarla Office from inventoryLevels — never store-wide inventoryQuantity.
- * Does NOT query root `locations` (that needs read_locations on the live token even when
- * the Dev Dashboard lists the scope). Needs read_inventory.
+ * Read Available at Aarla Office without Location object fields when possible.
+ * As of Admin API 2024-07, Location fields need read_locations on the *live* token
+ * (Dashboard scopes alone are not enough). Prefer inventoryLevel(locationId:) +
+ * quantities with a known Office GID — that path only needs read_inventory.
  */
+const VARIANT_INVENTORY_BY_LOCATION_QUERY = `
+query SyncVariantInventoryByLocation($cursor: String, $query: String, $pageSize: Int!, $officeLocationId: ID!) {
+  productVariants(first: $pageSize, after: $cursor, query: $query) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        sku
+        inventoryQuantity
+        inventoryItem {
+          id
+          office: inventoryLevel(locationId: $officeLocationId) {
+            quantities(names: ["available", "on_hand", "committed"]) {
+              name
+              quantity
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+const VARIANT_NODES_INVENTORY_BY_LOCATION_QUERY = `
+query VariantNodesInventoryByLocation($ids: [ID!]!, $officeLocationId: ID!) {
+  nodes(ids: $ids) {
+    ... on ProductVariant {
+      id
+      sku
+      inventoryQuantity
+      inventoryItem {
+        id
+        office: inventoryLevel(locationId: $officeLocationId) {
+          quantities(names: ["available", "on_hand", "committed"]) {
+            name
+            quantity
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+/** Fallback when Office GID unknown — needs read_locations for location { name }. */
 const VARIANT_INVENTORY_QUERY = `
 query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
   productVariants(first: $pageSize, after: $cursor, query: $query) {
@@ -517,7 +565,7 @@ query SyncVariantInventory($cursor: String, $query: String, $pageSize: Int!) {
 }
 `;
 
-/** Aarla-first compare — Available at Aarla Office for linked variants only. */
+/** Aarla-first compare fallback — needs read_locations for location names. */
 const VARIANT_NODES_INVENTORY_QUERY = `
 query VariantNodesInventory($ids: [ID!]!) {
   nodes(ids: $ids) {
@@ -1106,9 +1154,10 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     options: ShopifyFetchOptions = {},
   ): Promise<ShopifyVariantInventoryPage> {
     assertServerOnly();
-    // Optional hint only — Sync must not call root `locations` (read_locations).
-    // Aarla Office is picked from inventoryLevels by name.
-    const preferredLocationId = options.locationId?.trim() || null;
+    const officeLocationId =
+      options.locationId?.trim() ||
+      readShopifyOfficeLocationIdFromEnv() ||
+      null;
 
     const variants: ShopifyVariantInventoryRecord[] = [];
     let cursor: string | null = options.cursor ?? null;
@@ -1121,13 +1170,61 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
         pages += 1;
         const pageSize = Math.max(5, Math.min(options.pageSize ?? 25, 50));
         const query = options.query?.trim() ? options.query.trim() : null;
-        const data: VariantInventoryQueryData = await this.graphql<VariantInventoryQueryData>(
-          VARIANT_INVENTORY_QUERY,
-          {
+
+        if (officeLocationId) {
+          // Preferred path: no Location object fields → works without read_locations.
+          const data = await this.graphql<{
+            productVariants: {
+              pageInfo: { hasNextPage: boolean; endCursor: string | null };
+              edges: Array<{
+                node: {
+                  id: string;
+                  sku: string | null;
+                  inventoryQuantity?: number | null;
+                  inventoryItem?: {
+                    id?: string;
+                    office?: InventoryLevelNode | null;
+                  } | null;
+                };
+              }>;
+            };
+          }>(VARIANT_INVENTORY_BY_LOCATION_QUERY, {
             cursor,
             pageSize,
             query,
-          },
+            officeLocationId,
+          });
+
+          for (const edge of data.productVariants.edges) {
+            const externalVariantId = shopifyGidToExternalId(edge.node.id) ?? edge.node.id;
+            const sku =
+              (edge.node.sku ?? "").trim() || `shopify-${externalVariantId}`;
+            const item = edge.node.inventoryItem;
+            const officeQty = availableFromInventoryLevel(item?.office);
+            const shopTotal = Math.max(
+              0,
+              Math.floor(Number(edge.node.inventoryQuantity ?? 0)),
+            );
+            variants.push({
+              externalVariantId,
+              sku,
+              available: officeQty,
+              inventoryItemId: item?.id ?? null,
+              locationId: officeLocationId,
+              locationName: "Aarla Office",
+              shopTotal,
+              levelSummary: `Aarla Office=${officeQty}`,
+            });
+          }
+          hasNext = data.productVariants.pageInfo.hasNextPage;
+          cursor = data.productVariants.pageInfo.endCursor;
+          continue;
+        }
+
+        // Fallback: pick Office by name from inventoryLevels (needs read_locations).
+        const data: VariantInventoryQueryData = await this.graphql<VariantInventoryQueryData>(
+          VARIANT_INVENTORY_QUERY,
+          { cursor, pageSize, query },
         );
 
         for (const edge of data.productVariants.edges) {
@@ -1138,7 +1235,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const picked = pickAarlaOfficeAvailable({
             levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: edge.node.inventoryQuantity,
-            preferredLocationId,
+            preferredLocationId: null,
             officeLevel: null,
           });
           variants.push({
@@ -1158,8 +1255,10 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
-        /ACCESS_DENIED|read_inventory|not authorized|permission|inventoryLevel/i.test(message)
-          ? `${message} — reading Aarla Office Available needs read_inventory on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`
+        /ACCESS_DENIED|location|read_locations|read_inventory|not authorized|permission/i.test(
+          message,
+        )
+          ? `${message} — Since API 2024-07 Location fields need read_locations on the live token (not only in the Dev Dashboard). Fix: remove stale SHOPIFY_ADMIN_API_ACCESS_TOKEN so client credentials are used, reinstall/approve the app, or set SHOPIFY_AARLA_OFFICE_LOCATION_ID to the Aarla Office GID.`
           : message,
       );
     }
@@ -1180,15 +1279,53 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     const unique = [...new Set(externalVariantIds.map((id) => id.trim()).filter(Boolean))];
     if (!unique.length) return [];
 
-    const preferredLocationId = options?.locationId?.trim() || null;
+    const officeLocationId =
+      options?.locationId?.trim() ||
+      readShopifyOfficeLocationIdFromEnv() ||
+      null;
     const out: ShopifyVariantInventoryRecord[] = [];
     try {
-      // Shopify nodes() caps around 250 ids per call.
       for (let i = 0; i < unique.length; i += 50) {
         const slice = unique.slice(i, i + 50);
         const gids = slice.map((id) =>
           id.startsWith("gid://") ? id : `gid://shopify/ProductVariant/${id}`,
         );
+
+        if (officeLocationId) {
+          const data = await this.graphql<{
+            nodes: Array<{
+              id?: string;
+              sku?: string | null;
+              inventoryQuantity?: number | null;
+              inventoryItem?: {
+                id?: string;
+                office?: InventoryLevelNode | null;
+              } | null;
+            } | null>;
+          }>(VARIANT_NODES_INVENTORY_BY_LOCATION_QUERY, {
+            ids: gids,
+            officeLocationId,
+          });
+          for (const node of data.nodes ?? []) {
+            if (!node?.id) continue;
+            const externalVariantId = shopifyGidToExternalId(node.id) ?? node.id;
+            const item = node.inventoryItem;
+            const officeQty = availableFromInventoryLevel(item?.office);
+            const shopTotal = Math.max(0, Math.floor(Number(node.inventoryQuantity ?? 0)));
+            out.push({
+              externalVariantId,
+              sku: (node.sku ?? "").trim() || `shopify-${externalVariantId}`,
+              available: officeQty,
+              inventoryItemId: item?.id ?? null,
+              locationId: officeLocationId,
+              locationName: "Aarla Office",
+              shopTotal,
+              levelSummary: `Aarla Office=${officeQty}`,
+            });
+          }
+          continue;
+        }
+
         const data = await this.graphql<VariantNodesInventoryData>(VARIANT_NODES_INVENTORY_QUERY, {
           ids: gids,
         });
@@ -1199,7 +1336,7 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
           const picked = pickAarlaOfficeAvailable({
             levels: flattenInventoryLevels(item?.inventoryLevels),
             shopTotal: node.inventoryQuantity,
-            preferredLocationId,
+            preferredLocationId: null,
             officeLevel: null,
           });
           out.push({
@@ -1217,8 +1354,10 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
-        /ACCESS_DENIED|read_inventory|not authorized|permission|inventoryLevel/i.test(message)
-          ? `${message} — reading Aarla Office Available needs read_inventory on the live store token. Reinstall the app after adding the scope, or clear a stale SHOPIFY_ADMIN_API_ACCESS_TOKEN in Vercel and redeploy.`
+        /ACCESS_DENIED|location|read_locations|read_inventory|not authorized|permission/i.test(
+          message,
+        )
+          ? `${message} — Since API 2024-07 Location fields need read_locations on the live token (not only in the Dev Dashboard). Fix: remove stale SHOPIFY_ADMIN_API_ACCESS_TOKEN so client credentials are used, reinstall/approve the app, or set SHOPIFY_AARLA_OFFICE_LOCATION_ID to the Aarla Office GID.`
           : message,
       );
     }
@@ -1227,8 +1366,9 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
 
   async fetchPrimaryInventoryLocationId(): Promise<string | null> {
     assertServerOnly();
-    // Root `locations` needs read_locations on the *live* token (reinstall / clear stale shpat).
-    // Prefer inventoryLevels-by-name for Sync; this is mainly for Push when needed.
+    const fromEnv = readShopifyOfficeLocationIdFromEnv();
+    if (fromEnv) return fromEnv;
+    // Root `locations` needs read_locations on the *live* token.
     const data = await this.graphql<LocationsQueryData>(LOCATIONS_QUERY, {});
     const nodes = data.locations.edges.map((e) => e.node);
     return pickShopifyOfficeLocationStrict(nodes);
