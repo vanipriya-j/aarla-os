@@ -301,7 +301,7 @@ export default function FulfilOrdersPage() {
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
                 No orders in {fulfilmentTabLabel(tab)}.{" "}
                 {tab === "stock-check"
-                  ? "Pull open orders to load Unfulfilled / Partially fulfilled from Shopify."
+                  ? "No open Unfulfilled/Partial orders in the queue. Weekly board ORDERS can still show sales that Shopify already fulfilled. Use Pull open orders after Sync All if new opens exist."
                   : "Switch tabs, or pull open orders."}
               </p>
             ) : (
