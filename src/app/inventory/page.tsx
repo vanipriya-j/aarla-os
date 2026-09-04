@@ -73,9 +73,10 @@ function InventoryInner() {
     reorderRules,
     transferStock,
     adjustStock,
+    refresh,
   } = useAppLedger();
 
-  // Re-load ledger after catalog sync by soft refresh.
+  // Hard reload only for catalog import / bulk sync that may change product set.
   const reload = () => {
     if (typeof window !== "undefined") window.location.reload();
   };
@@ -89,6 +90,16 @@ function InventoryInner() {
   const productTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
+
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 8000);
+  };
+
+  const onStockRowSynced = (message?: string) => {
+    if (message) showToast(message);
+    void refresh();
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "stock", label: "Stock" },
@@ -112,11 +123,6 @@ function InventoryInner() {
   const aarlaLow = replenishmentItems.filter((i) => i.kind === "aarla-low");
   const partnerNeed = replenishmentItems.filter((i) => i.kind === "partner-need");
   const globalLow = replenishmentItems.filter((i) => i.kind === "global-low");
-
-  const showToast = (message: string) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 2800);
-  };
 
   const openDetail = (sel: StockCatalogSelection) => {
     setSelection(sel);
@@ -252,7 +258,7 @@ function InventoryInner() {
                 locations={locations}
                 reorderRules={reorderRules}
                 onSelectVariant={openDetail}
-                onShopifyRowSynced={reload}
+                onShopifyRowSynced={onStockRowSynced}
               />
             )}
           </div>

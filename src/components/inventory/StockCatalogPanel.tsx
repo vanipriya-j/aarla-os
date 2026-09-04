@@ -43,8 +43,8 @@ type Props = {
   locations: Location[];
   reorderRules: ReorderRule[];
   onSelectVariant: (selection: StockCatalogSelection) => void;
-  /** Called after a per-row Shopify refresh so the parent can reload ledger/catalog. */
-  onShopifyRowSynced?: () => void;
+  /** Called after a per-row Shopify pull so the parent can show a toast and soft-refresh. */
+  onShopifyRowSynced?: (message?: string) => void;
 };
 
 const STOCK_FILTERS: { id: StockStockFilter; label: string }[] = [
@@ -167,15 +167,20 @@ export function StockCatalogPanel({
       if (res.data.levelSummary) bits.push(res.data.levelSummary);
       if (res.data.errors.length) bits.push(res.data.errors[0]!);
       if (!res.data.pulled && !res.data.aligned && res.data.errors.length) {
-        setRowSyncMsg(
-          [res.data.errors[0], res.data.levelSummary].filter(Boolean).join(" · "),
-        );
+        const failMsg = [res.data.errors[0], res.data.levelSummary]
+          .filter(Boolean)
+          .join(" · ");
+        setRowSyncMsg(failMsg);
+        onShopifyRowSynced?.(failMsg);
         return;
       }
-      setRowSyncMsg(bits.join(" · ") || "Synced");
-      onShopifyRowSynced?.();
+      const msg = bits.join(" · ") || "Synced";
+      setRowSyncMsg(msg);
+      onShopifyRowSynced?.(msg);
     } catch (err) {
-      setRowSyncMsg(err instanceof Error ? err.message : String(err));
+      const failMsg = err instanceof Error ? err.message : String(err);
+      setRowSyncMsg(failMsg);
+      onShopifyRowSynced?.(failMsg);
     } finally {
       setRowSyncing(null);
       await unlockCommerceSyncLockViaApi().catch(() => undefined);
