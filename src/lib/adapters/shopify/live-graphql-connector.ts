@@ -689,6 +689,15 @@ export function pickAarlaOfficeAvailable(input: {
 
 type VariantInventoryItemData = { id?: string } | null;
 
+type VariantNodesInventoryData = {
+  nodes: Array<{
+    id?: string;
+    sku?: string | null;
+    inventoryQuantity?: number | null;
+    inventoryItem?: VariantInventoryItemData;
+  } | null>;
+};
+
 const LOCATIONS_QUERY = `
 query SyncInventoryLocations {
   locations(first: 50, includeInactive: false) {
