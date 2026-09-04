@@ -154,6 +154,16 @@ export async function recordPartnerSale(input: {
   return engine().recordPartnerSale(input);
 }
 
+export async function recordShopifySale(input: {
+  productId: string;
+  variantId?: string;
+  quantity: number;
+  notes?: string;
+  reference: string;
+}) {
+  return engine().recordShopifySale(input);
+}
+
 export async function transferStock(input: {
   productId: string;
   variantId?: string;

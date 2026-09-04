@@ -319,6 +319,46 @@ export class BusinessEngine {
     });
   }
 
+  /**
+   * Online sale against the shared Studio / Aarla Office pool.
+   * Idempotent via stable reference (fingerprint). Returns null if insufficient stock.
+   */
+  async recordShopifySale(input: {
+    productId: string;
+    variantId?: string;
+    quantity: number;
+    notes?: string;
+    reference: string;
+  }): Promise<StockMovement | null> {
+    if (input.quantity <= 0 || !input.reference.trim()) return null;
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const bal = Math.max(
+        balanceAt(balances, input.productId, LOC_CODES.studio, input.variantId),
+        0,
+      );
+      if (bal < input.quantity) return null;
+
+      const batch = batches.find((b) => b.productId === input.productId);
+      const created = await this.appendMovementsTx(tx, [
+        {
+          productId: input.productId,
+          variantId: input.variantId,
+          batchId: batch?.id,
+          quantity: input.quantity,
+          fromLocationId: LOC_CODES.studio,
+          toLocationId: LOC_CODES.sold,
+          movementType: "Shopify Sale",
+          reference: input.reference.trim(),
+          notes: input.notes || "Shopify sale",
+        },
+      ]);
+      return created[0] ?? null;
+    });
+  }
+
   /** General-purpose location-to-location transfer (studio ↔ partner, partner ↔ partner, etc.). */
   async transferStock(input: {
     productId: string;
