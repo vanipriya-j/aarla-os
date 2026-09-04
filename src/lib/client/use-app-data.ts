@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   adjustStockAction,
   createManufacturingPOAction,
+  createPartnerAction,
+  establishPartnerOpeningBalancesAction,
   getLedgerBundleAction,
   getNetworkBundleAction,
   partnerSaleAction,
@@ -201,6 +203,48 @@ export function useAppLedger() {
     [refresh],
   );
 
+  const createPartner = useCallback(
+    async (input: {
+      name: string;
+      partnerType?: Partner["partnerType"];
+      locationLabel?: string;
+      contact?: string;
+      margin?: number;
+      merchandisingNotes?: string;
+      code?: string;
+    }) => {
+      const result = await createPartnerAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      await refresh();
+      return result.data;
+    },
+    [refresh],
+  );
+
+  const establishPartnerOpeningBalances = useCallback(
+    async (
+      partnerId: string,
+      rows: Array<{
+        productId: string;
+        variantId: string;
+        quantity: number;
+        notes?: string;
+      }>,
+    ) => {
+      const result = await establishPartnerOpeningBalancesAction(partnerId, rows);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      await refresh();
+      return result.data;
+    },
+    [refresh],
+  );
+
   return {
     snapshots,
     movements,
@@ -220,6 +264,8 @@ export function useAppLedger() {
     transferStock,
     adjustStock,
     createManufacturingPO,
+    createPartner,
+    establishPartnerOpeningBalances,
     refresh,
   };
 }

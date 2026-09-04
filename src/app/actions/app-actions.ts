@@ -6,7 +6,7 @@ import {
 } from "@/lib/infra/db/errors";
 import * as services from "@/lib/application/services";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
-import type { AdjustmentReason } from "@/lib/domain/types";
+import type { AdjustmentReason, Partner } from "@/lib/domain/types";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -40,6 +40,30 @@ export async function listVendorsAction() {
 
 export async function listPartnersAction() {
   return wrap(() => services.listPartners());
+}
+
+export async function createPartnerAction(input: {
+  name: string;
+  partnerType?: Partner["partnerType"];
+  locationLabel?: string;
+  contact?: string;
+  margin?: number;
+  merchandisingNotes?: string;
+  code?: string;
+}) {
+  return wrap(() => services.createPartner(input));
+}
+
+export async function establishPartnerOpeningBalancesAction(
+  partnerId: string,
+  rows: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    notes?: string;
+  }>,
+) {
+  return wrap(() => services.establishPartnerOpeningBalances(partnerId, rows));
 }
 
 export async function listLocationsAction() {

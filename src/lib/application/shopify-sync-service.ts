@@ -20,6 +20,7 @@ import {
   getShopifyOrdersResumeCursor,
   getShopifyOrdersWatermark,
   noteShopifyOrdersSyncProgress,
+  seedShopifyOrdersWatermarkFromDbIfCaughtUp,
   shopifyOrdersCreatedAfterQuery,
 } from "@/lib/application/commerce-sync-watermarks";
 
@@ -91,7 +92,20 @@ export async function syncShopifyCustomerCallData(
   }
 
   if (mode === "incremental") {
-    const watermark = await getShopifyOrdersWatermark();
+    let watermark = await getShopifyOrdersWatermark();
+    // Tip watermark may have been wiped while orders are already in Postgres —
+    // restore incremental when local count ≈ Shopify catalog (avoids re-walking 600+).
+    if (!watermark && !resumeCursor && typeof connector.fetchOrdersCount === "function") {
+      try {
+        const catalogTotal = await connector.fetchOrdersCount(null);
+        watermark = await seedShopifyOrdersWatermarkFromDbIfCaughtUp(catalogTotal);
+        if (watermark) {
+          summary.ordersTotal = catalogTotal;
+        }
+      } catch {
+        /* keep catch-up walk */
+      }
+    }
     summary.incrementalFrom = watermark;
     if (watermark) {
       query = shopifyOrdersCreatedAfterQuery(watermark);

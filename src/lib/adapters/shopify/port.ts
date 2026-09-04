@@ -87,6 +87,16 @@ export type ShopifyFetchOptions = {
    * Used for incremental sync.
    */
   query?: string | null;
+  /**
+   * When true, also load inventoryItem.id (needs live read_inventory).
+   * Location-scoped Available also needs read_inventory.
+   */
+  includeInventoryItems?: boolean;
+  /**
+   * Shopify location gid for Available qty (Aarla Office).
+   * When set, inventory is read at this location only — not store-wide totals.
+   */
+  locationId?: string | null;
 };
 
 export type ShopifyCustomerCallPage = ShopifyCustomerCallPayload & {
@@ -159,8 +169,21 @@ export type ShopifyProductsPage = {
 export interface ShopifyVariantInventoryRecord {
   externalVariantId: string;
   sku: string;
-  /** Total sellable qty across Shopify locations (Admin inventoryQuantity). */
+  /**
+   * Store-wide sellable Available (Shopify inventoryQuantity).
+   * Partner stock is Aarla-only — not read from Shopify locations.
+   */
   available: number;
+  /** gid://shopify/InventoryItem/... when available from Admin API */
+  inventoryItemId?: string | null;
+  /** Shopify push location gid when known; reads may leave null */
+  locationId?: string | null;
+  /** Source label for Available (e.g. "Shopify") */
+  locationName?: string | null;
+  /** Same as available for shop-total reads (diagnostics) */
+  shopTotal?: number | null;
+  /** Short qty summary for UI */
+  levelSummary?: string | null;
 }
 
 export type ShopifyVariantInventoryPage = {
@@ -168,6 +191,17 @@ export type ShopifyVariantInventoryPage = {
   hasMore: boolean;
   nextCursor: string | null;
   pagesFetched: number;
+};
+
+export type ShopifySetInventoryQuantityInput = {
+  inventoryItemId: string;
+  locationId: string;
+  quantity: number;
+};
+
+export type ShopifySetInventoryResult = {
+  ok: boolean;
+  errors: string[];
 };
 
 export interface ShopifyConnector {
@@ -183,12 +217,28 @@ export interface ShopifyConnector {
   /** Chunked catalog products — optional; skipped when unimplemented. */
   fetchProductsPage?(options?: ShopifyFetchOptions): Promise<ShopifyProductsPage>;
   /**
-   * Chunked variant inventory quantities (Shopify Admin inventoryQuantity).
-   * Used only for one-time legacy opening balances — not continuous sync.
+   * Chunked variant inventory — store-wide inventoryQuantity (studio stock on Shopify).
+   * Used for opening balances, drift compare, and sync.
    */
   fetchVariantInventoryPage?(
     options?: ShopifyFetchOptions,
   ): Promise<ShopifyVariantInventoryPage>;
+  /**
+   * Fetch store-wide Available for specific Shopify variant ids.
+   */
+  fetchVariantsInventoryByIds?(
+    externalVariantIds: string[],
+    options?: { locationId?: string | null },
+  ): Promise<ShopifyVariantInventoryRecord[]>;
+  /**
+   * Preferred Shopify location for Push (inventorySetQuantities).
+   * Prefers "Aarla Office" / SHOPIFY_AARLA_OFFICE_LOCATION_ID when set.
+   */
+  fetchPrimaryInventoryLocationId?(): Promise<string | null>;
+  /** Set absolute available qty on Shopify for one or more inventory items. */
+  setInventoryQuantities?(
+    quantities: ShopifySetInventoryQuantityInput[],
+  ): Promise<ShopifySetInventoryResult>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.

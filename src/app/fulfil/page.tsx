@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { FormSection } from "@/components/ui/FormSection";
 import { StatusChip } from "@/components/ui/StatusChip";
@@ -69,6 +69,7 @@ export default function FulfilOrdersPage() {
   const [packReason, setPackReason] = useState("");
 
   const selectedRow = rows.find((r) => r.id === selectedId) ?? null;
+  const autoPullDoneRef = useRef(false);
 
   const reloadList = useCallback((nextTab = tab) => {
     startTransition(async () => {
@@ -129,7 +130,36 @@ export default function FulfilOrdersPage() {
 
   useEffect(() => {
     setListLoaded(false);
-    reloadList(tab);
+    if (autoPullDoneRef.current) {
+      reloadList(tab);
+      return;
+    }
+    autoPullDoneRef.current = true;
+    startTransition(async () => {
+      setBusyLabel("Pulling open Shopify orders…");
+      const pull = await syncIncomingFulfilmentOrdersAction();
+      setBusyLabel(null);
+      if (!pull.ok) {
+        setError(pull.error);
+        reloadList(tab);
+        return;
+      }
+      const parts: string[] = [];
+      if (pull.data.created > 0) {
+        parts.push(`Loaded ${pull.data.created} open order(s) into Fulfil`);
+      }
+      if (pull.data.archived > 0) {
+        parts.push(`cleared ${pull.data.archived} already fulfilled`);
+      }
+      if (parts.length) {
+        setStatus(`${parts.join("; ")}.`);
+      } else {
+        setStatus(
+          "No new open orders to pull — Weekly ORDERS counts all valid sales (including already fulfilled). Fulfil only shows Unfulfilled / Partially fulfilled.",
+        );
+      }
+      reloadList(tab);
+    });
   }, [tab, reloadList]);
 
   function runAction(label: string, fn: () => Promise<void>) {
@@ -183,7 +213,7 @@ export default function FulfilOrdersPage() {
     <>
       <Header
         title="Fulfil Orders"
-        subtitle="Same set as Shopify: Unfulfilled + Partially fulfilled → stock check → pick → pack → ship → handover."
+        subtitle="Pulls Unfulfilled + Partially fulfilled from synced Shopify orders → stock check → pick → pack → ship. Weekly ORDERS counts all valid sales (including already fulfilled) — different set."
       />
 
       <div className="px-6 py-6 space-y-5" data-testid="fulfil-orders-page">
@@ -271,7 +301,7 @@ export default function FulfilOrdersPage() {
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
                 No orders in {fulfilmentTabLabel(tab)}.{" "}
                 {tab === "stock-check"
-                  ? "Pull open orders to load Unfulfilled / Partially fulfilled from Shopify."
+                  ? "No open Unfulfilled/Partial orders in the queue. Weekly board ORDERS can still show sales that Shopify already fulfilled. Use Pull open orders after Sync All if new opens exist."
                   : "Switch tabs, or pull open orders."}
               </p>
             ) : (

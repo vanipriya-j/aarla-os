@@ -8,8 +8,6 @@ import {
   saveShopifyAbandonedResumeCursor,
   saveShopifyOrdersResumeCursor,
   saveDelhiveryResumeOffset,
-  clearShopifyAbandonedWatermark,
-  clearShopifyOrdersWatermark,
 } from "@/lib/application/commerce-sync-watermarks";
 import {
   ConfigurationError,
@@ -62,12 +60,13 @@ export async function POST(request: Request) {
 
     if (body.action === "clear") {
       await forceClearCommerceSyncLock();
-      // Reset sync progress so the next Full re-sync does not skip unsaved orders.
+      // Clear resume cursors so a stuck mid-walk can restart cleanly, but keep
+      // committed watermarks — wiping them forced Sync All to re-walk the full
+      // order catalog (e.g. 600+ orders) every time. Use mode "full" / Full re-sync
+      // when a true history rebuild is needed.
       await saveShopifyOrdersResumeCursor(null);
       await saveShopifyAbandonedResumeCursor(null);
       await saveDelhiveryResumeOffset(null);
-      await clearShopifyOrdersWatermark();
-      await clearShopifyAbandonedWatermark();
       return NextResponse.json({ ok: true, data: { cleared: true as const } });
     }
 

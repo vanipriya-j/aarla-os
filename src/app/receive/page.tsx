@@ -1,7 +1,8 @@
 "use client";
 
 import { useAppLedger } from "@/lib/client/use-app-data";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { Field, FormSection, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
@@ -18,7 +19,9 @@ const steps = [
   { id: "shelf", label: "Shelf & Shopify" },
 ];
 
-export default function ReceivePage() {
+function ReceivePageInner() {
+  const searchParams = useSearchParams();
+  const poFromQuery = searchParams.get("po");
   const { purchaseOrders, receive, products, vendors, error } = useAppLedger();
   const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
   const getVendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
@@ -31,8 +34,11 @@ export default function ReceivePage() {
   );
 
   const [step, setStep] = useState(0);
-  const [poId, setPoId] = useState(receivable[0]?.id ?? "");
-  const po = purchaseOrders.find((p) => p.id === poId) ?? receivable[0];
+  const [poId, setPoId] = useState(poFromQuery ?? receivable[0]?.id ?? "");
+  const po =
+    purchaseOrders.find((p) => p.id === poId) ??
+    (poFromQuery ? purchaseOrders.find((p) => p.id === poFromQuery) : undefined) ??
+    receivable[0];
 
   const [ordered, setOrdered] = useState(po?.quantityOrdered ?? 0);
   const [received, setReceived] = useState(po?.quantityOrdered ?? 0);
@@ -45,6 +51,7 @@ export default function ReceivePage() {
   const [barcodeAttached, setBarcodeAttached] = useState(false);
   const [shelf, setShelf] = useState("A-12-C");
   const [done, setDone] = useState(false);
+  const [shopifyPushNote, setShopifyPushNote] = useState<string | null>(null);
   const [refundType, setRefundType] = useState("replacement");
 
   const selectPo = (id: string) => {
@@ -58,8 +65,16 @@ export default function ReceivePage() {
       setDamaged(0);
       setMissing(0);
       setDone(false);
+      setShopifyPushNote(null);
     }
   };
+
+  useEffect(() => {
+    if (poFromQuery && purchaseOrders.some((p) => p.id === poFromQuery)) {
+      selectPo(poFromQuery);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate from manufacture deep-link once POs load
+  }, [poFromQuery, purchaseOrders]);
 
   const postToLedger = async () => {
     if (!po) return;
@@ -70,14 +85,36 @@ export default function ReceivePage() {
       missing,
       notes: qcNotes || `QC receive on shelf ${shelf}`,
     });
-    if (result) setDone(true);
+    if (result) {
+      setDone(true);
+      const push = result.shopifyPush;
+      if (!push) {
+        setShopifyPushNote(null);
+      } else if (push.pushed > 0) {
+        setShopifyPushNote(
+          `Shopify Available updated for ${push.pushed} linked variant${push.pushed === 1 ? "" : "s"} at Aarla Office.`,
+        );
+      } else if (push.skippedUnlinked > 0 && !push.attempted) {
+        setShopifyPushNote(
+          "Product not linked to Shopify — ledger only. Link the catalog SKU to auto-push Available next time.",
+        );
+      } else if (push.errors.length) {
+        setShopifyPushNote(
+          `Ledger saved. Shopify Available push skipped: ${push.errors[0]}`,
+        );
+      } else {
+        setShopifyPushNote(
+          "Ledger saved. No Shopify Available change (missing inventory item ids or scopes).",
+        );
+      }
+    }
   };
 
   return (
     <>
       <Header
         title="Receive Stock"
-        subtitle="QC inbound stock and post Purchase Receipt / Damage movements to the ledger."
+        subtitle="QC inbound stock, post Purchase Receipt to the ledger, and push Shopify Available at Aarla Office for linked SKUs."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-4xl">
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
@@ -277,23 +314,56 @@ export default function ReceivePage() {
                   <p className="text-sm text-charcoal/70 mt-1">
                     Purchase Receipt (+{accepted}) and Damage (+{damaged}) written. Shelf {shelf}.
                   </p>
-                  <div className="mt-2 flex gap-2">
+                  {shopifyPushNote ? (
+                    <p className="text-sm text-charcoal/70 mt-2">{shopifyPushNote}</p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <StatusChip label="Ledger updated" tone="success" />
-                    <StatusChip label="Ready for Shopify" tone="info" />
+                    <StatusChip
+                      label={
+                        shopifyPushNote?.includes("Available updated")
+                          ? "Shopify Available pushed"
+                          : "Shopify Available"
+                      }
+                      tone={
+                        shopifyPushNote?.includes("Available updated") ? "success" : "info"
+                      }
+                    />
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(4)}>
-                  Back
-                </Button>
-                <Button onClick={postToLedger}>Confirm receive & write ledger</Button>
+              <div className="space-y-3">
+                <p className="text-xs text-charcoal/55">
+                  Confirming receive writes Studio stock and best-effort sets Shopify{" "}
+                  <em>Available</em> at Aarla Office for linked variants (not Incoming / Committed).
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setStep(4)}>
+                    Back
+                  </Button>
+                  <Button onClick={postToLedger}>Confirm receive & write ledger</Button>
+                </div>
               </div>
             )}
           </FormSection>
         ) : null}
       </main>
     </>
+  );
+}
+
+export default function ReceivePage() {
+  return (
+    <Suspense
+      fallback={
+        <>
+          <Header title="Receive Stock" subtitle="Loading…" />
+          <main className="px-8 py-6 text-sm text-charcoal/50">Loading…</main>
+        </>
+      }
+    >
+      <ReceivePageInner />
+    </Suspense>
   );
 }

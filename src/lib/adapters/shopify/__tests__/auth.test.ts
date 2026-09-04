@@ -3,6 +3,7 @@ import {
   clearShopifyTokenCache,
   normalizeShopifyShopDomain,
   readShopifyAuthConfigFromEnv,
+  readShopifyOfficeLocationIdFromEnv,
   resolveShopifyAccessToken,
 } from "@/lib/adapters/shopify/auth";
 
@@ -27,6 +28,20 @@ describe("Shopify auth (Dev Dashboard client credentials)", () => {
     expect(cfg?.apiVersion).toBe("2025-04");
   });
 
+  it("normalizes Office location id from env", () => {
+    expect(
+      readShopifyOfficeLocationIdFromEnv({
+        SHOPIFY_AARLA_OFFICE_LOCATION_ID: "gid://shopify/Location/99",
+      } as NodeJS.ProcessEnv),
+    ).toBe("gid://shopify/Location/99");
+    expect(
+      readShopifyOfficeLocationIdFromEnv({
+        SHOPIFY_PRIMARY_LOCATION_ID: "12345",
+      } as NodeJS.ProcessEnv),
+    ).toBe("gid://shopify/Location/12345");
+    expect(readShopifyOfficeLocationIdFromEnv({} as NodeJS.ProcessEnv)).toBeNull();
+  });
+
   it("reads client credentials from env", () => {
     const cfg = readShopifyAuthConfigFromEnv({
       SHOPIFY_STORE_DOMAIN: "aarla.myshopify.com",
@@ -42,8 +57,37 @@ describe("Shopify auth (Dev Dashboard client credentials)", () => {
     });
   });
 
-  it("prefers static admin token when present", async () => {
-    const fetchImpl = vi.fn();
+  it("prefers client credentials over a static admin token", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "tok_cc",
+        expires_in: 86399,
+      }),
+    });
+    const token = await resolveShopifyAccessToken(
+      {
+        storeDomain: "aarla.myshopify.com",
+        apiVersion: "2025-01",
+        adminApiAccessToken: "shpat_static",
+        clientId: "cid",
+        clientSecret: "csecret",
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(token).toBe("tok_cc");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to static token when client credentials fail", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: "shop_not_permitted",
+        error_description: "Client credentials cannot be performed on this shop.",
+      }),
+    });
     const token = await resolveShopifyAccessToken(
       {
         storeDomain: "aarla.myshopify.com",
@@ -55,7 +99,6 @@ describe("Shopify auth (Dev Dashboard client credentials)", () => {
       fetchImpl as unknown as typeof fetch,
     );
     expect(token).toBe("shpat_static");
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("exchanges client credentials and caches the token", async () => {

@@ -474,6 +474,79 @@ export class BusinessEngine {
     });
   }
 
+  /** Create a partner and their Partner location (stock bucket in the ledger). */
+  async createPartner(input: {
+    name: string;
+    partnerType?: Partner["partnerType"];
+    locationLabel?: string;
+    contact?: string;
+    margin?: number;
+    merchandisingNotes?: string;
+    code?: string;
+  }): Promise<Partner> {
+    const name = input.name?.trim();
+    if (!name) throw new Error("Partner name is required");
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      return tx.partners.create({ ...input, name });
+    });
+  }
+
+  /**
+   * One-time legacy opening stock already at a partner (not transferred from Studio).
+   * Purchase Receipt External → Partner location. Idempotent via
+   * OPEN-PARTNER-{partnerId}-{variantId}. Skips variants that already have qty > 0.
+   */
+  async establishPartnerOpeningBalances(
+    partnerId: string,
+    rows: Array<{
+      productId: string;
+      variantId: string;
+      quantity: number;
+      notes?: string;
+    }>,
+  ): Promise<{ written: StockMovement[]; skipped: number }> {
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const locations = await tx.locations.list();
+      const loc = locations.find((l) => l.partnerId === partnerId);
+      if (!loc) throw new Error(`Partner location not found for ${partnerId}`);
+
+      const movements = await tx.movements.list();
+      const balances = deriveBalances(movements);
+      const partnerQty = (productId: string, variantId: string) =>
+        Math.max(balanceAt(balances, productId, loc.id, variantId), 0);
+
+      const planned: AppendMovementInput[] = [];
+      let skipped = 0;
+      for (const row of rows) {
+        const qty = Math.floor(row.quantity);
+        if (qty <= 0) {
+          skipped += 1;
+          continue;
+        }
+        if (partnerQty(row.productId, row.variantId) > 0) {
+          skipped += 1;
+          continue;
+        }
+        planned.push({
+          productId: row.productId,
+          variantId: row.variantId,
+          quantity: qty,
+          fromLocationId: LOC_CODES.external,
+          toLocationId: loc.id,
+          movementType: "Purchase Receipt",
+          reference: `OPEN-PARTNER-${partnerId}-${row.variantId}`,
+          notes: row.notes ?? "Partner legacy opening stock",
+        });
+      }
+
+      const written = await this.appendMovementsTx(tx, planned);
+      skipped += planned.length - written.length;
+      return { written, skipped };
+    });
+  }
+
   async registerProduct(
     input: RegisterProductInput,
   ): Promise<{ user: Person; registration: ProductRegistration }> {

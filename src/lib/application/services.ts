@@ -5,6 +5,7 @@ import { projectProductJourney } from "@/lib/domain/journey";
 import type {
   AdjustmentReason,
   InventorySnapshot,
+  Partner,
   Person,
   Product,
   ProductRegistration,
@@ -89,14 +90,46 @@ export async function createManufacturingPO(input: {
   return engine().createManufacturingPO(input);
 }
 
+export type ReceiveAgainstPOResult = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof engine>["receiveAgainstPO"]>>
+> & {
+  /** Best-effort Studio → Shopify Available push for linked variants. */
+  shopifyPush: import("@/lib/application/inventory-sync-service").PushAvailableResult | null;
+};
+
 export async function receiveAgainstPO(input: {
   poId: string;
   accepted: number;
   damaged: number;
   missing: number;
   notes: string;
-}) {
-  return engine().receiveAgainstPO(input);
+}): Promise<ReceiveAgainstPOResult | null> {
+  const result = await engine().receiveAgainstPO(input);
+  if (!result) return null;
+
+  // Weekend tighten: Receive → Shopify Available at Aarla Office (linked variants only).
+  // Never fail the ledger write if Shopify push is unavailable / mis-scoped.
+  let shopifyPush: ReceiveAgainstPOResult["shopifyPush"] = null;
+  if (input.accepted > 0) {
+    try {
+      const { pushStudioAvailableForProduct } = await import(
+        "@/lib/application/inventory-sync-service"
+      );
+      shopifyPush = await pushStudioAvailableForProduct({
+        productId: result.purchaseOrder.productId,
+      });
+    } catch (err) {
+      shopifyPush = {
+        attempted: true,
+        pushed: 0,
+        skippedUnlinked: 0,
+        skippedNoInventoryItem: 0,
+        errors: [err instanceof Error ? err.message : String(err)],
+      };
+    }
+  }
+
+  return { ...result, shopifyPush };
 }
 
 export async function transferToPartner(input: {
@@ -164,6 +197,30 @@ export async function establishOpeningBalances(
   }>,
 ) {
   return engine().establishOpeningBalances(rows);
+}
+
+export async function createPartner(input: {
+  name: string;
+  partnerType?: Partner["partnerType"];
+  locationLabel?: string;
+  contact?: string;
+  margin?: number;
+  merchandisingNotes?: string;
+  code?: string;
+}) {
+  return engine().createPartner(input);
+}
+
+export async function establishPartnerOpeningBalances(
+  partnerId: string,
+  rows: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    notes?: string;
+  }>,
+) {
+  return engine().establishPartnerOpeningBalances(partnerId, rows);
 }
 
 export async function listReorderRules(): Promise<ReorderRule[]> {

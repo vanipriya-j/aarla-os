@@ -3,6 +3,7 @@ import {
   formatAwbsTracked,
   formatCheckoutsLoaded,
   formatOrdersLoaded,
+  formatOrdersSyncMode,
 } from "@/lib/client/commerce-sync-progress";
 import {
   emptyShopifySyncSummary,
@@ -18,6 +19,11 @@ describe("commerce sync progress labels", () => {
   it("falls back when total is missing", () => {
     expect(formatOrdersLoaded(12)).toBe("Loaded 12 orders");
     expect(formatOrdersLoaded(12, null)).toBe("Loaded 12 orders");
+  });
+
+  it("labels catch-up vs incremental watermark", () => {
+    expect(formatOrdersSyncMode(null)).toContain("catch-up");
+    expect(formatOrdersSyncMode("2026-09-01T00:00:00.000Z")).toContain("new since");
   });
 
   it("formats AWB and checkout progress", () => {

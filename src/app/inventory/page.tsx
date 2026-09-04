@@ -19,19 +19,31 @@ import {
 import { AdjustStockModal, type AdjustStockSubmitInput } from "@/components/inventory/AdjustStockModal";
 import { ReplenishmentPanel } from "@/components/inventory/ReplenishmentPanel";
 import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogSyncButton";
+import { InventoryShopifySyncPanel } from "@/components/inventory/InventoryShopifySyncPanel";
 import { DEFAULT_INVENTORY_LOC, computeReplenishment } from "@/lib/domain";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
+import {
+  manufactureReorderHref,
+  suggestedReorderQty,
+} from "@/lib/domain/manufacture-reorder-link";
 
-type Tab = "stock" | "replenishment" | "locations" | "movements";
+type Tab = "stock" | "sync" | "replenishment" | "locations" | "movements";
 
 const TAB_ALIASES: Record<string, Tab> = {
   products: "stock",
   batches: "locations",
+  drift: "sync",
 };
 
 function tabFromParam(value: string | null): Tab {
   if (!value) return "stock";
-  if (value === "stock" || value === "replenishment" || value === "locations" || value === "movements") {
+  if (
+    value === "stock" ||
+    value === "sync" ||
+    value === "replenishment" ||
+    value === "locations" ||
+    value === "movements"
+  ) {
     return value;
   }
   return TAB_ALIASES[value] ?? "stock";
@@ -61,9 +73,10 @@ function InventoryInner() {
     reorderRules,
     transferStock,
     adjustStock,
+    refresh,
   } = useAppLedger();
 
-  // Re-load ledger after catalog sync by soft refresh.
+  // Hard reload only for catalog import / bulk sync that may change product set.
   const reload = () => {
     if (typeof window !== "undefined") window.location.reload();
   };
@@ -78,8 +91,19 @@ function InventoryInner() {
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
 
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 8000);
+  };
+
+  const onStockRowSynced = (message?: string) => {
+    if (message) showToast(message);
+    void refresh();
+  };
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "stock", label: "Stock" },
+    { id: "sync", label: "Mismatches" },
     { id: "replenishment", label: "Replenishment" },
     { id: "locations", label: "Locations" },
     { id: "movements", label: "Movement Ledger" },
@@ -99,11 +123,6 @@ function InventoryInner() {
   const aarlaLow = replenishmentItems.filter((i) => i.kind === "aarla-low");
   const partnerNeed = replenishmentItems.filter((i) => i.kind === "partner-need");
   const globalLow = replenishmentItems.filter((i) => i.kind === "global-low");
-
-  const showToast = (message: string) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 2800);
-  };
 
   const openDetail = (sel: StockCatalogSelection) => {
     setSelection(sel);
@@ -227,7 +246,8 @@ function InventoryInner() {
                 <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
                 <p>
                   1) Sync catalog from Shopify. 2) Import base inventory once (Shopify available →
-                  Studio opening receipts). After that manage with Receive / Transfer.
+                  Studio opening receipts). After that manage with Receive / Transfer and use Shopify
+                  sync to keep ATP aligned.
                 </p>
                 <ShopifyCatalogSyncButton onDone={reload} />
               </div>
@@ -238,10 +258,13 @@ function InventoryInner() {
                 locations={locations}
                 reorderRules={reorderRules}
                 onSelectVariant={openDetail}
+                onShopifyRowSynced={onStockRowSynced}
               />
             )}
           </div>
         ) : null}
+
+        {tab === "sync" ? <InventoryShopifySyncPanel onDone={reload} /> : null}
 
         {tab === "replenishment" ? (
           <div className="space-y-8">
@@ -251,6 +274,7 @@ function InventoryInner() {
               items={aarlaLow}
               onTransfer={openTransferForReplenishment}
               emptyMessage="Studio stock is healthy against every reorder rule."
+              needsFilter="low"
             />
             <ReplenishmentPanel
               title="B. Partner Replenishment Needed"
@@ -265,6 +289,7 @@ function InventoryInner() {
               items={globalLow}
               onTransfer={openTransferForReplenishment}
               emptyMessage="Global on-hand stock clears every reorder rule."
+              needsFilter="low"
             />
           </div>
         ) : null}
@@ -389,6 +414,19 @@ function InventoryInner() {
         cell={selection?.cell ?? null}
         onTransfer={openTransferFromDetail}
         onAdjust={openAdjustFromDetail}
+        reorderHref={
+          selection
+            ? manufactureReorderHref({
+                productId: selection.product.id,
+                variantId: selection.cell.variantId,
+                quantity: suggestedReorderQty(selection.cell.total),
+                label:
+                  selection.variantLabel && selection.variantLabel !== "Default"
+                    ? `${selection.product.title} / ${selection.variantLabel}`
+                    : selection.product.title,
+              })
+            : null
+        }
       />
 
       {transferCtx ? (

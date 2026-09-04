@@ -100,27 +100,56 @@ export default function DiagnosticsPage() {
 
             <FormSection
               title="Shopify"
-              description="Config presence only. Use probe to verify token exchange + shop ping."
+              description="Config presence + live scopes. Probe checks token, accessScopes, and locations (read_locations)."
             >
               <div className="grid sm:grid-cols-2 gap-2">
                 <Flag ok={report.shopify.configured} label="Configured" />
                 <Flag ok={report.shopify.storeDomainSet} label="Store domain set" />
                 <Flag ok={report.shopify.clientIdSet} label="Client ID set" />
                 <Flag ok={report.shopify.clientSecretSet} label="Client secret set" />
-                <Flag ok={report.shopify.staticTokenSet} label="Static token set (optional)" />
+                <Flag ok={report.shopify.staticTokenSet} label="Static token set (fallback)" />
+                <Flag
+                  ok={report.shopify.officeLocationIdSet}
+                  label="Office location ID set (env)"
+                />
               </div>
               <p className="text-sm text-charcoal/65 mt-3">
                 Auth mode: <span className="text-deep-navy">{report.shopify.authMode}</span>
                 {" · "}
                 API {report.shopify.apiVersion}
+                {report.shopify.staticTokenIgnoredWhileClientCredentials
+                  ? " · static token ignored while client credentials are set"
+                  : null}
               </p>
               {report.shopify.probe ? (
-                <p className="text-sm mt-2">
-                  Probe:{" "}
-                  {report.shopify.probe.ok
-                    ? `OK (${report.shopify.probe.latencyMs} ms)`
-                    : report.shopify.probe.error}
-                </p>
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm">
+                    Probe:{" "}
+                    {report.shopify.probe.ok
+                      ? `OK (${report.shopify.probe.latencyMs} ms)`
+                      : report.shopify.probe.error}
+                  </p>
+                  {report.shopify.probe.hasReadLocations != null ? (
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      <Flag
+                        ok={Boolean(report.shopify.probe.hasReadLocations)}
+                        label="Live scope: read_locations"
+                      />
+                      <Flag
+                        ok={Boolean(report.shopify.probe.locationsOk)}
+                        label="Locations GraphQL query"
+                      />
+                    </div>
+                  ) : null}
+                  {report.shopify.probe.locationsError ? (
+                    <p className="text-sm text-aarla-red">{report.shopify.probe.locationsError}</p>
+                  ) : null}
+                  {report.shopify.probe.scopes?.length ? (
+                    <p className="text-xs text-charcoal/55 break-all">
+                      Scopes: {report.shopify.probe.scopes.join(", ")}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
               <div className="flex flex-wrap gap-2 mt-4 items-end">
                 <label className="text-sm">

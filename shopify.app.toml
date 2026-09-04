@@ -8,9 +8,9 @@ application_url = "https://shopify.dev/apps/default-app-home"
 embedded = false
 
 [access_scopes]
-# Minimum for Customer Calls commerce sync. Prefer read_all_orders for history.
-# Web Pixel does not require extra Admin scopes for client-side event posting.
-scopes = "read_customers,read_orders,read_all_orders"
+# Commerce + catalog + bidirectional inventory sync.
+# After changing scopes: shopify app deploy / Dev Dashboard release, then reinstall on the store.
+scopes = "read_customers,read_orders,read_all_orders,read_products,read_inventory,write_inventory,read_locations"
 
 [auth]
 redirect_urls = [ "https://shopify.dev/apps/default-app-home" ]
