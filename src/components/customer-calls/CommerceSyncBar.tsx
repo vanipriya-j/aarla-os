@@ -172,6 +172,7 @@ export function CommerceSyncBar() {
         <button
           type="button"
           data-testid="clear-commerce-sync-lock"
+          title="Unlocks a stuck sync. Keeps the incremental order watermark so Sync All does not re-download full history."
           onClick={() => void handleClearLock()}
           disabled={controlsBusy}
           aria-busy={localAction === "clearing"}
