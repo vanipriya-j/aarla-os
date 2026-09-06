@@ -19,6 +19,7 @@ import type {
   WorkflowTemplateStep,
   VendorWorkflowAiDraft,
 } from "@/lib/domain/manufacture-types";
+import { listProductImageUrlsByCodes } from "@/lib/infra/repositories/postgres-shopify-catalog";
 
 function dateStr(v: string | Date | null | undefined): string | null {
   if (!v) return null;
@@ -1174,7 +1175,7 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
     });
     attachmentsByItem.set(String(a.vendor_order_item_id), list);
   }
-  return {
+  const detail: VendorOrder = {
     id: String(r.id),
     orderNumber: String(r.order_number),
     vendorId: String(r.vendor_code),
@@ -1218,6 +1219,7 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
         description: String(i.description ?? ""),
         isCustom: Boolean(i.is_custom),
         attachments: attachmentsByItem.get(String(i.id)) ?? [],
+        catalogImageUrl: null,
         productionRequirementId: null,
       }),
     ),
@@ -1225,6 +1227,20 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
     createdAt: iso(r.created_at as Date),
     updatedAt: iso(r.updated_at as Date),
   };
+
+  // Attach known catalog design thumbnails (Shopify featured images).
+  try {
+    const codes = detail.items.filter((i) => !i.isCustom).map((i) => i.productId);
+    const images = await listProductImageUrlsByCodes(codes);
+    for (const item of detail.items) {
+      if (item.isCustom) continue;
+      const hit = images.get(item.productId);
+      item.catalogImageUrl = hit?.imageUrl ?? null;
+    }
+  } catch {
+    /* image_url column may be missing until /setup */
+  }
+  return detail;
 }
 
 export async function getWorkflowInstanceForOrder(

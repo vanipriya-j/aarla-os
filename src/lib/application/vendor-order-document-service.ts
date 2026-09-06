@@ -13,6 +13,11 @@ import {
   savePdfVersion,
 } from "@/lib/infra/repositories/postgres-manufacture";
 import { formatVendorFacingDate } from "@/lib/application/vendor-communication";
+import {
+  cacheProductImageUrl,
+  listProductImageUrlsByCodes,
+} from "@/lib/infra/repositories/postgres-shopify-catalog";
+import { createLiveShopifyConnectorFromEnv } from "@/lib/adapters/shopify/live-graphql-connector";
 
 type AttachmentBytes = Awaited<ReturnType<typeof listVendorOrderAttachmentContents>>[number];
 
@@ -343,6 +348,93 @@ export async function buildVendorOrderPdfBuffer(input: {
   return done;
 }
 
+async function fetchImageBytes(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(12_000),
+      headers: { Accept: "image/*,*/*" },
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength < 32 || buf.byteLength > 2_500_000) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function shopifyIdFromProductCode(code: string): string | null {
+  const m = /^shopify-(\d+)$/.exec(code.trim());
+  return m?.[1] ?? (/^\d+$/.test(code.trim()) ? code.trim() : null);
+}
+
+/**
+ * For every catalog line without an uploaded image, pull the known Shopify
+ * featured image (DB cache, then live Admin backfill) so the vendor PDF shows designs.
+ */
+async function resolveCatalogDesignAttachments(
+  order: VendorOrder,
+  existing: AttachmentBytes[],
+): Promise<AttachmentBytes[]> {
+  const hasImage = new Set(
+    existing
+      .filter((a) => a.kind === "image" || isEmbeddableImage(a.mimeType, a.filename))
+      .map((a) => a.itemId),
+  );
+  const need = order.items.filter((i) => !i.isCustom && !hasImage.has(i.id));
+  if (!need.length) return [];
+
+  const codes = need.map((i) => i.productId);
+  let catalog = await listProductImageUrlsByCodes(codes);
+
+  const missingShopifyIds: string[] = [];
+  for (const item of need) {
+    const hit = catalog.get(item.productId);
+    if (hit?.imageUrl) continue;
+    const sid =
+      hit?.shopifyProductId ??
+      shopifyIdFromProductCode(item.productId) ??
+      null;
+    if (sid) missingShopifyIds.push(sid);
+  }
+
+  if (missingShopifyIds.length) {
+    const live = createLiveShopifyConnectorFromEnv();
+    if (live?.fetchProductFeaturedImageUrls) {
+      try {
+        const fetched = await live.fetchProductFeaturedImageUrls(missingShopifyIds);
+        for (const [sid, url] of fetched) {
+          await cacheProductImageUrl(sid, url);
+        }
+        catalog = await listProductImageUrlsByCodes(codes);
+      } catch {
+        /* Shopify may be unavailable in preview — skip gracefully */
+      }
+    }
+  }
+
+  const out: AttachmentBytes[] = [];
+  for (const item of need) {
+    const url =
+      item.catalogImageUrl ||
+      catalog.get(item.productId)?.imageUrl ||
+      null;
+    if (!url) continue;
+    const bytes = await fetchImageBytes(url);
+    if (!bytes) continue;
+    const filename = url.split("?")[0]?.split("/").pop() || `${item.productId}.jpg`;
+    out.push({
+      id: `catalog-${item.id}`,
+      itemId: item.id,
+      kind: "image",
+      filename,
+      mimeType: filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg",
+      bytes,
+    });
+  }
+  return out;
+}
+
 export async function generateVendorOrderPdf(orderNumber: string): Promise<{
   version: Awaited<ReturnType<typeof savePdfVersion>>;
   bytes: Buffer;
@@ -351,7 +443,9 @@ export async function generateVendorOrderPdf(orderNumber: string): Promise<{
   if (!order) throw new Error("Vendor order not found");
   const vendor = await getMfgVendor(order.vendorId);
   if (!vendor) throw new Error("Vendor not found");
-  const attachments = await listVendorOrderAttachmentContents(orderNumber);
+  const uploaded = await listVendorOrderAttachmentContents(orderNumber);
+  const catalogDesigns = await resolveCatalogDesignAttachments(order, uploaded);
+  const attachments = [...uploaded, ...catalogDesigns];
   const latest = await getLatestPdfVersion(orderNumber);
   const nextVersion = (latest?.versionNumber ?? 0) + 1;
   const bytes = await buildVendorOrderPdfBuffer({

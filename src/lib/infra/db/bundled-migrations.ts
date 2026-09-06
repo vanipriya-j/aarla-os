@@ -95,5 +95,9 @@ export const BUNDLED_MIGRATIONS: { filename: string; sql: string }[] = [
   {
     "filename": "20260906170000_vendor_order_custom_items.sql",
     "sql": "-- Custom (non-catalog) vendor PO lines + image/design attachments.\n-- Idempotent for /setup.\n\nalter table vendor_order_items\n  add column if not exists is_custom boolean not null default false;\n\nalter table vendor_order_items\n  add column if not exists description text not null default '';\n\ncreate table if not exists vendor_order_item_attachments (\n  id uuid primary key default gen_random_uuid(),\n  vendor_order_item_id uuid not null references vendor_order_items(id) on delete cascade,\n  kind text not null check (kind in ('image', 'design')),\n  filename text not null,\n  mime_type text not null default 'application/octet-stream',\n  byte_size integer not null check (byte_size >= 0),\n  content bytea not null,\n  created_at timestamptz not null default now()\n);\n\ncreate index if not exists vendor_order_item_attachments_item_idx\n  on vendor_order_item_attachments(vendor_order_item_id);\n\ncreate index if not exists vendor_order_item_attachments_kind_idx\n  on vendor_order_item_attachments(vendor_order_item_id, kind);\n"
+  },
+  {
+    "filename": "20260906180000_product_image_url.sql",
+    "sql": "-- Persist Shopify featured image URL on catalog products for PO PDF thumbnails.\n-- Idempotent for /setup.\n\nalter table products\n  add column if not exists image_url text;\n\ncreate index if not exists products_image_url_idx\n  on products(organization_id)\n  where image_url is not null;\n"
   }
 ];

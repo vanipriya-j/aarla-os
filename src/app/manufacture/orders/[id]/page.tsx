@@ -475,9 +475,18 @@ function VendorOrderDetailInner() {
                                 .filter(Boolean)
                                 .join(" · ")}
                         </p>
-                        {item.attachments.length > 0 ? (
+                        {(item.catalogImageUrl || item.attachments.length > 0) ? (
                           <div className="mt-2 space-y-2">
                             <div className="flex flex-wrap gap-2">
+                              {item.catalogImageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.catalogImageUrl}
+                                  alt={item.title}
+                                  className="h-20 w-20 rounded-lg border border-border object-cover bg-white"
+                                  title="Catalog design"
+                                />
+                              ) : null}
                               {item.attachments.map((a) => {
                                 const href = `/api/manufacture/orders/${encodeURIComponent(orderNumber)}/attachments/${a.id}`;
                                 const isImage =

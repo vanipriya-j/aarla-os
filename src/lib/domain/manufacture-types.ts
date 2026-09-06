@@ -185,6 +185,8 @@ export interface VendorOrderItem {
   description: string;
   isCustom: boolean;
   attachments: VendorOrderItemAttachment[];
+  /** Catalog featured image URL when known (Shopify CDN). */
+  catalogImageUrl: string | null;
   productionRequirementId: string | null;
 }
 

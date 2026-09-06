@@ -156,6 +156,8 @@ export interface ShopifyProductRecord {
   vendor: string;
   tags: string[];
   updatedAt: string;
+  /** Featured / primary product image CDN URL when available. */
+  imageUrl: string | null;
   variants: ShopifyProductVariantRecord[];
 }
 

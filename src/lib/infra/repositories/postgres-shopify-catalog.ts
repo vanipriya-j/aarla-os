@@ -51,6 +51,7 @@ async function ensureCatalogColumns(): Promise<void> {
     await query(
       `alter table products add column if not exists catalog_source text not null default 'manual'`,
     );
+    await query(`alter table products add column if not exists image_url text`);
     await query(
       `alter table product_variants add column if not exists shopify_variant_id text`,
     );
@@ -115,6 +116,7 @@ export async function upsertShopifyCatalogProduct(
          status = $5,
          catalog_source = 'shopify',
          shopify_product_id = $6,
+         image_url = coalesce($7, image_url),
          updated_at = now()
        where id = $1`,
       [
@@ -124,6 +126,7 @@ export async function upsertShopifyCatalogProduct(
         sellingPrice,
         statusFromShopify(product.status),
         product.externalProductId,
+        product.imageUrl,
       ],
     );
     productAction = "updated";
@@ -146,6 +149,7 @@ export async function upsertShopifyCatalogProduct(
            status = $5,
            catalog_source = 'shopify',
            shopify_product_id = $6,
+           image_url = coalesce($7, image_url),
            updated_at = now()
          where id = $1`,
         [
@@ -155,6 +159,7 @@ export async function upsertShopifyCatalogProduct(
           sellingPrice,
           statusFromShopify(product.status),
           product.externalProductId,
+          product.imageUrl,
         ],
       );
       productAction = "updated";
@@ -165,8 +170,8 @@ export async function upsertShopifyCatalogProduct(
         await query(
           `insert into products (
              id, organization_id, code, sku, title, category, world, story,
-             selling_price, cost, velocity, status, catalog_source, shopify_product_id
-           ) values ($1,$2,$3,$4,$5,$6,'','',$7,0,'Steady',$8,'shopify',$9)`,
+             selling_price, cost, velocity, status, catalog_source, shopify_product_id, image_url
+           ) values ($1,$2,$3,$4,$5,$6,'','',$7,0,'Steady',$8,'shopify',$9,$10)`,
           [
             productUuid,
             ORG_ID,
@@ -177,6 +182,7 @@ export async function upsertShopifyCatalogProduct(
             sellingPrice,
             statusFromShopify(product.status),
             product.externalProductId,
+            product.imageUrl,
           ],
         );
         productAction = "inserted";
@@ -186,14 +192,15 @@ export async function upsertShopifyCatalogProduct(
         await query(
           `insert into products (
              id, organization_id, code, sku, title, category, world, story,
-             selling_price, cost, velocity, status, catalog_source, shopify_product_id
-           ) values ($1,$2,$3,$4,$5,$6,'','',$7,0,'Steady',$8,'shopify',$9)
+             selling_price, cost, velocity, status, catalog_source, shopify_product_id, image_url
+           ) values ($1,$2,$3,$4,$5,$6,'','',$7,0,'Steady',$8,'shopify',$9,$10)
            on conflict (organization_id, code) do update set
              title = excluded.title,
              selling_price = excluded.selling_price,
              status = excluded.status,
              shopify_product_id = excluded.shopify_product_id,
              catalog_source = 'shopify',
+             image_url = coalesce(excluded.image_url, products.image_url),
              updated_at = now()`,
           [
             productUuid,
@@ -205,6 +212,7 @@ export async function upsertShopifyCatalogProduct(
             sellingPrice,
             statusFromShopify(product.status),
             product.externalProductId,
+            product.imageUrl,
           ],
         );
         productAction = "inserted";
@@ -296,3 +304,56 @@ export async function upsertShopifyCatalogProduct(
     variantsSkipped,
   };
 }
+
+/** Map product codes → image_url for PO thumbnails. */
+export async function listProductImageUrlsByCodes(
+  codes: string[],
+): Promise<Map<string, { imageUrl: string | null; shopifyProductId: string | null }>> {
+  await ensureCatalogColumns();
+  const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+  const out = new Map<string, { imageUrl: string | null; shopifyProductId: string | null }>();
+  if (!unique.length) return out;
+
+  const rows = await query<{
+    code: string;
+    image_url: string | null;
+    shopify_product_id: string | null;
+  }>(
+    `select code, image_url, shopify_product_id
+     from products
+     where organization_id = $1
+       and (
+         code = any($2::text[])
+         or shopify_product_id = any($2::text[])
+         or ('shopify-' || shopify_product_id) = any($2::text[])
+       )`,
+    [ORG_ID, unique],
+  ).catch(() => []);
+
+  for (const r of rows) {
+    const info = {
+      imageUrl: r.image_url ? String(r.image_url) : null,
+      shopifyProductId: r.shopify_product_id ? String(r.shopify_product_id) : null,
+    };
+    out.set(String(r.code), info);
+    if (info.shopifyProductId) {
+      out.set(info.shopifyProductId, info);
+      out.set(`shopify-${info.shopifyProductId}`, info);
+    }
+  }
+  return out;
+}
+
+export async function cacheProductImageUrl(
+  shopifyProductId: string,
+  imageUrl: string,
+): Promise<void> {
+  await ensureCatalogColumns();
+  await query(
+    `update products
+     set image_url = $3, updated_at = now()
+     where organization_id = $1 and shopify_product_id = $2`,
+    [ORG_ID, shopifyProductId, imageUrl],
+  ).catch(() => undefined);
+}
+
