@@ -268,9 +268,16 @@ export async function buildVendorOrderPdfBuffer(input: {
 
   y += 16;
   ensureSpace(120);
+  const totalItems = order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   doc.fillColor("#1B2A4A").fontSize(11).text("Totals & payment", left, y);
   y += 16;
   doc.fillColor("#333333").fontSize(9);
+  doc.text(
+    `Total items: ${totalItems} (${order.items.length} line${order.items.length === 1 ? "" : "s"})`,
+    left,
+    y,
+  );
+  y += 12;
   doc.text(`Subtotal / Total: ${formatINR(order.total ?? order.subtotal)}`, left, y);
   y += 12;
   if (order.advancePercentage != null) {
