@@ -218,6 +218,7 @@ export function createFulfilmentRepository(): FulfilmentRepository {
       lines: await loadLines(fulfilmentOrderId),
       tasks: await loadTasks(fulfilmentOrderId),
       events: await loadEvents(fulfilmentOrderId),
+      resellerLocations: [],
     };
   }
 
@@ -695,6 +696,13 @@ export function createFulfilmentRepository(): FulfilmentRepository {
 
     async listPartnerStockBySkuHint(title: string) {
       // Best-effort: partner location balances for products whose title matches.
+      // Use significant tokens so long Shopify titles still match catalog names.
+      const tokens = title
+        .split(/[^a-zA-Z0-9]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 4)
+        .slice(0, 4);
+      const hint = tokens[0] ?? title.slice(0, 24);
       const rows = await q<{
         partner_code: string;
         partner_name: string;
@@ -723,7 +731,10 @@ export function createFulfilmentRepository(): FulfilmentRepository {
            where l.organization_id = $1
              and l.kind = 'Partner'
              and pr.organization_id = $1
-             and pr.title ilike '%' || $2 || '%'
+             and (
+               pr.title ilike '%' || $2 || '%'
+               or pr.title ilike '%' || $3 || '%'
+             )
            group by l.code, l.kind, p.code, p.name, pr.code, pr.title
          )
          select partner_code, partner_name, location_code, qty::text
@@ -731,7 +742,7 @@ export function createFulfilmentRepository(): FulfilmentRepository {
          where qty > 0
          order by qty desc
          limit 20`,
-        [ORG_ID, title.slice(0, 40)],
+        [ORG_ID, hint, tokens[1] ?? hint],
       );
       return rows
         .filter((r) => r.partner_code)
@@ -741,6 +752,30 @@ export function createFulfilmentRepository(): FulfilmentRepository {
           locationCode: String(r.location_code),
           qty: Number(r.qty),
         }));
+    },
+
+    async listPartnerLocationsForRecall() {
+      const rows = await q<{
+        partner_code: string;
+        partner_name: string;
+        location_code: string;
+      }>(
+        `select p.code as partner_code,
+                p.name as partner_name,
+                l.code as location_code
+         from locations l
+         join partners p on p.id = l.partner_id
+         where l.organization_id = $1
+           and l.kind = 'Partner'
+           and p.code is not null
+         order by p.name asc, l.code asc`,
+        [ORG_ID],
+      );
+      return rows.map((r) => ({
+        partnerCode: String(r.partner_code),
+        partnerName: String(r.partner_name ?? r.partner_code),
+        locationCode: String(r.location_code),
+      }));
     },
   };
 }

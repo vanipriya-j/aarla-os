@@ -263,6 +263,7 @@ export async function getFulfilmentDetail(id: string): Promise<FulfilmentOrderDe
       line.partnerStock = await r.listPartnerStockBySkuHint(line.title);
     }
   }
+  detail.resellerLocations = await r.listPartnerLocationsForRecall();
   return detail;
 }
 

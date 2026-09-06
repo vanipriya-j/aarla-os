@@ -108,6 +108,12 @@ export type FulfilmentOrderDetail = FulfilmentOrderListItem & {
   lines: FulfilmentLineRow[];
   tasks: FulfilmentTaskRow[];
   events: FulfilmentEventRow[];
+  /** Partner locations for manual reseller arrange when title match fails. */
+  resellerLocations: Array<{
+    partnerCode: string;
+    partnerName: string;
+    locationCode: string;
+  }>;
 };
 
 export type UpsertFulfilmentFromExternalInput = {
@@ -248,5 +254,9 @@ export interface FulfilmentRepository {
   } | null>;
   listPartnerStockBySkuHint(title: string): Promise<
     Array<{ partnerCode: string; partnerName: string; locationCode: string; qty: number }>
+  >;
+  /** All partner locations (for manual reseller arrange when title match fails). */
+  listPartnerLocationsForRecall(): Promise<
+    Array<{ partnerCode: string; partnerName: string; locationCode: string }>
   >;
 }
