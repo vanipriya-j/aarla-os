@@ -18,6 +18,7 @@ type TickData = {
   ordersRead: number;
   ordersUpserted: number;
   fulfilCreated: number;
+  fulfilArchived?: number;
   salesPosted: number;
   salesSkipped: number;
   newFulfilmentIds: string[];
@@ -30,7 +31,7 @@ type TickData = {
 
 export type LiveCheckPhase = "idle" | "checking" | "got-orders" | "syncing" | "done";
 
-/** Founder-facing clock for “Last sync at …”. */
+/** Founder-facing clock for “Last checked at …”. */
 export function formatLiveSyncAt(isoOrDate: string | Date, now = new Date()): string {
   const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
   if (Number.isNaN(d.getTime())) return "unknown";
@@ -176,14 +177,15 @@ function summarizeOpenOrders(
 
 function idleStatus(lastSyncAt: string | null): string {
   if (lastSyncAt) {
-    return `Live watch on · Last sync at ${formatLiveSyncAt(lastSyncAt)}`;
+    return `Live watch on · Last checked at ${formatLiveSyncAt(lastSyncAt)}`;
   }
-  return "Live watch on — listening for new Shopify orders";
+  return "Live watch on — listening for open Shopify orders";
 }
 
 /**
- * App-wide live Shopify order desk: polls incremental sync, pulls into Fulfil,
- * plays sound + browser notification when new stock-check orders appear.
+ * App-wide live Shopify order desk: polls open Unfulfilled/Partial refresh,
+ * pulls into Fulfil, plays sound + browser notification when new stock-check
+ * orders appear.
  */
 export function LiveOrdersWatch() {
   const { busy } = useCommerceSync();
@@ -242,10 +244,12 @@ export function LiveOrdersWatch() {
         setPhase("got-orders");
         if (gotCount > 0) {
           setStatus(
-            gotCount === 1 ? "Got 1 order…" : `Got ${gotCount} orders…`,
+            gotCount === 1
+              ? "Got 1 open order from Shopify…"
+              : `Got ${gotCount} open orders from Shopify…`,
           );
         } else {
-          setStatus("No new orders from Shopify…");
+          setStatus("Checked Shopify — no open Unfulfilled/Partial orders…");
         }
         if (manual) await sleep(450);
 
@@ -253,7 +257,7 @@ export function LiveOrdersWatch() {
         setStatus(
           data.fulfilCreated > 0
             ? `Syncing details into Fulfil (${data.fulfilCreated})…`
-            : "Syncing details…",
+            : "Refreshing Fulfil queue…",
         );
         if (manual) await sleep(400);
 
@@ -278,8 +282,8 @@ export function LiveOrdersWatch() {
           setPhase("done");
           setStatus(
             data.fulfilCreated
-              ? `Done — pulled ${data.fulfilCreated} into Fulfil · ${openSummary} · Last sync at ${formatLiveSyncAt(syncedAt)}`
-              : `Done — ${openSummary} · Last sync at ${formatLiveSyncAt(syncedAt)}`,
+              ? `Done — pulled ${data.fulfilCreated} into Fulfil · ${openSummary} · Last checked at ${formatLiveSyncAt(syncedAt)}`
+              : `Done — ${openSummary} · Last checked at ${formatLiveSyncAt(syncedAt)}`,
           );
           if (data.openStockCheck.length) {
             setAlert(
@@ -310,8 +314,8 @@ export function LiveOrdersWatch() {
         } else if (manual) {
           setAlert(
             data.openStockCheck.length
-              ? `Up to date · ${openSummary}`
-              : "Up to date · nothing open in Stock Check",
+              ? `Checked Shopify opens · ${openSummary}`
+              : "Checked Shopify opens · nothing open in Stock Check",
           );
         }
 
@@ -320,17 +324,17 @@ export function LiveOrdersWatch() {
         if (data.fulfilCreated > 0) bits.push(`pulled ${data.fulfilCreated}`);
         if (data.salesPosted > 0) bits.push(`${data.salesPosted} Studio sale(s)`);
         if (data.fulfilCreated === 0 && fresh.length === 0) {
-          bits.push("already up to date");
+          bits.push("queue unchanged");
         }
         bits.push(openSummary);
-        bits.push(`Last sync at ${formatLiveSyncAt(syncedAt)}`);
+        bits.push(`Last checked at ${formatLiveSyncAt(syncedAt)}`);
         setStatus(bits.join(" · "));
       } catch (err) {
         setPhase("idle");
         setStatus(err instanceof Error ? err.message : "Live watch failed");
       } finally {
         ticking.current = false;
-        // Keep the “Done · open orders · last sync” line longer on manual checks.
+        // Keep the “Done · open orders · last checked” line longer on manual checks.
         window.setTimeout(() => {
           if (ticking.current) return;
           setPhase("idle");

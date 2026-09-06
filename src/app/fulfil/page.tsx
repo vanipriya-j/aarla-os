@@ -139,7 +139,7 @@ export default function FulfilOrdersPage() {
     }
     autoPullDoneRef.current = true;
     startTransition(async () => {
-      setBusyLabel("Pulling open Shopify orders…");
+      setBusyLabel("Refreshing open Shopify orders…");
       const pull = await syncIncomingFulfilmentOrdersAction();
       setBusyLabel(null);
       if (!pull.ok) {
@@ -156,9 +156,15 @@ export default function FulfilOrdersPage() {
       }
       if (parts.length) {
         setStatus(`${parts.join("; ")}.`);
+      } else if (pull.data.shopifyRefreshSkipped) {
+        setStatus(
+          `Couldn’t refresh Shopify (${pull.data.reason ?? "sync busy"}) — no new opens in local queue. Try again in a moment.`,
+        );
       } else {
         setStatus(
-          "No new open orders to pull — Weekly ORDERS counts all valid sales (including already fulfilled). Fulfil only shows Unfulfilled / Partially fulfilled.",
+          pull.data.ordersRead > 0
+            ? `Checked ${pull.data.ordersRead} open Shopify order(s) — nothing new to pull into Fulfil. Weekly ORDERS still counts fulfilled sales separately.`
+            : "Shopify has no open Unfulfilled / Partially fulfilled orders right now. Weekly ORDERS can still show already fulfilled sales.",
         );
       }
       reloadList(tab);
@@ -238,7 +244,7 @@ export default function FulfilOrdersPage() {
     <>
       <Header
         title="Fulfil Orders"
-        subtitle="Pulls Unfulfilled + Partially fulfilled from synced Shopify orders → stock check → pick → pack → ship. Weekly ORDERS counts all valid sales (including already fulfilled) — different set."
+        subtitle="Refreshes Unfulfilled + Partially fulfilled from Shopify → stock check → pick → pack → ship. Weekly ORDERS counts all valid sales (including already fulfilled) — different set."
       />
 
       <div className="px-6 py-6 space-y-5" data-testid="fulfil-orders-page">
@@ -248,15 +254,29 @@ export default function FulfilOrdersPage() {
             data-testid="fulfil-sync-incoming"
             disabled={pending}
             onClick={() => {
-              runAction("Pulling open Shopify orders…", async () => {
+              runAction("Refreshing open Shopify orders…", async () => {
                 const res = await syncIncomingFulfilmentOrdersAction();
                 if (!res.ok) {
                   setError(res.error);
                   return;
                 }
-                const parts = [`Pulled ${res.data.created} open order(s)`];
+                const parts: string[] = [];
+                if (res.data.created > 0) {
+                  parts.push(`Pulled ${res.data.created} open order(s)`);
+                }
                 if (res.data.archived > 0) {
                   parts.push(`cleared ${res.data.archived} already fulfilled`);
+                }
+                if (res.data.shopifyRefreshSkipped) {
+                  parts.push(
+                    `Shopify refresh skipped (${res.data.reason ?? "sync busy"})`,
+                  );
+                } else if (res.data.created === 0 && res.data.ordersRead > 0) {
+                  parts.push(
+                    `checked ${res.data.ordersRead} Shopify open(s) — queue unchanged`,
+                  );
+                } else if (res.data.created === 0) {
+                  parts.push("Shopify has no open Unfulfilled/Partial orders");
                 }
                 setStatus(`${parts.join("; ")}.`);
                 const list = await listFulfilmentWorkbenchAction(tab);
@@ -270,7 +290,8 @@ export default function FulfilOrdersPage() {
             }}
             className="inline-flex items-center gap-2 text-sm rounded-full px-4 py-2 bg-deep-navy text-white hover:bg-deep-navy/90 disabled:opacity-60"
           >
-            {pending && busyLabel?.startsWith("Pulling") ? (
+            {pending &&
+            (busyLabel?.startsWith("Pulling") || busyLabel?.startsWith("Refreshing")) ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
@@ -326,7 +347,7 @@ export default function FulfilOrdersPage() {
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
                 No orders in {fulfilmentTabLabel(tab)}.{" "}
                 {tab === "stock-check"
-                  ? "No open Unfulfilled/Partial orders in the queue. Weekly board ORDERS can still show sales that Shopify already fulfilled. Use Pull open orders after Sync All if new opens exist."
+                  ? "No open Unfulfilled/Partial orders in the queue. Weekly board ORDERS can still show sales that Shopify already fulfilled. Use Pull open orders (or Check now) to refresh from Shopify."
                   : "Switch tabs, or pull open orders."}
               </p>
             ) : (

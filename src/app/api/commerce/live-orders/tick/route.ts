@@ -21,7 +21,7 @@ function toErrorMessage(err: unknown): string {
  * POST /api/commerce/live-orders/tick
  * Body: { lockToken: string }
  *
- * Quiet incremental Shopify order pull + fulfil ingest for the live ops desk.
+ * Refresh current open Unfulfilled/Partial Shopify orders + fulfil ingest.
  */
 export async function POST(request: Request) {
   try {

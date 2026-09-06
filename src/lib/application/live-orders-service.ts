@@ -1,6 +1,6 @@
 /**
- * Live Shopify order watch — incremental pull + fulfil ingest for the ops desk.
- * Reuses commerce sync lock + watermarked order sync.
+ * Live Shopify order watch — open Unfulfilled/Partial refresh + fulfil ingest.
+ * Does not rely on the created_at incremental watermark (that misses older opens).
  */
 import "server-only";
 import {
@@ -17,6 +17,7 @@ export type LiveOrdersTickResult = {
   ordersRead: number;
   ordersUpserted: number;
   fulfilCreated: number;
+  fulfilArchived: number;
   salesPosted: number;
   salesSkipped: number;
   newFulfilmentIds: string[];
@@ -28,8 +29,8 @@ export type LiveOrdersTickResult = {
 };
 
 /**
- * One live-desk tick: pull newest Shopify orders (bounded chunks), then ingest
- * into Fulfilment and post Studio Shopify Sale movements for new lines.
+ * One live-desk tick: refresh current open Shopify fulfilment orders (bounded
+ * chunks), then ingest into Fulfilment and post Studio Shopify Sale movements.
  */
 export async function runLiveOrdersTick(input: {
   lockToken: string;
@@ -42,6 +43,7 @@ export async function runLiveOrdersTick(input: {
     ordersRead: 0,
     ordersUpserted: 0,
     fulfilCreated: 0,
+    fulfilArchived: 0,
     salesPosted: 0,
     salesSkipped: 0,
     newFulfilmentIds: [],
@@ -65,7 +67,7 @@ export async function runLiveOrdersTick(input: {
     for (let i = 0; i < maxChunks; i += 1) {
       const page = await syncShopifyCustomerCallData({
         cursor,
-        mode: "incremental",
+        mode: "open-fulfilment",
         runId: lockToken,
         maxPages: 1,
       });
@@ -84,6 +86,7 @@ export async function runLiveOrdersTick(input: {
       ordersRead,
       ordersUpserted,
       fulfilCreated: fulfil.created,
+      fulfilArchived: fulfil.archived,
       salesPosted: fulfil.salesPosted,
       salesSkipped: fulfil.salesSkipped,
       newFulfilmentIds: fulfil.ids,

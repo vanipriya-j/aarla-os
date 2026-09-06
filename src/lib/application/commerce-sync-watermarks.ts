@@ -241,6 +241,15 @@ export function shopifyOrdersCreatedAfterQuery(watermarkIso: string): string {
   return `created_at:>'${overlap}'`;
 }
 
+/**
+ * Shopify Admin search for currently open Unfulfilled / Partially fulfilled orders.
+ * Used by Fulfil live desk — independent of the created_at incremental watermark so
+ * older opens that were never pulled (or whose status changed) still refresh.
+ */
+export function shopifyOpenFulfilmentOrdersQuery(): string {
+  return "status:open AND (fulfillment_status:unshipped OR fulfillment_status:partial)";
+}
+
 /** Committed watermark only (no DB bootstrap). */
 export async function getCommittedShopifyAbandonedWatermark(): Promise<string | null> {
   await ensureCommerceSyncWatermarksTable();

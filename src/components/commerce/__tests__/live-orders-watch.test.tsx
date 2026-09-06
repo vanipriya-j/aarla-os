@@ -67,7 +67,7 @@ describe("LiveOrdersWatch", () => {
     await waitFor(
       () => {
         expect(screen.getByTestId("live-orders-status").textContent).toMatch(
-          /Last sync at|Live watch on|Done/i,
+          /Last sync at|Last checked at|Live watch on|Done/i,
         );
       },
       { timeout: 3000 },
@@ -77,14 +77,14 @@ describe("LiveOrdersWatch", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("live-orders-status").textContent).toMatch(
-        /Checking now|Got |Syncing|Done/i,
+        /Checking now|Got |Syncing|Refreshing|Done/i,
       );
     });
 
     await waitFor(
       () => {
         expect(screen.getByTestId("live-orders-status").textContent).toMatch(
-          /Last sync at/i,
+          /Last checked at|Last sync at/i,
         );
       },
       { timeout: 5000 },

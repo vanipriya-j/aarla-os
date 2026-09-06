@@ -90,8 +90,11 @@ export interface ShopifySyncSummary {
   pagesFetched?: number;
   /** True when this call finished the full catalog (no more pages) */
   complete?: boolean;
-  /** incremental = only orders after watermark; full = entire catalog */
-  mode?: "incremental" | "full";
+  /**
+   * incremental = only orders after watermark; full = entire catalog;
+   * open-fulfilment = current Unfulfilled/Partial opens (no watermark).
+   */
+  mode?: "incremental" | "full" | "open-fulfilment";
   /** Watermark used for this run (ISO), if incremental */
   incrementalFrom?: string | null;
   /**
