@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Boxes,
+  ClipboardCheck,
   ClipboardList,
   Compass,
   Factory,
@@ -39,6 +40,12 @@ export const operateNav: NavItem[] = [
     href: "/weekly",
     icon: CalendarRange,
     description: "Weekly operating board — targets vs actuals.",
+  },
+  {
+    label: "Attendance",
+    href: "/attendance",
+    icon: ClipboardCheck,
+    description: "Who is in today — present, absent, half day, leave.",
   },
   {
     label: "Fulfil Orders",
