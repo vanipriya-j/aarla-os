@@ -76,7 +76,7 @@ export async function runLiveOrdersTick(input: {
       if (!cursor) break;
     }
 
-    const fulfil = await syncIncomingOrdersIntoFulfilment(50);
+    const fulfil = await syncIncomingOrdersIntoFulfilment(200);
     const openRows = await createFulfilmentRepository().listWorkbench("stock-check");
 
     return {

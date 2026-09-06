@@ -36,7 +36,10 @@ import {
   buildPackingActual,
   packingLineSignature,
 } from "@/lib/domain/fulfilment-decisions";
-import { CheckCircle2, Loader2, Package, Plus, RefreshCw, Truck, X } from "lucide-react";
+import {
+  LIVE_ORDERS_UPDATED_EVENT,
+  type LiveOrdersUpdatedDetail,
+} from "@/lib/client/live-orders-events";
 
 export default function FulfilOrdersPage() {
   const [tab, setTab] = useState<FulfilmentTab>("stock-check");
@@ -160,6 +163,28 @@ export default function FulfilOrdersPage() {
       }
       reloadList(tab);
     });
+  }, [tab, reloadList]);
+
+  // Live Shopify “Check now” / watch already pulls — refresh this list automatically.
+  useEffect(() => {
+    const onLive = (ev: Event) => {
+      const detail = (ev as CustomEvent<LiveOrdersUpdatedDetail>).detail;
+      if (detail?.fulfilCreated > 0) {
+        setStatus(
+          `Live sync pulled ${detail.fulfilCreated} order(s)` +
+            (detail.openOrderNumbers?.length
+              ? ` · open: ${detail.openOrderNumbers.slice(0, 5).join(", ")}`
+              : ""),
+        );
+      } else if (detail?.openCount != null) {
+        setStatus(
+          `Live sync up to date · ${detail.openCount} open in Stock Check`,
+        );
+      }
+      reloadList(tab);
+    };
+    window.addEventListener(LIVE_ORDERS_UPDATED_EVENT, onLive);
+    return () => window.removeEventListener(LIVE_ORDERS_UPDATED_EVENT, onLive);
   }, [tab, reloadList]);
 
   function runAction(label: string, fn: () => Promise<void>) {

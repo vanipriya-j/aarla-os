@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, BellOff, Loader2, Volume2 } from "lucide-react";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
+import { dispatchLiveOrdersUpdated } from "@/lib/client/live-orders-events";
 
 const ENABLED_KEY = "aarla.liveOrders.enabled";
 const SEEN_KEY = "aarla.liveOrders.seenIds";
@@ -160,6 +161,19 @@ function notifyNewOrders(
   playOrderChime();
 }
 
+function summarizeOpenOrders(
+  open: Array<{ orderNumber: string }>,
+  max = 5,
+): string {
+  if (!open.length) return "no open Stock Check orders";
+  const nums = open
+    .map((o) => o.orderNumber)
+    .filter(Boolean)
+    .slice(0, max);
+  const extra = open.length > max ? ` +${open.length - max} more` : "";
+  return `${open.length} open: ${nums.join(", ")}${extra}`;
+}
+
 function idleStatus(lastSyncAt: string | null): string {
   if (lastSyncAt) {
     return `Live watch on · Last sync at ${formatLiveSyncAt(lastSyncAt)}`;
@@ -248,6 +262,15 @@ export function LiveOrdersWatch() {
         writeLastSyncAt(syncedAt);
         setLastSyncAt(syncedAt);
 
+        dispatchLiveOrdersUpdated({
+          fulfilCreated: data.fulfilCreated,
+          openCount: data.openStockCheck.length,
+          openOrderNumbers: data.openStockCheck.map((o) => o.orderNumber).filter(Boolean),
+          syncedAt,
+        });
+
+        const openSummary = summarizeOpenOrders(data.openStockCheck);
+
         if (!seededRef.current) {
           for (const id of openIds) seenRef.current.add(id);
           writeSeen(seenRef.current);
@@ -255,9 +278,14 @@ export function LiveOrdersWatch() {
           setPhase("done");
           setStatus(
             data.fulfilCreated
-              ? `Done — pulled ${data.fulfilCreated} into Fulfil · Last sync at ${formatLiveSyncAt(syncedAt)}`
-              : `Done · Last sync at ${formatLiveSyncAt(syncedAt)}`,
+              ? `Done — pulled ${data.fulfilCreated} into Fulfil · ${openSummary} · Last sync at ${formatLiveSyncAt(syncedAt)}`
+              : `Done — ${openSummary} · Last sync at ${formatLiveSyncAt(syncedAt)}`,
           );
+          if (data.openStockCheck.length) {
+            setAlert(
+              `${openSummary} — open Fulfil to work them`,
+            );
+          }
           return;
         }
 
@@ -279,15 +307,22 @@ export function LiveOrdersWatch() {
                 : `${alertOrders.length} new orders — open Fulfil`,
             );
           }
+        } else if (manual) {
+          setAlert(
+            data.openStockCheck.length
+              ? `Up to date · ${openSummary}`
+              : "Up to date · nothing open in Stock Check",
+          );
         }
 
         setPhase("done");
         const bits = ["Done"];
         if (data.fulfilCreated > 0) bits.push(`pulled ${data.fulfilCreated}`);
         if (data.salesPosted > 0) bits.push(`${data.salesPosted} Studio sale(s)`);
-        if (data.fulfilCreated === 0 && data.ordersRead === 0) {
-          bits.push("no new orders");
+        if (data.fulfilCreated === 0 && fresh.length === 0) {
+          bits.push("already up to date");
         }
+        bits.push(openSummary);
         bits.push(`Last sync at ${formatLiveSyncAt(syncedAt)}`);
         setStatus(bits.join(" · "));
       } catch (err) {
@@ -295,13 +330,13 @@ export function LiveOrdersWatch() {
         setStatus(err instanceof Error ? err.message : "Live watch failed");
       } finally {
         ticking.current = false;
-        // After a beat, settle to the idle “last sync” line if still enabled.
+        // Keep the “Done · open orders · last sync” line longer on manual checks.
         window.setTimeout(() => {
           if (ticking.current) return;
           setPhase("idle");
           const last = readLastSyncAt();
           if (last) setStatus(idleStatus(last));
-        }, 4000);
+        }, manual ? 12_000 : 4000);
       }
     },
     [busy],
