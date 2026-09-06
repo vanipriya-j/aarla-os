@@ -445,20 +445,43 @@ function VendorOrderDetailInner() {
                                 .join(" · ")}
                         </p>
                         {item.attachments.length > 0 ? (
-                          <ul className="mt-2 space-y-1 text-xs text-charcoal/60">
-                            {item.attachments.map((a) => (
-                              <li key={a.id}>
-                                <a
-                                  className="underline text-deep-navy"
-                                  href={`/api/manufacture/orders/${encodeURIComponent(orderNumber)}/attachments/${a.id}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {a.kind === "image" ? "Image" : "Design"}: {a.filename}
-                                </a>
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="mt-2 space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {item.attachments.map((a) => {
+                                const href = `/api/manufacture/orders/${encodeURIComponent(orderNumber)}/attachments/${a.id}`;
+                                const isImage =
+                                  a.kind === "image" ||
+                                  /\.(png|jpe?g|webp|gif)$/i.test(a.filename);
+                                return isImage ? (
+                                  <a
+                                    key={a.id}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block"
+                                    title={a.filename}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={href}
+                                      alt={a.filename}
+                                      className="h-20 w-20 rounded-lg border border-border object-cover bg-white"
+                                    />
+                                  </a>
+                                ) : (
+                                  <a
+                                    key={a.id}
+                                    className="inline-flex items-center rounded-lg border border-border bg-white px-2 py-1.5 text-xs text-deep-navy underline"
+                                    href={href}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Design: {a.filename}
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
                         ) : null}
                       </div>
                       <div className="text-sm text-right text-charcoal/70 space-y-2">
@@ -503,7 +526,7 @@ function VendorOrderDetailInner() {
                         )}
                         <p>
                           {item.unitCost == null
-                            ? "PRICE PENDING"
+                            ? "NA"
                             : `₹${item.unitCost.toLocaleString("en-IN")}`}
                         </p>
                       </div>

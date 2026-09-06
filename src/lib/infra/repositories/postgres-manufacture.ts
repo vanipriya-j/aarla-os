@@ -1024,6 +1024,44 @@ export async function getVendorOrderItemAttachment(input: {
   };
 }
 
+/** Load attachment bytes for PO PDF embedding (images / design previews). */
+export async function listVendorOrderAttachmentContents(orderNumber: string): Promise<
+  Array<{
+    id: string;
+    itemId: string;
+    kind: "image" | "design";
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+  }>
+> {
+  await ensureManufactureSchema();
+  const rows = await query<{
+    id: string;
+    vendor_order_item_id: string;
+    kind: string;
+    filename: string;
+    mime_type: string;
+    content: Buffer;
+  }>(
+    `select a.id, a.vendor_order_item_id, a.kind, a.filename, a.mime_type, a.content
+     from vendor_order_item_attachments a
+     join vendor_order_items i on i.id = a.vendor_order_item_id
+     join vendor_orders vo on vo.id = i.vendor_order_id
+     where vo.organization_id = $1 and vo.order_number = $2
+     order by i.line_number asc, a.created_at asc`,
+    [ORG_ID, orderNumber],
+  ).catch(() => []);
+  return rows.map((r) => ({
+    id: String(r.id),
+    itemId: String(r.vendor_order_item_id),
+    kind: r.kind === "design" ? ("design" as const) : ("image" as const),
+    filename: String(r.filename),
+    mimeType: String(r.mime_type),
+    bytes: Buffer.isBuffer(r.content) ? r.content : Buffer.from(r.content as ArrayBuffer),
+  }));
+}
+
 async function instantiateWorkflow(vendorOrderUuid: string, templateUuid: string): Promise<void> {
   const inst = await query<{ id: string }>(
     `insert into workflow_instances (organization_id, workflow_template_id, vendor_order_id, status, current_step_sequence)
