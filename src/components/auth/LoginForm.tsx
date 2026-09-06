@@ -70,7 +70,7 @@ export function LoginForm({ nextPath }: { nextPath?: string }) {
           htmlFor="password"
           className="block text-xs font-semibold uppercase tracking-wider text-charcoal/55 mb-1.5"
         >
-          Password
+          Password / PIN / PIN
         </label>
         <input
           id="password"

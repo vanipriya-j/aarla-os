@@ -10,6 +10,8 @@ import {
 } from "@/lib/auth/session-cookie";
 import { createAuthSession, sessionTtlSeconds } from "@/lib/auth/sessions";
 import { homePathForRole } from "@/lib/auth/roles";
+import { AccountService } from "@/lib/application/team-service";
+import { primaryAccessRole } from "@/lib/auth/team-access";
 
 function clientIp(request: NextRequest): string | null {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -37,37 +39,124 @@ export async function POST(request: NextRequest) {
   if (!username || !password) {
     return NextResponse.json(
       { error: "Username and password are required" },
-      { status: 400 },
+      { status: 401 },
     );
   }
 
-  const user = authenticateCredentials(username, password);
-  if (!user) {
-    return NextResponse.json(
-      { error: "Invalid username or password" },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
-    );
+  const ip = clientIp(request);
+  const userAgent = request.headers.get("user-agent");
+
+  // 1) Env founder/CRM shared logins (unchanged)
+  const envUser = authenticateCredentials(username, password);
+  if (envUser) {
+    try {
+      await AccountService.recordLoginEvent({
+        username: envUser.username,
+        outcome: "success",
+        role: envUser.role,
+        ip,
+        userAgent,
+      });
+      const { token, session } = await createAuthSession({
+        username: envUser.username,
+        role: envUser.role,
+        userAgent,
+        ip,
+      });
+
+      const nextRaw = typeof body.next === "string" ? body.next : "";
+      const nextPath =
+        nextRaw.startsWith("/") && !nextRaw.startsWith("//")
+          ? nextRaw
+          : homePathForRole(envUser.role);
+
+      const res = NextResponse.json({
+        ok: true,
+        role: session.role,
+        username: session.username,
+        redirectTo: nextPath,
+        mustChangeCredential: false,
+      });
+      res.cookies.set(
+        SESSION_COOKIE_NAME,
+        token,
+        sessionCookieOptions(sessionTtlSeconds()),
+      );
+      return res;
+    } catch (err) {
+      console.error("[auth] login failed", err);
+      return NextResponse.json(
+        { error: "Could not create session — is the database migrated?" },
+        { status: 503 },
+      );
+    }
   }
 
+  // 2) Internal team accounts (username + PIN/password, no email)
   try {
-    const { token, session } = await createAuthSession({
-      username: user.username,
-      role: user.role,
-      userAgent: request.headers.get("user-agent"),
-      ip: clientIp(request),
+    const result = await AccountService.authenticateInternal(username, password);
+    if (!result.ok) {
+      await AccountService.recordLoginEvent({
+        username,
+        outcome: result.reason === "disabled" ? "disabled" : "failure",
+        accountId: "account" in result ? result.account?.id : null,
+        ip,
+        userAgent,
+      });
+      return NextResponse.json(
+        {
+          error:
+            result.reason === "disabled"
+              ? "This account is disabled"
+              : "Invalid username or password",
+        },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const account = result.account;
+    await AccountService.touchLogin(account.id);
+    await AccountService.recordLoginEvent({
+      username: account.username,
+      outcome: "success",
+      role: "team",
+      accountId: account.id,
+      ip,
+      userAgent,
     });
 
-    const nextRaw = typeof body.next === "string" ? body.next : "";
-    const nextPath =
-      nextRaw.startsWith("/") && !nextRaw.startsWith("//")
-        ? nextRaw
-        : homePathForRole(user.role);
+    const { token, session } = await createAuthSession({
+      username: account.username,
+      role: "team",
+      accountId: account.id,
+      personId: account.personId,
+      accessRoleCodes: account.accessRoleCodes,
+      userAgent,
+      ip,
+    });
+
+    let redirectTo: string;
+    if (account.mustChangeCredential) {
+      redirectTo = "/account/change-pin";
+    } else if (account.attendanceRequired) {
+      redirectTo = "/attendance/check-in";
+    } else {
+      const nextRaw = typeof body.next === "string" ? body.next : "";
+      redirectTo =
+        nextRaw.startsWith("/") && !nextRaw.startsWith("//")
+          ? nextRaw
+          : homePathForRole("team", account.accessRoleCodes);
+    }
+
+    void primaryAccessRole(account.accessRoleCodes);
 
     const res = NextResponse.json({
       ok: true,
       role: session.role,
       username: session.username,
-      redirectTo: nextPath,
+      redirectTo,
+      mustChangeCredential: account.mustChangeCredential,
+      displayName: account.displayName,
     });
     res.cookies.set(
       SESSION_COOKIE_NAME,
@@ -76,10 +165,11 @@ export async function POST(request: NextRequest) {
     );
     return res;
   } catch (err) {
-    console.error("[auth] login failed", err);
+    console.error("[auth] team login failed", err);
+    // If team tables aren't migrated yet, fall through as invalid
     return NextResponse.json(
-      { error: "Could not create session — is the database migrated?" },
-      { status: 503 },
+      { error: "Invalid username or password" },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

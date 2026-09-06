@@ -55,9 +55,9 @@ function NavSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { role, username, authEnabled } = useAuth();
-  const nav = navForRole(role);
-  const homeHref = homePathForRole(role);
+  const { role, username, authEnabled, accessRoleCodes } = useAuth();
+  const nav = navForRole(role, accessRoleCodes);
+  const homeHref = homePathForRole(role, accessRoleCodes);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -72,7 +72,11 @@ export function Sidebar() {
             Aarla OS
           </p>
           <p className="mt-1 text-xs text-charcoal/55 tracking-wide">
-            {role === "crm" ? "CRM outreach" : "Founder operating system"}
+            {role === "crm"
+              ? "CRM outreach"
+              : role === "team"
+                ? "Team workspace"
+                : "Founder operating system"}
           </p>
         </Link>
       </div>

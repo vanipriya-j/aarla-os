@@ -83,6 +83,7 @@ describe("role-based credentials + cookie sessions", () => {
     expect(admin.operate.some((i) => i.href === "/fulfil")).toBe(true);
     expect(admin.admin.some((i) => i.href === "/diagnostics")).toBe(true);
     expect(admin.admin.some((i) => i.href === "/finance/gst")).toBe(true);
+    expect(admin.admin.some((i) => i.href === "/team")).toBe(true);
     expect(admin.create.length).toBeGreaterThan(0);
   });
 

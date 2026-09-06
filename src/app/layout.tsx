@@ -36,6 +36,9 @@ export default async function RootLayout({
           role={auth.role}
           username={auth.username}
           sessionId={auth.sessionId}
+          accountId={auth.accountId}
+          personId={auth.personId}
+          accessRoleCodes={auth.accessRoleCodes}
           authEnabled={auth.authEnabled}
         >
           <AppShell>{children}</AppShell>

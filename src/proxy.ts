@@ -4,6 +4,9 @@ import { isAuthEnabled } from "@/lib/auth/credentials";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session-cookie";
 import { resolveAuthSession } from "@/lib/auth/sessions";
 import {
+  AUTH_ACCESS_ROLES_HEADER,
+  AUTH_ACCOUNT_HEADER,
+  AUTH_PERSON_HEADER,
   AUTH_ROLE_HEADER,
   AUTH_SESSION_HEADER,
   AUTH_USER_HEADER,
@@ -38,7 +41,14 @@ function unauthorizedApi(): NextResponse {
 
 function withAuthHeaders(
   request: NextRequest,
-  input: { role: string; username: string; sessionId?: string | null },
+  input: {
+    role: string;
+    username: string;
+    sessionId?: string | null;
+    accountId?: string | null;
+    personId?: string | null;
+    accessRoleCodes?: string[];
+  },
 ): NextResponse {
   const headers = new Headers(request.headers);
   headers.set(AUTH_ROLE_HEADER, input.role);
@@ -47,6 +57,21 @@ function withAuthHeaders(
     headers.set(AUTH_SESSION_HEADER, input.sessionId);
   } else {
     headers.delete(AUTH_SESSION_HEADER);
+  }
+  if (input.accountId) {
+    headers.set(AUTH_ACCOUNT_HEADER, input.accountId);
+  } else {
+    headers.delete(AUTH_ACCOUNT_HEADER);
+  }
+  if (input.personId) {
+    headers.set(AUTH_PERSON_HEADER, input.personId);
+  } else {
+    headers.delete(AUTH_PERSON_HEADER);
+  }
+  if (input.accessRoleCodes?.length) {
+    headers.set(AUTH_ACCESS_ROLES_HEADER, input.accessRoleCodes.join(","));
+  } else {
+    headers.delete(AUTH_ACCESS_ROLES_HEADER);
   }
   return NextResponse.next({ request: { headers } });
 }
@@ -81,9 +106,9 @@ export async function proxy(request: NextRequest) {
     return isApiPath(pathname) ? unauthorizedApi() : redirectToLogin(request);
   }
 
-  if (!canAccessPath(session.role, pathname)) {
+  if (!canAccessPath(session.role, pathname, session.accessRoleCodes)) {
     const url = request.nextUrl.clone();
-    url.pathname = homePathForRole(session.role);
+    url.pathname = homePathForRole(session.role, session.accessRoleCodes);
     url.search = "";
     return NextResponse.redirect(url);
   }
@@ -92,6 +117,9 @@ export async function proxy(request: NextRequest) {
     role: session.role,
     username: session.username,
     sessionId: session.id,
+    accountId: session.accountId,
+    personId: session.personId,
+    accessRoleCodes: session.accessRoleCodes,
   });
 }
 

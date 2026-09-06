@@ -21,6 +21,10 @@ import {
   Truck,
   Users,
   BookOpen,
+  UserCog,
+  KeyRound,
+  MapPin,
+  Clock3,
 } from "lucide-react";
 
 export interface NavItem {
@@ -135,10 +139,34 @@ export const adminNav: NavItem[] = [
     description: "Monthly sales & purchase capture for your accountant.",
   },
   {
+    label: "Team",
+    href: "/team",
+    icon: UserCog,
+    description: "Internal team, attendance, access and work locations.",
+  },
+  {
+    label: "Attendance",
+    href: "/team/attendance",
+    icon: Clock3,
+    description: "Who is at work today — check-ins and exceptions.",
+  },
+  {
+    label: "Access",
+    href: "/team/access",
+    icon: KeyRound,
+    description: "Roles and module permissions for team accounts.",
+  },
+  {
+    label: "Work locations",
+    href: "/team/locations",
+    icon: MapPin,
+    description: "Offices and studios where the team works.",
+  },
+  {
     label: "People",
     href: "/people",
     icon: Users,
-    description: "Customers, users and community members.",
+    description: "Customers, owners and community members.",
   },
   {
     label: "Partners",
