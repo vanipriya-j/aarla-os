@@ -40,6 +40,7 @@ describe("VendorCommunication helpers", () => {
     const msg = prepareWhatsAppMessage({ order, vendorName: "Rajesh Kumar" });
     expect(msg).toContain("AARLA-MFG-0247");
     expect(msg).toContain("quantities");
-    expect(msg).toContain("2026-09-10");
+    expect(msg).toContain("Sept 10, 2026");
+    expect(msg).not.toContain("2026-09-10");
   });
 });

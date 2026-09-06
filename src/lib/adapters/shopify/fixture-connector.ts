@@ -257,6 +257,7 @@ const FIXTURE_PRODUCTS: ShopifyProductRecord[] = [
     vendor: "Aarla",
     tags: ["fixture"],
     updatedAt: "2026-08-20T10:00:00.000Z",
+    imageUrl: "https://cdn.shopify.com/s/files/1/fixture/kolam-bottle.png",
     variants: [
       {
         externalVariantId: "9001",
@@ -277,6 +278,7 @@ const FIXTURE_PRODUCTS: ShopifyProductRecord[] = [
     vendor: "Aarla",
     tags: ["fixture", "tee"],
     updatedAt: "2026-08-21T10:00:00.000Z",
+    imageUrl: null,
     variants: [
       {
         externalVariantId: "9002",

@@ -401,6 +401,9 @@ query SyncProducts($cursor: String, $query: String, $pageSize: Int!) {
         vendor
         tags
         updatedAt
+        featuredImage {
+          url
+        }
         variants(first: 100) {
           edges {
             node {
@@ -428,6 +431,7 @@ type RawProductNode = {
   vendor: string | null;
   tags: string[];
   updatedAt: string;
+  featuredImage: { url: string } | null;
   variants: {
     edges: Array<{
       node: {
@@ -475,6 +479,7 @@ function mapProduct(node: RawProductNode): ShopifyProductRecord {
     vendor: node.vendor ?? "",
     tags: node.tags ?? [],
     updatedAt: node.updatedAt,
+    imageUrl: node.featuredImage?.url?.trim() || null,
     variants,
   };
 }
@@ -1207,6 +1212,43 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       query: options.query,
     });
     return { customers: page.customers, orders: page.orders };
+  }
+
+  /**
+   * Fetch featured image URLs for Shopify product external ids (numeric / gid-less).
+   * Used to backfill catalog thumbnails for PO PDFs.
+   */
+  async fetchProductFeaturedImageUrls(
+    externalProductIds: string[],
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const unique = [...new Set(externalProductIds.map((id) => id.trim()).filter(Boolean))];
+    for (let i = 0; i < unique.length; i += 20) {
+      const chunk = unique.slice(i, i + 20);
+      const gids = chunk.map((id) =>
+        id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`,
+      );
+      const data = await this.graphql<{
+        nodes: Array<{ id?: string; featuredImage?: { url?: string } | null } | null>;
+      }>(
+        `query ProductImages($ids: [ID!]!) {
+           nodes(ids: $ids) {
+             ... on Product {
+               id
+               featuredImage { url }
+             }
+           }
+         }`,
+        { ids: gids },
+      );
+      for (const node of data.nodes ?? []) {
+        if (!node?.id) continue;
+        const ext = shopifyGidToExternalId(node.id) ?? node.id;
+        const url = node.featuredImage?.url?.trim();
+        if (url) out.set(ext, url);
+      }
+    }
+    return out;
   }
 }
 

@@ -19,6 +19,7 @@ import type {
   WorkflowTemplateStep,
   VendorWorkflowAiDraft,
 } from "@/lib/domain/manufacture-types";
+import { listProductImageUrlsByCodes } from "@/lib/infra/repositories/postgres-shopify-catalog";
 
 function dateStr(v: string | Date | null | undefined): string | null {
   if (!v) return null;
@@ -98,6 +99,23 @@ export async function ensureManufactureSchema(): Promise<void> {
       updates_order_status text,
       notes text not null default '',
       unique (workflow_template_id, sequence)
+    )`).catch(() => undefined);
+  await query(
+    `alter table vendor_order_items add column if not exists is_custom boolean not null default false`,
+  ).catch(() => undefined);
+  await query(
+    `alter table vendor_order_items add column if not exists description text not null default ''`,
+  ).catch(() => undefined);
+  await query(`
+    create table if not exists vendor_order_item_attachments (
+      id uuid primary key default gen_random_uuid(),
+      vendor_order_item_id uuid not null references vendor_order_items(id) on delete cascade,
+      kind text not null check (kind in ('image', 'design')),
+      filename text not null,
+      mime_type text not null default 'application/octet-stream',
+      byte_size integer not null check (byte_size >= 0),
+      content bytea not null,
+      created_at timestamptz not null default now()
     )`).catch(() => undefined);
   schemaReady = true;
 }
@@ -715,13 +733,21 @@ export async function addVendorOrderItems(
     );
   }
 
+  await refreshVendorOrderPricing(orderId);
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+async function refreshVendorOrderPricing(orderId: string): Promise<void> {
   const all = await query<{
     quantity: number;
     unit_cost: string | number | null;
   }>(`select quantity, unit_cost from vendor_order_items where vendor_order_id = $1`, [orderId]);
   const priced = all.length > 0 && all.every((i) => i.unit_cost != null);
   const subtotal = priced
-    ? all.reduce((s, i) => s + Number(i.unit_cost) * i.quantity, 0)
+    ? all.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0)
     : null;
   await query(
     `update vendor_orders
@@ -729,10 +755,312 @@ export async function addVendorOrderItems(
      where id = $1`,
     [orderId, priced ? "confirmed" : "pending", subtotal],
   );
+}
+
+async function resolveVendorOrderUuid(orderNumber: string): Promise<string> {
+  const idRows = await query<{ id: string }>(
+    `select id from vendor_orders where organization_id = $1 and order_number = $2 limit 1`,
+    [ORG_ID, orderNumber],
+  );
+  const orderId = idRows[0]?.id;
+  if (!orderId) throw new Error("Order not found");
+  return String(orderId);
+}
+
+/** Update quantity (and optional unit cost / description) on a draft / ready-to-send line. */
+export async function updateVendorOrderItem(
+  orderNumber: string,
+  itemId: string,
+  patch: { quantity?: number; unitCost?: number | null; description?: string; title?: string },
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot edit lines when order is ${existing.status}. Edit while the PO is still draft.`,
+    );
+  }
+  const item = existing.items.find((i) => i.id === itemId);
+  if (!item) throw new Error("Line item not found on this order.");
+
+  const quantity =
+    patch.quantity != null ? Math.max(1, Math.floor(Number(patch.quantity))) : item.quantity;
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    throw new Error("Quantity must be a positive integer.");
+  }
+  const unitCost =
+    patch.unitCost !== undefined
+      ? patch.unitCost == null
+        ? null
+        : Number(patch.unitCost)
+      : item.unitCost;
+  if (unitCost != null && (!Number.isFinite(unitCost) || unitCost < 0)) {
+    throw new Error("Unit cost must be a non-negative number.");
+  }
+  const lineTotal = unitCost != null ? unitCost * quantity : null;
+  const description =
+    patch.description !== undefined ? String(patch.description).trim() : item.description;
+  const title =
+    patch.title !== undefined ? String(patch.title).trim() || item.title : item.title;
+
+  const orderUuid = await resolveVendorOrderUuid(orderNumber);
+  await query(
+    `update vendor_order_items
+     set quantity = $3, unit_cost = $4, line_total = $5, description = $6, title = $7
+     where id = $1 and vendor_order_id = $2`,
+    [itemId, orderUuid, quantity, unitCost, lineTotal, description, title],
+  );
+  await refreshVendorOrderPricing(orderUuid);
 
   const updated = await getVendorOrder(orderNumber);
   if (!updated) throw new Error("Order not found after update");
   return updated;
+}
+
+/** Remove a line from a draft / ready-to-send vendor order. */
+export async function removeVendorOrderItem(
+  orderNumber: string,
+  itemId: string,
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot remove lines when order is ${existing.status}. Edit while the PO is still draft.`,
+    );
+  }
+  if (!existing.items.some((i) => i.id === itemId)) {
+    throw new Error("Line item not found on this order.");
+  }
+
+  const orderUuid = await resolveVendorOrderUuid(orderNumber);
+  const deleted = await query<{ id: string }>(
+    `delete from vendor_order_items
+     where id = $1 and vendor_order_id = $2
+     returning id`,
+    [itemId, orderUuid],
+  );
+  if (!deleted[0]) {
+    throw new Error("Could not remove that line — refresh and try again.");
+  }
+  await refreshVendorOrderPricing(orderUuid);
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_ATTACHMENTS_PER_KIND = 5;
+
+export type VendorOrderAttachmentFileInput = {
+  kind: "image" | "design";
+  filename: string;
+  mimeType: string;
+  /** Raw base64 (no data: URL prefix). */
+  contentBase64: string;
+};
+
+/** Add a custom (non-catalog) line with optional image/design files. */
+export async function addCustomVendorOrderItem(
+  orderNumber: string,
+  input: {
+    name: string;
+    quantity: number;
+    description?: string;
+    attachments?: VendorOrderAttachmentFileInput[];
+  },
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const name = String(input.name ?? "").trim();
+  if (!name) throw new Error("Custom item name is required.");
+  const quantity = Math.max(1, Math.floor(Number(input.quantity)));
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    throw new Error("Quantity must be a positive integer.");
+  }
+  const description = String(input.description ?? "").trim();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot add lines when order is ${existing.status}. Add while the PO is still draft.`,
+    );
+  }
+
+  const idRows = await query<{ id: string }>(
+    `select id from vendor_orders where organization_id = $1 and order_number = $2 limit 1`,
+    [ORG_ID, orderNumber],
+  );
+  const orderId = idRows[0]?.id;
+  if (!orderId) throw new Error("Order not found");
+
+  const maxLine = await query<{ m: number | string | null }>(
+    `select coalesce(max(line_number), 0) as m from vendor_order_items where vendor_order_id = $1`,
+    [orderId],
+  );
+  const line = Number(maxLine[0]?.m ?? 0) + 1;
+  const productCode = `custom-${Date.now().toString(36)}`;
+
+  const inserted = await query<{ id: string }>(
+    `insert into vendor_order_items (
+       vendor_order_id, line_number, product_code, variant_code, title, variant_label, sku,
+       quantity, unit_cost, line_total, colour, size_label, production_requirement_id,
+       is_custom, description, notes
+     ) values ($1,$2,$3,null,$4,'','',$5,null,null,'','',null,true,$6,$6)
+     returning id`,
+    [orderId, line, productCode, name, quantity, description],
+  );
+  const itemId = inserted[0]!.id;
+
+  const files = input.attachments ?? [];
+  let imageCount = 0;
+  let designCount = 0;
+  for (const file of files) {
+    if (file.kind === "image") imageCount += 1;
+    else designCount += 1;
+    if (imageCount > MAX_ATTACHMENTS_PER_KIND || designCount > MAX_ATTACHMENTS_PER_KIND) {
+      throw new Error(`At most ${MAX_ATTACHMENTS_PER_KIND} files per type (images / design).`);
+    }
+    await insertVendorOrderItemAttachment(itemId, file);
+  }
+
+  await refreshVendorOrderPricing(orderId);
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+async function insertVendorOrderItemAttachment(
+  itemId: string,
+  file: VendorOrderAttachmentFileInput,
+): Promise<void> {
+  const filename = String(file.filename ?? "").trim() || "file";
+  const mimeType = String(file.mimeType ?? "application/octet-stream").trim();
+  const kind = file.kind === "design" ? "design" : "image";
+  const raw = String(file.contentBase64 ?? "").replace(/\s/g, "");
+  if (!raw) throw new Error(`Empty file: ${filename}`);
+  let content: Buffer;
+  try {
+    content = Buffer.from(raw, "base64");
+  } catch {
+    throw new Error(`Could not read file: ${filename}`);
+  }
+  if (content.byteLength === 0) throw new Error(`Empty file: ${filename}`);
+  if (content.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new Error(`${filename} is larger than 2 MB.`);
+  }
+  await query(
+    `insert into vendor_order_item_attachments
+       (vendor_order_item_id, kind, filename, mime_type, byte_size, content)
+     values ($1,$2,$3,$4,$5,$6)`,
+    [itemId, kind, filename, mimeType, content.byteLength, content],
+  );
+}
+
+/** Append attachments to an existing draft custom (or catalog) line. */
+export async function addVendorOrderItemAttachments(
+  orderNumber: string,
+  itemId: string,
+  files: VendorOrderAttachmentFileInput[],
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  if (!files.length) throw new Error("No files to upload.");
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(`Cannot attach files when order is ${existing.status}.`);
+  }
+  const item = existing.items.find((i) => i.id === itemId);
+  if (!item) throw new Error("Line item not found on this order.");
+
+  const currentImages = item.attachments.filter((a) => a.kind === "image").length;
+  const currentDesigns = item.attachments.filter((a) => a.kind === "design").length;
+  let imageCount = currentImages;
+  let designCount = currentDesigns;
+  for (const file of files) {
+    if (file.kind === "image") imageCount += 1;
+    else designCount += 1;
+    if (imageCount > MAX_ATTACHMENTS_PER_KIND || designCount > MAX_ATTACHMENTS_PER_KIND) {
+      throw new Error(`At most ${MAX_ATTACHMENTS_PER_KIND} files per type (images / design).`);
+    }
+    await insertVendorOrderItemAttachment(itemId, file);
+  }
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+export async function getVendorOrderItemAttachment(input: {
+  orderNumber: string;
+  attachmentId: string;
+}): Promise<{
+  filename: string;
+  mimeType: string;
+  bytes: Buffer;
+} | null> {
+  await ensureManufactureSchema();
+  const rows = await query<{
+    filename: string;
+    mime_type: string;
+    content: Buffer;
+  }>(
+    `select a.filename, a.mime_type, a.content
+     from vendor_order_item_attachments a
+     join vendor_order_items i on i.id = a.vendor_order_item_id
+     join vendor_orders vo on vo.id = i.vendor_order_id
+     where vo.organization_id = $1
+       and vo.order_number = $2
+       and a.id = $3
+     limit 1`,
+    [ORG_ID, input.orderNumber, input.attachmentId],
+  ).catch(() => []);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    filename: String(r.filename),
+    mimeType: String(r.mime_type),
+    bytes: Buffer.isBuffer(r.content) ? r.content : Buffer.from(r.content as ArrayBuffer),
+  };
+}
+
+/** Load attachment bytes for PO PDF embedding (images / design previews). */
+export async function listVendorOrderAttachmentContents(orderNumber: string): Promise<
+  Array<{
+    id: string;
+    itemId: string;
+    kind: "image" | "design";
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+  }>
+> {
+  await ensureManufactureSchema();
+  const rows = await query<{
+    id: string;
+    vendor_order_item_id: string;
+    kind: string;
+    filename: string;
+    mime_type: string;
+    content: Buffer;
+  }>(
+    `select a.id, a.vendor_order_item_id, a.kind, a.filename, a.mime_type, a.content
+     from vendor_order_item_attachments a
+     join vendor_order_items i on i.id = a.vendor_order_item_id
+     join vendor_orders vo on vo.id = i.vendor_order_id
+     where vo.organization_id = $1 and vo.order_number = $2
+     order by i.line_number asc, a.created_at asc`,
+    [ORG_ID, orderNumber],
+  ).catch(() => []);
+  return rows.map((r) => ({
+    id: String(r.id),
+    itemId: String(r.vendor_order_item_id),
+    kind: r.kind === "design" ? ("design" as const) : ("image" as const),
+    filename: String(r.filename),
+    mimeType: String(r.mime_type),
+    bytes: Buffer.isBuffer(r.content) ? r.content : Buffer.from(r.content as ArrayBuffer),
+  }));
 }
 
 async function instantiateWorkflow(vendorOrderUuid: string, templateUuid: string): Promise<void> {
@@ -800,6 +1128,7 @@ export async function listVendorOrders(): Promise<VendorOrder[]> {
 }
 
 export async function getVendorOrder(orderNumber: string): Promise<VendorOrder | null> {
+  await ensureManufactureSchema();
   const rows = await query<Record<string, unknown>>(
     `select vo.*, v.code as vendor_code, wt.code as workflow_template_code
      from vendor_orders vo
@@ -814,8 +1143,40 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
     `select * from vendor_order_items where vendor_order_id = $1 order by line_number`,
     [r.id],
   );
-  return {
-    id: String(r.order_number),
+  const itemIds = items.map((i) => String(i.id));
+  const attachmentRows =
+    itemIds.length === 0
+      ? []
+      : await query<{
+          id: string;
+          vendor_order_item_id: string;
+          kind: string;
+          filename: string;
+          mime_type: string;
+          byte_size: number | string;
+          created_at: Date | string;
+        }>(
+          `select id, vendor_order_item_id, kind, filename, mime_type, byte_size, created_at
+           from vendor_order_item_attachments
+           where vendor_order_item_id = any($1::uuid[])
+           order by created_at asc`,
+          [itemIds],
+        ).catch(() => []);
+  const attachmentsByItem = new Map<string, VendorOrderItem["attachments"]>();
+  for (const a of attachmentRows) {
+    const list = attachmentsByItem.get(String(a.vendor_order_item_id)) ?? [];
+    list.push({
+      id: String(a.id),
+      kind: a.kind === "design" ? "design" : "image",
+      filename: String(a.filename),
+      mimeType: String(a.mime_type),
+      byteSize: Number(a.byte_size),
+      createdAt: iso(a.created_at),
+    });
+    attachmentsByItem.set(String(a.vendor_order_item_id), list);
+  }
+  const detail: VendorOrder = {
+    id: String(r.id),
     orderNumber: String(r.order_number),
     vendorId: String(r.vendor_code),
     orderDate: dateStr(r.order_date as string | Date) ?? "",
@@ -855,6 +1216,10 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
         finishInstructions: String(i.finish_instructions ?? ""),
         artworkReference: String(i.artwork_reference ?? ""),
         notes: String(i.notes ?? ""),
+        description: String(i.description ?? ""),
+        isCustom: Boolean(i.is_custom),
+        attachments: attachmentsByItem.get(String(i.id)) ?? [],
+        catalogImageUrl: null,
         productionRequirementId: null,
       }),
     ),
@@ -862,6 +1227,20 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
     createdAt: iso(r.created_at as Date),
     updatedAt: iso(r.updated_at as Date),
   };
+
+  // Attach known catalog design thumbnails (Shopify featured images).
+  try {
+    const codes = detail.items.filter((i) => !i.isCustom).map((i) => i.productId);
+    const images = await listProductImageUrlsByCodes(codes);
+    for (const item of detail.items) {
+      if (item.isCustom) continue;
+      const hit = images.get(item.productId);
+      item.catalogImageUrl = hit?.imageUrl ?? null;
+    }
+  } catch {
+    /* image_url column may be missing until /setup */
+  }
+  return detail;
 }
 
 export async function getWorkflowInstanceForOrder(
