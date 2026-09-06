@@ -36,6 +36,7 @@ import {
   buildPackingActual,
   packingLineSignature,
 } from "@/lib/domain/fulfilment-decisions";
+import { CheckCircle2, Loader2, Package, Plus, RefreshCw, Truck, X } from "lucide-react";
 import {
   LIVE_ORDERS_UPDATED_EVENT,
   type LiveOrdersUpdatedDetail,
