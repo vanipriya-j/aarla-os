@@ -18,6 +18,8 @@ import {
   createMfgVendor,
   createVendorOrder,
   addVendorOrderItems,
+  updateVendorOrderItem,
+  removeVendorOrderItem,
   getMfgVendor,
   getVendorOrder,
   getWorkflowInstanceForOrder,
@@ -251,6 +253,30 @@ export async function addVendorOrderItemsAction(
 ) {
   try {
     const order = await addVendorOrderItems(orderNumber, items);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Edit quantity / unit cost on a draft vendor PO line. */
+export async function updateVendorOrderItemAction(
+  orderNumber: string,
+  itemId: string,
+  patch: { quantity?: number; unitCost?: number | null },
+) {
+  try {
+    const order = await updateVendorOrderItem(orderNumber, itemId, patch);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Remove a line from a draft vendor PO. */
+export async function removeVendorOrderItemAction(orderNumber: string, itemId: string) {
+  try {
+    const order = await removeVendorOrderItem(orderNumber, itemId);
     return { ok: true as const, data: order };
   } catch (e) {
     return fail(e);

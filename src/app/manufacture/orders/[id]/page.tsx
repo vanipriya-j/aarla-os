@@ -16,7 +16,9 @@ import {
   prepareReceiveStockAction,
   prepareSendOrderAction,
   recordConfirmationAction,
+  removeVendorOrderItemAction,
   sendViaWhatsAppAction,
+  updateVendorOrderItemAction,
 } from "@/app/actions/manufacture-actions";
 import type {
   MfgVendorProfile,
@@ -69,6 +71,7 @@ function VendorOrderDetailInner() {
   const [addProductId, setAddProductId] = useState(prefillProduct ?? "");
   const [addVariantId, setAddVariantId] = useState(prefillVariant ?? "");
   const [addQty, setAddQty] = useState(Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20);
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
 
   const load = () => {
     startTransition(async () => {
@@ -86,6 +89,9 @@ function VendorOrderDetailInner() {
       setWorkflow(r.data.workflow);
       setPayments(r.data.payments);
       setComms(r.data.communications);
+      setQtyDrafts(
+        Object.fromEntries(r.data.order.items.map((i) => [i.id, String(i.quantity)])),
+      );
       if (r.data.order.vendorCommittedDate) {
         setConfirmDate(r.data.order.vendorCommittedDate);
       }
@@ -131,8 +137,41 @@ function VendorOrderDetailInner() {
         return;
       }
       setOrder(r.data);
+      setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
       setAddQty(20);
       setAddVariantId("");
+      setError(null);
+    });
+  }
+
+  function saveLineQty(itemId: string) {
+    const raw = qtyDrafts[itemId];
+    const quantity = Math.floor(Number(raw));
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      setError("Quantity must be at least 1.");
+      return;
+    }
+    startTransition(async () => {
+      const r = await updateVendorOrderItemAction(orderNumber, itemId, { quantity });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOrder(r.data);
+      setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
+      setError(null);
+    });
+  }
+
+  function removeLine(itemId: string) {
+    startTransition(async () => {
+      const r = await removeVendorOrderItemAction(orderNumber, itemId);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOrder(r.data);
+      setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
       setError(null);
     });
   }
@@ -311,26 +350,71 @@ function VendorOrderDetailInner() {
             <section className="space-y-3">
               <h2 className="font-display text-xl text-deep-navy">Line items</h2>
               <div className="space-y-2">
-                {order.items.map((item) => (
-                  <div key={item.id} className="card-surface p-4 flex flex-wrap justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-deep-navy">{item.title}</p>
-                      <p className="text-sm text-charcoal/65">
-                        {[item.variantLabel, item.colour, item.sizeLabel, item.sku]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
+                {order.items.map((item) => {
+                  const draftQty = qtyDrafts[item.id] ?? String(item.quantity);
+                  const dirty = Number(draftQty) !== item.quantity;
+                  return (
+                    <div
+                      key={item.id}
+                      className="card-surface p-4 flex flex-wrap justify-between gap-3"
+                      data-testid={`vendor-order-line-${item.id}`}
+                    >
+                      <div className="min-w-[12rem] flex-1">
+                        <p className="font-medium text-deep-navy">{item.title}</p>
+                        <p className="text-sm text-charcoal/65">
+                          {[item.variantLabel, item.colour, item.sizeLabel, item.sku]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      </div>
+                      <div className="text-sm text-right text-charcoal/70 space-y-2">
+                        {canEditLines ? (
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <label className="text-xs text-charcoal/60">
+                              Qty
+                              <input
+                                type="number"
+                                min={1}
+                                value={draftQty}
+                                onChange={(e) =>
+                                  setQtyDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value,
+                                  }))
+                                }
+                                className="mt-1 block w-20 rounded-lg border border-border bg-white px-2 py-1.5 text-sm text-left"
+                                data-testid={`vendor-order-line-qty-${item.id}`}
+                              />
+                            </label>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={pending || !dirty}
+                              onClick={() => saveLineQty(item.id)}
+                            >
+                              {pending && dirty ? "Saving…" : "Save qty"}
+                            </Button>
+                            <button
+                              type="button"
+                              disabled={pending || order.items.length <= 1}
+                              className="text-xs text-aarla-red underline disabled:opacity-40"
+                              onClick={() => removeLine(item.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : (
+                          <p>{item.quantity} pcs</p>
+                        )}
+                        <p>
+                          {item.unitCost == null
+                            ? "PRICE PENDING"
+                            : `₹${item.unitCost.toLocaleString("en-IN")}`}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-sm text-right text-charcoal/70">
-                      <p>{item.quantity} pcs</p>
-                      <p>
-                        {item.unitCost == null
-                          ? "PRICE PENDING"
-                          : `₹${item.unitCost.toLocaleString("en-IN")}`}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {canEditLines ? (

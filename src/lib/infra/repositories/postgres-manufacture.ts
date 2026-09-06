@@ -715,13 +715,21 @@ export async function addVendorOrderItems(
     );
   }
 
+  await refreshVendorOrderPricing(orderId);
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+async function refreshVendorOrderPricing(orderId: string): Promise<void> {
   const all = await query<{
     quantity: number;
     unit_cost: string | number | null;
   }>(`select quantity, unit_cost from vendor_order_items where vendor_order_id = $1`, [orderId]);
   const priced = all.length > 0 && all.every((i) => i.unit_cost != null);
   const subtotal = priced
-    ? all.reduce((s, i) => s + Number(i.unit_cost) * i.quantity, 0)
+    ? all.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0)
     : null;
   await query(
     `update vendor_orders
@@ -729,6 +737,79 @@ export async function addVendorOrderItems(
      where id = $1`,
     [orderId, priced ? "confirmed" : "pending", subtotal],
   );
+}
+
+/** Update quantity (and optional unit cost) on a draft / ready-to-send line. */
+export async function updateVendorOrderItem(
+  orderNumber: string,
+  itemId: string,
+  patch: { quantity?: number; unitCost?: number | null },
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot edit lines when order is ${existing.status}. Edit while the PO is still draft.`,
+    );
+  }
+  const item = existing.items.find((i) => i.id === itemId);
+  if (!item) throw new Error("Line item not found on this order.");
+
+  const quantity =
+    patch.quantity != null ? Math.max(1, Math.floor(Number(patch.quantity))) : item.quantity;
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    throw new Error("Quantity must be a positive integer.");
+  }
+  const unitCost =
+    patch.unitCost !== undefined
+      ? patch.unitCost == null
+        ? null
+        : Number(patch.unitCost)
+      : item.unitCost;
+  if (unitCost != null && (!Number.isFinite(unitCost) || unitCost < 0)) {
+    throw new Error("Unit cost must be a non-negative number.");
+  }
+  const lineTotal = unitCost != null ? unitCost * quantity : null;
+
+  await query(
+    `update vendor_order_items
+     set quantity = $3, unit_cost = $4, line_total = $5
+     where id = $1 and vendor_order_id = $2`,
+    [itemId, existing.id, quantity, unitCost, lineTotal],
+  );
+  await refreshVendorOrderPricing(existing.id);
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after update");
+  return updated;
+}
+
+/** Remove a line from a draft / ready-to-send vendor order. */
+export async function removeVendorOrderItem(
+  orderNumber: string,
+  itemId: string,
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!EDITABLE_ORDER_STATUSES.has(existing.status)) {
+    throw new Error(
+      `Cannot remove lines when order is ${existing.status}. Edit while the PO is still draft.`,
+    );
+  }
+  if (!existing.items.some((i) => i.id === itemId)) {
+    throw new Error("Line item not found on this order.");
+  }
+  if (existing.items.length <= 1) {
+    throw new Error("Order must keep at least one line. Add another product first, or cancel the PO.");
+  }
+
+  await query(
+    `delete from vendor_order_items where id = $1 and vendor_order_id = $2`,
+    [itemId, existing.id],
+  );
+  await refreshVendorOrderPricing(existing.id);
 
   const updated = await getVendorOrder(orderNumber);
   if (!updated) throw new Error("Order not found after update");
