@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import {
+  addCustomVendorOrderItemAction,
   addVendorOrderItemsAction,
   advanceWorkflowAction,
   generateOrderPdfAction,
@@ -32,6 +33,34 @@ function daysOverdue(date: string | null): number | null {
   if (!date) return null;
   const d = Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
   return d > 0 ? d : null;
+}
+
+async function filesToAttachments(
+  files: FileList | null,
+  kind: "image" | "design",
+): Promise<
+  Array<{ kind: "image" | "design"; filename: string; mimeType: string; contentBase64: string }>
+> {
+  if (!files?.length) return [];
+  const out: Array<{
+    kind: "image" | "design";
+    filename: string;
+    mimeType: string;
+    contentBase64: string;
+  }> = [];
+  for (const file of Array.from(files)) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+    out.push({
+      kind,
+      filename: file.name,
+      mimeType: file.type || "application/octet-stream",
+      contentBase64: btoa(binary),
+    });
+  }
+  return out;
 }
 
 function VendorOrderDetailInner() {
@@ -72,6 +101,11 @@ function VendorOrderDetailInner() {
   const [addVariantId, setAddVariantId] = useState(prefillVariant ?? "");
   const [addQty, setAddQty] = useState(Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+  const [customName, setCustomName] = useState("");
+  const [customQty, setCustomQty] = useState(10);
+  const [customDescription, setCustomDescription] = useState("");
+  const [customImages, setCustomImages] = useState<FileList | null>(null);
+  const [customDesigns, setCustomDesigns] = useState<FileList | null>(null);
 
   const load = () => {
     startTransition(async () => {
@@ -173,6 +207,41 @@ function VendorOrderDetailInner() {
       setOrder(r.data);
       setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
       setError(null);
+    });
+  }
+
+  function addCustomLine() {
+    if (!customName.trim()) {
+      setError("Custom item needs a name.");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const [images, designs] = await Promise.all([
+          filesToAttachments(customImages, "image"),
+          filesToAttachments(customDesigns, "design"),
+        ]);
+        const r = await addCustomVendorOrderItemAction(orderNumber, {
+          name: customName.trim(),
+          quantity: customQty,
+          description: customDescription.trim(),
+          attachments: [...images, ...designs],
+        });
+        if (!r.ok) {
+          setError(r.error);
+          return;
+        }
+        setOrder(r.data);
+        setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
+        setCustomName("");
+        setCustomQty(10);
+        setCustomDescription("");
+        setCustomImages(null);
+        setCustomDesigns(null);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     });
   }
 
@@ -360,12 +429,37 @@ function VendorOrderDetailInner() {
                       data-testid={`vendor-order-line-${item.id}`}
                     >
                       <div className="min-w-[12rem] flex-1">
-                        <p className="font-medium text-deep-navy">{item.title}</p>
-                        <p className="text-sm text-charcoal/65">
-                          {[item.variantLabel, item.colour, item.sizeLabel, item.sku]
-                            .filter(Boolean)
-                            .join(" · ")}
+                        <p className="font-medium text-deep-navy">
+                          {item.title}
+                          {item.isCustom ? (
+                            <span className="ml-2 text-xs font-normal uppercase tracking-wide text-charcoal/45">
+                              Custom
+                            </span>
+                          ) : null}
                         </p>
+                        <p className="text-sm text-charcoal/65">
+                          {item.isCustom
+                            ? item.description || "No description"
+                            : [item.variantLabel, item.colour, item.sizeLabel, item.sku]
+                                .filter(Boolean)
+                                .join(" · ")}
+                        </p>
+                        {item.attachments.length > 0 ? (
+                          <ul className="mt-2 space-y-1 text-xs text-charcoal/60">
+                            {item.attachments.map((a) => (
+                              <li key={a.id}>
+                                <a
+                                  className="underline text-deep-navy"
+                                  href={`/api/manufacture/orders/${encodeURIComponent(orderNumber)}/attachments/${a.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {a.kind === "image" ? "Image" : "Design"}: {a.filename}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                       <div className="text-sm text-right text-charcoal/70 space-y-2">
                         {canEditLines ? (
@@ -418,59 +512,134 @@ function VendorOrderDetailInner() {
               </div>
 
               {canEditLines ? (
-                <div className="card-surface p-4 space-y-3 border-dashed border-aarla-red/25">
-                  <p className="text-sm font-medium text-deep-navy">Add another product</p>
-                  <p className="text-xs text-charcoal/55">
-                    Same vendor PO — keep adding lines, then Preview / Send once.
-                  </p>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <label className="text-xs text-charcoal/60">
-                      Product
-                      <select
-                        value={addProductId}
-                        onChange={(e) => {
-                          setAddProductId(e.target.value);
-                          setAddVariantId("");
-                        }}
-                        className="mt-1 block min-w-[14rem] max-w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                      >
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-xs text-charcoal/60">
-                      Variant
-                      <select
-                        value={addVariantId}
-                        onChange={(e) => setAddVariantId(e.target.value)}
-                        className="mt-1 block min-w-[10rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                      >
-                        <option value="">—</option>
-                        {(addProduct?.variants ?? []).map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-xs text-charcoal/60">
-                      Qty
-                      <input
-                        type="number"
-                        min={1}
-                        value={addQty}
-                        onChange={(e) => setAddQty(Number(e.target.value))}
-                        className="mt-1 block w-20 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                      />
-                    </label>
-                    <Button size="sm" onClick={addLine} disabled={pending || !addProductId}>
-                      {pending ? "Adding…" : "Add to PO"}
+                <>
+                  <div className="card-surface p-4 space-y-3 border-dashed border-aarla-red/25">
+                    <p className="text-sm font-medium text-deep-navy">Add another product</p>
+                    <p className="text-xs text-charcoal/55">
+                      Same vendor PO — keep adding lines, then Preview / Send once.
+                    </p>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <label className="text-xs text-charcoal/60">
+                        Product
+                        <select
+                          value={addProductId}
+                          onChange={(e) => {
+                            setAddProductId(e.target.value);
+                            setAddVariantId("");
+                          }}
+                          className="mt-1 block min-w-[14rem] max-w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                        >
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs text-charcoal/60">
+                        Variant
+                        <select
+                          value={addVariantId}
+                          onChange={(e) => setAddVariantId(e.target.value)}
+                          className="mt-1 block min-w-[10rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                        >
+                          <option value="">—</option>
+                          {(addProduct?.variants ?? []).map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs text-charcoal/60">
+                        Qty
+                        <input
+                          type="number"
+                          min={1}
+                          value={addQty}
+                          onChange={(e) => setAddQty(Number(e.target.value))}
+                          className="mt-1 block w-20 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <Button size="sm" onClick={addLine} disabled={pending || !addProductId}>
+                        {pending ? "Adding…" : "Add to PO"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div
+                    className="card-surface p-4 space-y-3 border-dashed border-deep-navy/20"
+                    data-testid="vendor-order-custom-item"
+                  >
+                    <p className="text-sm font-medium text-deep-navy">Add custom item</p>
+                    <p className="text-xs text-charcoal/55">
+                      Outside the catalog — name, qty, description, images and design files.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="text-xs text-charcoal/60 sm:col-span-1">
+                        Name
+                        <input
+                          value={customName}
+                          onChange={(e) => setCustomName(e.target.value)}
+                          placeholder="e.g. Festival gift sleeve"
+                          className="mt-1 block w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                          data-testid="custom-item-name"
+                        />
+                      </label>
+                      <label className="text-xs text-charcoal/60">
+                        Qty
+                        <input
+                          type="number"
+                          min={1}
+                          value={customQty}
+                          onChange={(e) => setCustomQty(Number(e.target.value))}
+                          className="mt-1 block w-24 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                          data-testid="custom-item-qty"
+                        />
+                      </label>
+                      <label className="text-xs text-charcoal/60 sm:col-span-2">
+                        Description
+                        <textarea
+                          value={customDescription}
+                          onChange={(e) => setCustomDescription(e.target.value)}
+                          rows={3}
+                          placeholder="Specs, finish, packaging notes…"
+                          className="mt-1 block w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+                          data-testid="custom-item-description"
+                        />
+                      </label>
+                      <label className="text-xs text-charcoal/60">
+                        Images
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => setCustomImages(e.target.files)}
+                          className="mt-1 block w-full text-sm"
+                          data-testid="custom-item-images"
+                        />
+                      </label>
+                      <label className="text-xs text-charcoal/60">
+                        Design files
+                        <input
+                          type="file"
+                          accept=".pdf,.ai,.psd,.zip,.svg,.png,.jpg,.jpeg,.webp,.fig"
+                          multiple
+                          onChange={(e) => setCustomDesigns(e.target.files)}
+                          className="mt-1 block w-full text-sm"
+                          data-testid="custom-item-designs"
+                        />
+                      </label>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={addCustomLine}
+                      disabled={pending || !customName.trim()}
+                    >
+                      {pending ? "Adding…" : "Add custom item"}
                     </Button>
                   </div>
-                </div>
+                </>
               ) : (
                 <p className="text-xs text-charcoal/50">
                   Lines are locked after send. Create a new order to reorder more SKUs.

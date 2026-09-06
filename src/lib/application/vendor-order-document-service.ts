@@ -71,6 +71,9 @@ export async function buildVendorOrderPdfBuffer(input: {
   for (const item of order.items) {
     doc.fillColor("#1B2A4A").fontSize(11).text(item.title || item.productId);
     doc.fillColor("#333333").fontSize(9);
+    if (item.isCustom) {
+      doc.text("Custom item (not in catalog)");
+    }
     const bits = [
       item.variantLabel,
       item.colour && `Colour: ${item.colour}`,
@@ -84,12 +87,23 @@ export async function buildVendorOrderPdfBuffer(input: {
         item.lineTotal == null ? "PRICE PENDING" : formatINR(item.lineTotal)
       }`,
     );
+    if (item.description) {
+      doc.text(`Description: ${item.description}`);
+    }
     if (item.customisationInstructions) {
       doc.text(`Customisation: ${item.customisationInstructions}`);
     }
     if (item.finishInstructions) doc.text(`Finish: ${item.finishInstructions}`);
     if (item.artworkReference) doc.text(`Artwork: ${item.artworkReference}`);
-    if (item.notes) doc.text(`Notes: ${item.notes}`);
+    if (item.notes && item.notes !== item.description) doc.text(`Notes: ${item.notes}`);
+    const images = item.attachments.filter((a) => a.kind === "image");
+    const designs = item.attachments.filter((a) => a.kind === "design");
+    if (images.length) {
+      doc.text(`Images: ${images.map((a) => a.filename).join(", ")}`);
+    }
+    if (designs.length) {
+      doc.text(`Design files: ${designs.map((a) => a.filename).join(", ")}`);
+    }
     doc.moveDown(0.6);
   }
 

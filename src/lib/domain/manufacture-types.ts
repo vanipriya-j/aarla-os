@@ -154,6 +154,15 @@ export interface ProductionRequirement {
   createdAt: string;
 }
 
+export interface VendorOrderItemAttachment {
+  id: string;
+  kind: "image" | "design";
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  createdAt: string;
+}
+
 export interface VendorOrderItem {
   id: string;
   lineNumber: number;
@@ -172,6 +181,10 @@ export interface VendorOrderItem {
   finishInstructions: string;
   artworkReference: string;
   notes: string;
+  /** Free-text brief for custom (non-catalog) lines. */
+  description: string;
+  isCustom: boolean;
+  attachments: VendorOrderItemAttachment[];
   productionRequirementId: string | null;
 }
 
