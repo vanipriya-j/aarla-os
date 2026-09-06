@@ -250,6 +250,22 @@ export function shopifyOpenFulfilmentOrdersQuery(): string {
   return "status:open AND (fulfillment_status:unshipped OR fulfillment_status:partial)";
 }
 
+/** Exact order-name clause for Shopify search (e.g. name:"#1604"). */
+export function shopifyOrderNameClause(orderNumber: string): string {
+  const trimmed = orderNumber.trim();
+  if (!trimmed) return "";
+  const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  return `name:${JSON.stringify(withHash)}`;
+}
+
+/**
+ * OR-joined name query for a batch of order numbers (Shopify search limit-friendly).
+ * Empty input → empty string (caller should skip).
+ */
+export function shopifyOrdersByNamesQuery(orderNumbers: string[]): string {
+  return orderNumbers.map(shopifyOrderNameClause).filter(Boolean).join(" OR ");
+}
+
 /** Committed watermark only (no DB bootstrap). */
 export async function getCommittedShopifyAbandonedWatermark(): Promise<string | null> {
   await ensureCommerceSyncWatermarksTable();

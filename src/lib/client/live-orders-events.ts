@@ -6,6 +6,7 @@ export const LIVE_ORDERS_UPDATED_EVENT = "aarla:live-orders-updated";
 
 export type LiveOrdersUpdatedDetail = {
   fulfilCreated: number;
+  fulfilArchived?: number;
   openCount: number;
   openOrderNumbers: string[];
   syncedAt: string;

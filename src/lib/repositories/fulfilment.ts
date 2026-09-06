@@ -136,6 +136,11 @@ export interface FulfilmentRepository {
       fulfilmentStatus: string | null;
     }>
   >;
+  /**
+   * Order numbers for early Fulfil queue rows (received / stock-check) so we can
+   * re-fetch Shopify status and auto-archive ones already fulfilled there.
+   */
+  listEarlyQueueOrderNumbers(limit?: number): Promise<string[]>;
   /** Move wrongly pulled stock-check rows that are already Shopify-fulfilled or Delhivery-delivered out of the active queue. */
   archiveAlreadyShippedStockChecks(): Promise<number>;
   setStatus(fulfilmentOrderId: string, status: FulfilmentStatus): Promise<void>;

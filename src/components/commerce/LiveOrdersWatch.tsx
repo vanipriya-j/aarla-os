@@ -268,6 +268,7 @@ export function LiveOrdersWatch() {
 
         dispatchLiveOrdersUpdated({
           fulfilCreated: data.fulfilCreated,
+          fulfilArchived: data.fulfilArchived ?? 0,
           openCount: data.openStockCheck.length,
           openOrderNumbers: data.openStockCheck.map((o) => o.orderNumber).filter(Boolean),
           syncedAt,
@@ -322,8 +323,15 @@ export function LiveOrdersWatch() {
         setPhase("done");
         const bits = ["Done"];
         if (data.fulfilCreated > 0) bits.push(`pulled ${data.fulfilCreated}`);
+        if ((data.fulfilArchived ?? 0) > 0) {
+          bits.push(`cleared ${data.fulfilArchived} fulfilled in Shopify`);
+        }
         if (data.salesPosted > 0) bits.push(`${data.salesPosted} Studio sale(s)`);
-        if (data.fulfilCreated === 0 && fresh.length === 0) {
+        if (
+          data.fulfilCreated === 0 &&
+          (data.fulfilArchived ?? 0) === 0 &&
+          fresh.length === 0
+        ) {
           bits.push("queue unchanged");
         }
         bits.push(openSummary);

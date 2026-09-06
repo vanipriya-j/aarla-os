@@ -92,9 +92,10 @@ export interface ShopifySyncSummary {
   complete?: boolean;
   /**
    * incremental = only orders after watermark; full = entire catalog;
-   * open-fulfilment = current Unfulfilled/Partial opens (no watermark).
+   * open-fulfilment = current Unfulfilled/Partial opens (no watermark);
+   * targeted = caller-supplied Shopify search query (no watermark).
    */
-  mode?: "incremental" | "full" | "open-fulfilment";
+  mode?: "incremental" | "full" | "open-fulfilment" | "targeted";
   /** Watermark used for this run (ISO), if incremental */
   incrementalFrom?: string | null;
   /**

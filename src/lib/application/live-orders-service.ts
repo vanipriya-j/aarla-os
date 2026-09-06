@@ -1,12 +1,13 @@
 /**
- * Live Shopify order watch — open Unfulfilled/Partial refresh + fulfil ingest.
- * Does not rely on the created_at incremental watermark (that misses older opens).
+ * Live Shopify order watch — refresh current opens + re-check existing Stock Check
+ * rows so Shopify-fulfilled orders leave the queue (without Sync All).
  */
 import "server-only";
 import {
   acquireOrRenewCommerceSyncLock,
   releaseCommerceSyncLock,
 } from "@/lib/application/commerce-sync-lock";
+import { shopifyOrdersByNamesQuery } from "@/lib/application/commerce-sync-watermarks";
 import { syncShopifyCustomerCallData } from "@/lib/application/shopify-sync-service";
 import { syncIncomingOrdersIntoFulfilment } from "@/lib/application/fulfilment-service";
 import { createFulfilmentRepository } from "@/lib/infra/repositories/postgres-fulfilment";
@@ -28,13 +29,21 @@ export type LiveOrdersTickResult = {
   }>;
 };
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 /**
- * One live-desk tick: refresh current open Shopify fulfilment orders (bounded
- * chunks), then ingest into Fulfilment and post Studio Shopify Sale movements.
+ * One live-desk tick:
+ * 1) Pull current Shopify Unfulfilled/Partial opens
+ * 2) Re-fetch early Fulfil queue orders by name (status catch-up for already-shipped)
+ * 3) Ingest new opens + auto-archive rows no longer open in Shopify
  */
 export async function runLiveOrdersTick(input: {
   lockToken: string;
-  /** Max Shopify order pages this tick (default 3). */
+  /** Max Shopify order pages this tick for the open query (default 3). */
   maxChunks?: number;
 }): Promise<LiveOrdersTickResult> {
   const lockToken = input.lockToken.trim();
@@ -63,6 +72,7 @@ export async function runLiveOrdersTick(input: {
     let ordersRead = 0;
     let ordersUpserted = 0;
     const maxChunks = Math.max(1, Math.min(input.maxChunks ?? 3, 8));
+    const repo = createFulfilmentRepository();
 
     for (let i = 0; i < maxChunks; i += 1) {
       const page = await syncShopifyCustomerCallData({
@@ -78,8 +88,25 @@ export async function runLiveOrdersTick(input: {
       if (!cursor) break;
     }
 
+    // Status catch-up: open-fulfilment only returns still-open Shopify orders.
+    // Rows already in Stock Check that Shopify fulfilled later must be re-fetched
+    // by name so archiveAlreadyShippedStockChecks can clear them.
+    const earlyNumbers = await repo.listEarlyQueueOrderNumbers(80);
+    for (const batch of chunk(earlyNumbers, 10)) {
+      const searchQuery = shopifyOrdersByNamesQuery(batch);
+      if (!searchQuery) continue;
+      const page = await syncShopifyCustomerCallData({
+        mode: "targeted",
+        searchQuery,
+        runId: lockToken,
+        maxPages: 1,
+      });
+      ordersRead += page.ordersRead;
+      ordersUpserted += page.ordersAdded + page.ordersUpdated;
+    }
+
     const fulfil = await syncIncomingOrdersIntoFulfilment(200);
-    const openRows = await createFulfilmentRepository().listWorkbench("stock-check");
+    const openRows = await repo.listWorkbench("stock-check");
 
     return {
       skipped: false,

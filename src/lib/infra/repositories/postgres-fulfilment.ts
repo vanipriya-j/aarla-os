@@ -283,6 +283,21 @@ export function createFulfilmentRepository(): FulfilmentRepository {
       }));
     },
 
+    async listEarlyQueueOrderNumbers(limit = 80) {
+      const rows = await q<{ order_number: string }>(
+        `select o.order_number
+         from fulfilment_orders fo
+         join external_orders o on o.id = fo.external_order_id
+         where fo.organization_id = $1
+           and fo.status in ('received', 'stock-check')
+           and nullif(btrim(o.order_number), '') is not null
+         order by o.order_date asc
+         limit $2`,
+        [ORG_ID, Math.max(1, Math.min(limit, 200))],
+      );
+      return rows.map((r) => String(r.order_number));
+    },
+
     async archiveAlreadyShippedStockChecks() {
       // Drop early-queue rows that are no longer Unfulfilled / Partially fulfilled in Shopify.
       const openStatuses = [...SHOPIFY_OPEN_FULFILMENT_STATUSES];

@@ -176,16 +176,21 @@ export default function FulfilOrdersPage() {
   useEffect(() => {
     const onLive = (ev: Event) => {
       const detail = (ev as CustomEvent<LiveOrdersUpdatedDetail>).detail;
-      if (detail?.fulfilCreated > 0) {
+      if (detail?.fulfilCreated > 0 || (detail?.fulfilArchived ?? 0) > 0) {
+        const bits: string[] = [];
+        if (detail.fulfilCreated > 0) bits.push(`pulled ${detail.fulfilCreated}`);
+        if ((detail.fulfilArchived ?? 0) > 0) {
+          bits.push(`cleared ${detail.fulfilArchived} fulfilled in Shopify`);
+        }
         setStatus(
-          `Live sync pulled ${detail.fulfilCreated} order(s)` +
+          `Live sync ${bits.join("; ")}` +
             (detail.openOrderNumbers?.length
               ? ` · open: ${detail.openOrderNumbers.slice(0, 5).join(", ")}`
               : ""),
         );
       } else if (detail?.openCount != null) {
         setStatus(
-          `Live sync up to date · ${detail.openCount} open in Stock Check`,
+          `Live sync checked Shopify · ${detail.openCount} open in Stock Check`,
         );
       }
       reloadList(tab);

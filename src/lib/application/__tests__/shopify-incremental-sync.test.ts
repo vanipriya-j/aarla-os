@@ -10,6 +10,7 @@ import {
   getShopifyOrdersWatermark,
   noteShopifyOrdersSyncProgress,
   shopifyOpenFulfilmentOrdersQuery,
+  shopifyOrdersByNamesQuery,
   shopifyOrdersCreatedAfterQuery,
 } from "@/lib/application/commerce-sync-watermarks";
 
@@ -29,6 +30,15 @@ describe("shopifyOpenFulfilmentOrdersQuery", () => {
     expect(q).toContain("status:open");
     expect(q).toContain("fulfillment_status:unshipped");
     expect(q).toContain("fulfillment_status:partial");
+  });
+});
+
+describe("shopifyOrdersByNamesQuery", () => {
+  it("builds OR-joined exact name filters", () => {
+    expect(shopifyOrdersByNamesQuery(["#1556", "1587"])).toBe(
+      'name:"#1556" OR name:"#1587"',
+    );
+    expect(shopifyOrdersByNamesQuery([])).toBe("");
   });
 });
 
