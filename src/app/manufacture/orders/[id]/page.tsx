@@ -146,6 +146,7 @@ function VendorOrderDetailInner() {
   const outstanding = payments
     .filter((p) => p.status === "due")
     .reduce((s, p) => s + p.amount, 0);
+  const totalItems = order?.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
   const canEditLines = order?.status === "draft" || order?.status === "ready_to_send";
   const addProduct = products.find((p) => p.id === addProductId);
 
@@ -390,9 +391,13 @@ function VendorOrderDetailInner() {
                 ["Vendor committed", order.vendorCommittedDate ?? "—"],
                 ["Aarla expected", order.internalExpectedDate ?? "—"],
                 [
+                  "Total items",
+                  `${totalItems} pcs · ${order.items.length} line${order.items.length === 1 ? "" : "s"}`,
+                ],
+                [
                   "Order value",
                   order.pricingStatus === "pending" || order.total == null
-                    ? "PRICE PENDING"
+                    ? "NA"
                     : `₹${order.total.toLocaleString("en-IN")}`,
                 ],
                 ["Amount paid", `₹${paid.toLocaleString("en-IN")}`],
