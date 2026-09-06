@@ -31,6 +31,8 @@ export {
   buildApparelMatrix,
   buildArtMatrix,
   listVariantRows,
+  apparelColourOf,
+  apparelSizeOf,
 } from "./inventory-presentation";
 export type { ApparelMatrixRow, ArtMatrixRow, VariantRow } from "./inventory-presentation";
 export { computeReplenishment } from "./inventory-replenishment";
@@ -38,12 +40,16 @@ export type { ReplenishmentItem } from "./inventory-replenishment";
 export {
   STOCK_TABLE_PAGE_SIZE,
   buildStockTableRows,
+  buildStockCatalogEntries,
   filterStockTableRows,
   paginateStockTableRows,
+  rowsForStockCatalogView,
   sortStockTableRows,
+  sortStockCatalogEntries,
   uniqueStockCategories,
 } from "./inventory-stock-table";
 export type {
+  StockCatalogEntry,
   StockSortKey,
   StockStockFilter,
   StockTableRow,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildStockCatalogEntries,
   buildStockTableRows,
   filterStockTableRows,
   paginateStockTableRows,
@@ -80,5 +81,17 @@ describe("inventory-stock-table", () => {
     const pastEnd = paginateStockTableRows(rows, 999, 5);
     expect(pastEnd.page).toBe(pastEnd.totalPages);
     expect(pastEnd.pageRows.length).toBeGreaterThan(0);
+  });
+
+  it("collapses apparel tees into Colour × Size catalog entries", () => {
+    const entries = buildStockCatalogEntries(rows);
+    const tee = products.find((p) => p.id === "prod-chennai-tee")!;
+    const apparel = entries.find((e) => e.kind === "apparel" && e.product.id === tee.id);
+    expect(apparel?.kind).toBe("apparel");
+    if (apparel?.kind === "apparel") {
+      expect(apparel.matrix.length).toBeGreaterThan(0);
+      expect(apparel.variantRows.length).toBe(tee.variants.length);
+      expect(entries.length).toBeLessThan(rows.length);
+    }
   });
 });
