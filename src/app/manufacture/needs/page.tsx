@@ -14,6 +14,7 @@ import {
   listProductsForManufactureAction,
   listVendorOrdersAction,
 } from "@/app/actions/manufacture-actions";
+import { parseManufactureReorderLines } from "@/lib/domain/manufacture-reorder-link";
 
 type NeedItem = {
   productId: string;
@@ -34,6 +35,10 @@ function NeedsInner() {
   const makeQty = Number(search.get("qty") ?? "20");
   const makeLabelParam = search.get("label");
   const makeFilter = search.get("filter");
+  const makeLines = useMemo(
+    () => parseManufactureReorderLines(search.get("lines")),
+    [search],
+  );
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [board, setBoard] = useState<{
@@ -179,6 +184,37 @@ function NeedsInner() {
 
   function createFromQuery() {
     if (!makeProductId) return;
+    if (makeLines.length > 1) {
+      if (!vendorCode) {
+        setError("Pick a vendor first — add one under Vendors if the list is empty.");
+        return;
+      }
+      const product = products.find((p) => p.id === makeProductId);
+      startTransition(async () => {
+        const items = makeLines.map((line) => {
+          const variant = product?.variants.find((v) => v.id === line.variantId);
+          return {
+            productCode: makeProductId,
+            variantCode: line.variantId,
+            title: line.label || `${product?.title ?? makeProductId} / ${variant?.label ?? line.variantId}`,
+            variantLabel: variant?.label ?? "",
+            quantity: line.quantity,
+            sku: variant?.sku || product?.sku || makeProductId,
+          };
+        });
+        const result = await createVendorOrderAction({
+          vendorCode,
+          items,
+          notes: `From Needs Making · apparel reorder · ${product?.title ?? makeProductId}`,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        router.push(`/manufacture/orders/${encodeURIComponent(result.data.orderNumber)}`);
+      });
+      return;
+    }
     createOrder({
       productId: makeProductId,
       variantId: makeVariantId,
@@ -194,16 +230,33 @@ function NeedsInner() {
       return;
     }
     startTransition(async () => {
-      const r = await addVendorOrderItemsAction(targetOrder, [
-        {
-          productCode: makeProductId,
-          variantCode: makeVariantId,
-          title: makeLabel ?? makeProductId,
-          variantLabel: "",
-          quantity: qty,
-          sku: makeProductId,
-        },
-      ]);
+      const product = products.find((p) => p.id === makeProductId);
+      const items =
+        makeLines.length > 0
+          ? makeLines.map((line) => {
+              const variant = product?.variants.find((v) => v.id === line.variantId);
+              return {
+                productCode: makeProductId,
+                variantCode: line.variantId,
+                title:
+                  line.label ||
+                  `${product?.title ?? makeProductId} / ${variant?.label ?? line.variantId}`,
+                variantLabel: variant?.label ?? "",
+                quantity: line.quantity,
+                sku: variant?.sku || product?.sku || makeProductId,
+              };
+            })
+          : [
+              {
+                productCode: makeProductId,
+                variantCode: makeVariantId,
+                title: makeLabel ?? makeProductId,
+                variantLabel: "",
+                quantity: qty,
+                sku: makeProductId,
+              },
+            ];
+      const r = await addVendorOrderItemsAction(targetOrder, items);
       if (!r.ok) {
         setError(r.error);
         return;
@@ -235,10 +288,27 @@ function NeedsInner() {
       {makeProductId ? (
         <div className="card-surface p-4 border-aarla-red/25 space-y-4">
           <div>
-            <p className="font-medium text-deep-navy">Reorder · {makeLabel}</p>
-            <p className="text-xs text-charcoal/55 mt-1">
-              Add this SKU to an open PO, or start a new one for a vendor.
+            <p className="font-medium text-deep-navy">
+              Reorder ·{" "}
+              {makeLines.length > 1
+                ? `${makeLines.length} sizes/colours`
+                : makeLabel}
             </p>
+            <p className="text-xs text-charcoal/55 mt-1">
+              {makeLines.length > 1
+                ? "Add these size/colour lines to an open PO, or start a new one for a vendor."
+                : "Add this SKU to an open PO, or start a new one for a vendor."}
+            </p>
+            {makeLines.length > 1 ? (
+              <ul className="mt-2 text-sm text-charcoal/80 space-y-1 max-h-40 overflow-y-auto">
+                {makeLines.map((line) => (
+                  <li key={line.variantId} className="flex justify-between gap-3">
+                    <span className="truncate">{line.label ?? line.variantId}</span>
+                    <span className="tabular-nums shrink-0">×{line.quantity}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           {openOrders.length > 0 ? (

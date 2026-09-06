@@ -4,14 +4,42 @@
 
 import type { VendorOrder } from "@/lib/domain/manufacture-types";
 
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sept",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/** Format YYYY-MM-DD as "Sept 11, 2026" for vendor-facing copy. */
+export function formatVendorFacingDate(isoDate: string | null | undefined): string {
+  if (!isoDate) return "as discussed";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate.trim());
+  if (!m) return isoDate;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return isoDate;
+  return `${MONTHS_SHORT[month - 1]} ${day}, ${year}`;
+}
+
 export function prepareWhatsAppMessage(input: {
   order: VendorOrder;
   vendorName: string;
 }): string {
-  const delivery =
+  const raw =
     input.order.requestedDeliveryDate ??
     input.order.vendorCommittedDate ??
-    "as discussed";
+    null;
+  const delivery = raw ? formatVendorFacingDate(raw) : "as discussed";
   return [
     `Hi ${input.vendorName.split(" ")[0] || "there"},`,
     "",
@@ -23,7 +51,7 @@ export function prepareWhatsAppMessage(input: {
     "• pricing",
     "• committed delivery date",
     "",
-    `Requested delivery:`,
+    "Requested delivery:",
     delivery,
     "",
     "Please confirm when received.",

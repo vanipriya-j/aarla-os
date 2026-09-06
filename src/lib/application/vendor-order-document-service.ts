@@ -1,18 +1,28 @@
 /**
  * VendorOrderDocumentService — visual PDF generation + versioning.
+ * Formats as a purchase-order style table and embeds image attachments.
  */
 import "server-only";
 import PDFDocument from "pdfkit";
-import type { VendorOrder, MfgVendorProfile } from "@/lib/domain/manufacture-types";
+import type { VendorOrder, MfgVendorProfile, VendorOrderItem } from "@/lib/domain/manufacture-types";
 import {
   getLatestPdfVersion,
   getMfgVendor,
   getVendorOrder,
+  listVendorOrderAttachmentContents,
   savePdfVersion,
 } from "@/lib/infra/repositories/postgres-manufacture";
+import { formatVendorFacingDate } from "@/lib/application/vendor-communication";
+import {
+  cacheProductImageUrl,
+  listProductImageUrlsByCodes,
+} from "@/lib/infra/repositories/postgres-shopify-catalog";
+import { createLiveShopifyConnectorFromEnv } from "@/lib/adapters/shopify/live-graphql-connector";
 
-function formatINR(n: number | null | undefined): string {
-  if (n == null) return "PRICE PENDING";
+type AttachmentBytes = Awaited<ReturnType<typeof listVendorOrderAttachmentContents>>[number];
+
+function formatRate(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "NA";
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -20,12 +30,54 @@ function formatINR(n: number | null | undefined): string {
   }).format(n);
 }
 
+function formatINR(n: number | null | undefined): string {
+  if (n == null) return "NA";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function isEmbeddableImage(mimeType: string, filename: string): boolean {
+  const mime = mimeType.toLowerCase();
+  if (mime.includes("png") || mime.includes("jpeg") || mime.includes("jpg")) return true;
+  const lower = filename.toLowerCase();
+  return /\.(png|jpe?g)$/i.test(lower);
+}
+
+function itemDescription(item: VendorOrderItem): string {
+  const lines: string[] = [item.title || item.productId];
+  if (item.isCustom) lines.push("Custom item (not in catalog)");
+  const meta = [
+    item.variantLabel,
+    item.colour && `Colour: ${item.colour}`,
+    item.sizeLabel && `Size: ${item.sizeLabel}`,
+    item.sku && `SKU: ${item.sku}`,
+  ].filter(Boolean);
+  if (meta.length) lines.push(meta.join(" · "));
+  if (item.description) lines.push(item.description);
+  if (item.customisationInstructions) lines.push(`Customisation: ${item.customisationInstructions}`);
+  if (item.finishInstructions) lines.push(`Finish: ${item.finishInstructions}`);
+  if (item.notes && item.notes !== item.description) lines.push(`Notes: ${item.notes}`);
+  return lines.join("\n");
+}
+
 export async function buildVendorOrderPdfBuffer(input: {
   order: VendorOrder;
   vendor: MfgVendorProfile;
   versionNumber: number;
+  attachments?: AttachmentBytes[];
 }): Promise<Buffer> {
   const { order, vendor, versionNumber } = input;
+  const attachments = input.attachments ?? [];
+  const byItem = new Map<string, AttachmentBytes[]>();
+  for (const a of attachments) {
+    const list = byItem.get(a.itemId) ?? [];
+    list.push(a);
+    byItem.set(a.itemId, list);
+  }
+
   const doc = new PDFDocument({ size: "A4", margin: 48 });
   const chunks: Buffer[] = [];
   doc.on("data", (c) => chunks.push(c as Buffer));
@@ -35,97 +87,352 @@ export async function buildVendorOrderPdfBuffer(input: {
     doc.on("error", reject);
   });
 
+  const pageWidth = doc.page.width;
+  const left = 48;
+  const right = pageWidth - 48;
+  const usable = right - left;
+
+  // Column layout: S.No | Item Description | Qty | Rate
+  const col = {
+    sno: left,
+    item: left + 36,
+    qty: left + usable - 130,
+    rate: left + usable - 70,
+  };
+  const widths = {
+    sno: 32,
+    item: col.qty - col.item - 8,
+    qty: 52,
+    rate: 70,
+  };
+
   // Header
-  doc.fillColor("#1B2A4A").fontSize(22).text("Aarla", { continued: false });
-  doc.fillColor("#C45C26").fontSize(10).text("OS · Manufacturing order", { continued: false });
-  doc.moveDown(0.5);
-  doc.fillColor("#1B2A4A").fontSize(16).text(order.orderNumber);
-  doc.fontSize(9).fillColor("#555555").text(
-    `PDF Version ${versionNumber} · Generated ${new Date().toLocaleString("en-IN")}`,
-  );
-  doc.moveDown();
-
-  doc.fillColor("#1B2A4A").fontSize(11).text("Vendor");
-  doc.fontSize(10).fillColor("#333333");
-  doc.text(vendor.businessName || vendor.name);
-  if (vendor.contactPerson) doc.text(`Contact: ${vendor.contactPerson}`);
-  if (vendor.whatsappNumber || vendor.phone) {
-    doc.text(`WhatsApp / phone: ${vendor.whatsappNumber || vendor.phone}`);
-  }
-  if (vendor.email) doc.text(`Email: ${vendor.email}`);
-  doc.moveDown(0.5);
-
-  doc.fillColor("#1B2A4A").fontSize(11).text("Dates");
-  doc.fontSize(10).fillColor("#333333");
-  doc.text(`Order date: ${order.orderDate}`);
-  doc.text(`Requested delivery: ${order.requestedDeliveryDate ?? "—"}`);
-  if (order.vendorCommittedDate) {
-    doc.text(`Vendor committed: ${order.vendorCommittedDate}`);
-  }
-  // Internal expected date intentionally omitted from vendor PDF
-  doc.moveDown();
-
-  doc.fillColor("#1B2A4A").fontSize(11).text("Line items");
-  doc.moveDown(0.3);
-
-  for (const item of order.items) {
-    doc.fillColor("#1B2A4A").fontSize(11).text(item.title || item.productId);
-    doc.fillColor("#333333").fontSize(9);
-    const bits = [
-      item.variantLabel,
-      item.colour && `Colour: ${item.colour}`,
-      item.sizeLabel && `Size: ${item.sizeLabel}`,
-      item.sku && `SKU: ${item.sku}`,
-    ].filter(Boolean);
-    if (bits.length) doc.text(bits.join(" · "));
-    doc.text(`Quantity: ${item.quantity}`);
-    doc.text(
-      `Unit: ${item.unitCost == null ? "PRICE PENDING" : formatINR(item.unitCost)} · Line: ${
-        item.lineTotal == null ? "PRICE PENDING" : formatINR(item.lineTotal)
-      }`,
+  doc.fillColor("#1B2A4A").fontSize(20).text("Aarla", left, 48, { continued: false });
+  doc.fillColor("#C45C26").fontSize(10).text("Purchase Order", left, 72);
+  doc.fillColor("#1B2A4A").fontSize(14).text(order.orderNumber, left, 92);
+  doc
+    .fontSize(8)
+    .fillColor("#666666")
+    .text(
+      `PDF v${versionNumber} · ${new Date().toLocaleString("en-IN")}`,
+      left,
+      112,
     );
-    if (item.customisationInstructions) {
-      doc.text(`Customisation: ${item.customisationInstructions}`);
+
+  let y = 136;
+  doc.fillColor("#1B2A4A").fontSize(10).text("Vendor", left, y);
+  y += 14;
+  doc.fillColor("#333333").fontSize(9);
+  doc.text(vendor.businessName || vendor.name, left, y);
+  y += 12;
+  if (vendor.contactPerson) {
+    doc.text(`Contact: ${vendor.contactPerson}`, left, y);
+    y += 12;
+  }
+  if (vendor.whatsappNumber || vendor.phone) {
+    doc.text(`WhatsApp / phone: ${vendor.whatsappNumber || vendor.phone}`, left, y);
+    y += 12;
+  }
+  y += 6;
+  doc.fillColor("#1B2A4A").fontSize(10).text("Dates", left, y);
+  y += 14;
+  doc.fillColor("#333333").fontSize(9);
+  doc.text(`Order date: ${formatVendorFacingDate(order.orderDate)}`, left, y);
+  y += 12;
+  doc.text(
+    `Requested delivery: ${
+      order.requestedDeliveryDate ? formatVendorFacingDate(order.requestedDeliveryDate) : "—"
+    }`,
+    left,
+    y,
+  );
+  y += 12;
+  if (order.vendorCommittedDate) {
+    doc.text(
+      `Vendor committed: ${formatVendorFacingDate(order.vendorCommittedDate)}`,
+      left,
+      y,
+    );
+    y += 12;
+  }
+  y += 14;
+
+  function ensureSpace(needed: number) {
+    const bottom = doc.page.height - 48;
+    if (y + needed > bottom) {
+      doc.addPage();
+      y = 48;
+      drawTableHeader();
     }
-    if (item.finishInstructions) doc.text(`Finish: ${item.finishInstructions}`);
-    if (item.artworkReference) doc.text(`Artwork: ${item.artworkReference}`);
-    if (item.notes) doc.text(`Notes: ${item.notes}`);
-    doc.moveDown(0.6);
   }
 
-  doc.fillColor("#1B2A4A").fontSize(11).text("Totals & payment");
-  doc.fillColor("#333333").fontSize(10);
-  doc.text(`Pricing: ${order.pricingStatus === "pending" ? "PRICE PENDING" : "Confirmed"}`);
-  doc.text(`Subtotal / Total: ${formatINR(order.total ?? order.subtotal)}`);
+  function drawTableHeader() {
+    const h = 22;
+    doc.rect(left, y, usable, h).fill("#1B2A4A");
+    doc.fillColor("#FFFFFF").fontSize(8).font("Helvetica-Bold");
+    doc.text("S.No", col.sno + 4, y + 7, { width: widths.sno });
+    doc.text("Item Description", col.item + 4, y + 7, { width: widths.item });
+    doc.text("Qty", col.qty + 4, y + 7, { width: widths.qty, align: "right" });
+    doc.text("Rate", col.rate + 4, y + 7, { width: widths.rate, align: "right" });
+    doc.font("Helvetica");
+    y += h;
+  }
+
+  drawTableHeader();
+
+  order.items.forEach((item, index) => {
+    const desc = itemDescription(item);
+    const descHeight = Math.max(
+      28,
+      doc.heightOfString(desc, { width: widths.item - 8, align: "left" }) + 12,
+    );
+    const files = byItem.get(item.id) ?? [];
+    const imageFiles = files.filter((f) => isEmbeddableImage(f.mimeType, f.filename));
+    const otherFiles = files.filter((f) => !isEmbeddableImage(f.mimeType, f.filename));
+    const imageBlock = imageFiles.length > 0 ? 8 + Math.ceil(imageFiles.length / 2) * 118 : 0;
+    const otherBlock = otherFiles.length
+      ? 14 + otherFiles.length * 11
+      : 0;
+    ensureSpace(descHeight + imageBlock + otherBlock + 8);
+
+    // Row background stripe
+    if (index % 2 === 1) {
+      doc.rect(left, y, usable, descHeight).fill("#F7F5F1");
+    }
+    doc
+      .strokeColor("#DDDDDD")
+      .lineWidth(0.5)
+      .moveTo(left, y)
+      .lineTo(right, y)
+      .stroke();
+
+    const textY = y + 6;
+    doc.fillColor("#1B2A4A").fontSize(9);
+    doc.text(String(index + 1), col.sno + 4, textY, { width: widths.sno });
+    doc.fillColor("#222222").fontSize(9);
+    doc.text(desc, col.item + 4, textY, { width: widths.item - 8 });
+    doc.text(String(item.quantity), col.qty + 4, textY, {
+      width: widths.qty - 8,
+      align: "right",
+    });
+    doc.text(formatRate(item.unitCost), col.rate + 4, textY, {
+      width: widths.rate - 8,
+      align: "right",
+    });
+
+    y += descHeight;
+
+    // Embed image / design previews
+    if (imageFiles.length) {
+      doc.fillColor("#555555").fontSize(8).text("Attachments", col.item + 4, y);
+      y += 12;
+      let x = col.item + 4;
+      let rowStartY = y;
+      let maxRowH = 0;
+      for (const file of imageFiles) {
+        const boxW = 160;
+        const boxH = 110;
+        if (x + boxW > right) {
+          x = col.item + 4;
+          y = rowStartY + maxRowH + 8;
+          rowStartY = y;
+          maxRowH = 0;
+          ensureSpace(boxH + 20);
+        }
+        ensureSpace(boxH + 20);
+        try {
+          doc.image(file.bytes, x, y, { fit: [boxW, boxH - 14], align: "center", valign: "center" });
+          doc
+            .fillColor("#666666")
+            .fontSize(7)
+            .text(file.filename, x, y + boxH - 12, { width: boxW, ellipsis: true });
+          maxRowH = Math.max(maxRowH, boxH);
+          x += boxW + 10;
+        } catch {
+          doc
+            .fillColor("#888888")
+            .fontSize(8)
+            .text(`${file.filename} (could not preview)`, x, y, { width: boxW });
+          maxRowH = Math.max(maxRowH, 20);
+          x += boxW + 10;
+        }
+      }
+      y = rowStartY + maxRowH + 6;
+    }
+
+    if (otherFiles.length) {
+      ensureSpace(16 + otherFiles.length * 11);
+      doc.fillColor("#555555").fontSize(8).text("Design files (download from Aarla OS):", col.item + 4, y);
+      y += 12;
+      for (const file of otherFiles) {
+        doc
+          .fillColor("#333333")
+          .fontSize(8)
+          .text(`• ${file.filename}`, col.item + 4, y, { width: widths.item });
+        y += 11;
+      }
+      y += 4;
+    }
+
+    doc
+      .strokeColor("#DDDDDD")
+      .lineWidth(0.5)
+      .moveTo(left, y)
+      .lineTo(right, y)
+      .stroke();
+  });
+
+  y += 16;
+  ensureSpace(120);
+  const totalItems = order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  doc.fillColor("#1B2A4A").fontSize(11).text("Totals & payment", left, y);
+  y += 16;
+  doc.fillColor("#333333").fontSize(9);
+  doc.text(
+    `Total items: ${totalItems} (${order.items.length} line${order.items.length === 1 ? "" : "s"})`,
+    left,
+    y,
+  );
+  y += 12;
+  doc.text(`Subtotal / Total: ${formatINR(order.total ?? order.subtotal)}`, left, y);
+  y += 12;
   if (order.advancePercentage != null) {
     doc.text(
       `Advance (${order.advancePercentage}%): ${formatINR(order.advanceAmount)}`,
+      left,
+      y,
     );
+    y += 12;
   }
   if (order.balanceAmount != null) {
-    doc.text(`Balance: ${formatINR(order.balanceAmount)}`);
+    doc.text(`Balance: ${formatINR(order.balanceAmount)}`, left, y);
+    y += 12;
   }
-  if (vendor.paymentTerms) doc.text(`Payment terms: ${vendor.paymentTerms}`);
-  doc.text(`Deliver to: ${order.deliveryLocation}`);
+  if (vendor.paymentTerms) {
+    doc.text(`Payment terms: ${vendor.paymentTerms}`, left, y);
+    y += 12;
+  }
+  doc.text(`Deliver to: ${order.deliveryLocation}`, left, y);
+  y += 12;
   if (order.notes) {
-    doc.moveDown(0.3);
-    doc.text(`Order notes: ${order.notes}`);
+    doc.text(`Order notes: ${order.notes}`, left, y, { width: usable });
+    y += 16;
   }
 
-  doc.moveDown();
-  doc.fillColor("#1B2A4A").fontSize(11).text("PLEASE CONFIRM");
-  doc.fillColor("#333333").fontSize(10);
-  doc.text("• Quantities");
-  doc.text("• Pricing");
-  doc.text("• Committed delivery date");
-  doc.text("• Any material / design constraints");
-  doc.moveDown();
-  doc.fontSize(8).fillColor("#888888").text(
-    "Inventory is updated only after Aarla receives and accepts stock — not when production is marked done.",
-  );
+  y += 8;
+  ensureSpace(90);
+  doc.fillColor("#1B2A4A").fontSize(11).text("PLEASE CONFIRM", left, y);
+  y += 14;
+  doc.fillColor("#333333").fontSize(9);
+  for (const line of [
+    "• Quantities",
+    "• Pricing",
+    "• Committed delivery date",
+    "• Any material / design constraints",
+  ]) {
+    doc.text(line, left, y);
+    y += 12;
+  }
+  y += 8;
+  doc
+    .fontSize(8)
+    .fillColor("#888888")
+    .text(
+      "Inventory is updated only after Aarla receives and accepts stock — not when production is marked done.",
+      left,
+      y,
+      { width: usable },
+    );
 
   doc.end();
   return done;
+}
+
+async function fetchImageBytes(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(12_000),
+      headers: { Accept: "image/*,*/*" },
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength < 32 || buf.byteLength > 2_500_000) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function shopifyIdFromProductCode(code: string): string | null {
+  const m = /^shopify-(\d+)$/.exec(code.trim());
+  return m?.[1] ?? (/^\d+$/.test(code.trim()) ? code.trim() : null);
+}
+
+/**
+ * For every catalog line without an uploaded image, pull the known Shopify
+ * featured image (DB cache, then live Admin backfill) so the vendor PDF shows designs.
+ */
+async function resolveCatalogDesignAttachments(
+  order: VendorOrder,
+  existing: AttachmentBytes[],
+): Promise<AttachmentBytes[]> {
+  const hasImage = new Set(
+    existing
+      .filter((a) => a.kind === "image" || isEmbeddableImage(a.mimeType, a.filename))
+      .map((a) => a.itemId),
+  );
+  const need = order.items.filter((i) => !i.isCustom && !hasImage.has(i.id));
+  if (!need.length) return [];
+
+  const codes = need.map((i) => i.productId);
+  let catalog = await listProductImageUrlsByCodes(codes);
+
+  const missingShopifyIds: string[] = [];
+  for (const item of need) {
+    const hit = catalog.get(item.productId);
+    if (hit?.imageUrl) continue;
+    const sid =
+      hit?.shopifyProductId ??
+      shopifyIdFromProductCode(item.productId) ??
+      null;
+    if (sid) missingShopifyIds.push(sid);
+  }
+
+  if (missingShopifyIds.length) {
+    const live = createLiveShopifyConnectorFromEnv();
+    if (live?.fetchProductFeaturedImageUrls) {
+      try {
+        const fetched = await live.fetchProductFeaturedImageUrls(missingShopifyIds);
+        for (const [sid, url] of fetched) {
+          await cacheProductImageUrl(sid, url);
+        }
+        catalog = await listProductImageUrlsByCodes(codes);
+      } catch {
+        /* Shopify may be unavailable in preview — skip gracefully */
+      }
+    }
+  }
+
+  const out: AttachmentBytes[] = [];
+  for (const item of need) {
+    const url =
+      item.catalogImageUrl ||
+      catalog.get(item.productId)?.imageUrl ||
+      null;
+    if (!url) continue;
+    const bytes = await fetchImageBytes(url);
+    if (!bytes) continue;
+    const filename = url.split("?")[0]?.split("/").pop() || `${item.productId}.jpg`;
+    out.push({
+      id: `catalog-${item.id}`,
+      itemId: item.id,
+      kind: "image",
+      filename,
+      mimeType: filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg",
+      bytes,
+    });
+  }
+  return out;
 }
 
 export async function generateVendorOrderPdf(orderNumber: string): Promise<{
@@ -136,12 +443,16 @@ export async function generateVendorOrderPdf(orderNumber: string): Promise<{
   if (!order) throw new Error("Vendor order not found");
   const vendor = await getMfgVendor(order.vendorId);
   if (!vendor) throw new Error("Vendor not found");
+  const uploaded = await listVendorOrderAttachmentContents(orderNumber);
+  const catalogDesigns = await resolveCatalogDesignAttachments(order, uploaded);
+  const attachments = [...uploaded, ...catalogDesigns];
   const latest = await getLatestPdfVersion(orderNumber);
   const nextVersion = (latest?.versionNumber ?? 0) + 1;
   const bytes = await buildVendorOrderPdfBuffer({
     order,
     vendor,
     versionNumber: nextVersion,
+    attachments,
   });
   const version = await savePdfVersion({
     orderNumber,

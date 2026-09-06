@@ -3,8 +3,19 @@
  * Balances still come from the ledger; this only shapes/filter/sorts rows.
  */
 
-import type { Product, ReorderRule, StockMovement, Location, VariantStockCell } from "@/lib/domain/types";
+import type {
+  Product,
+  ReorderRule,
+  StockMovement,
+  Location,
+  VariantStockCell,
+} from "@/lib/domain/types";
 import { deriveVariantTotals } from "@/lib/domain/ledger";
+import {
+  buildApparelMatrix,
+  resolvePresentation,
+  type ApparelMatrixRow,
+} from "@/lib/domain/inventory-presentation";
 
 export type StockStockFilter = "all" | "in-stock" | "zero" | "low";
 
@@ -38,6 +49,25 @@ export type StockTableRow = {
   shopifyAdminUrl: string | null;
   shopifyVariantId: string | null;
 };
+
+/** Flat variant row, or one apparel product collapsed into a Colour × Size matrix. */
+export type StockCatalogEntry =
+  | { kind: "variant"; key: string; row: StockTableRow }
+  | {
+      kind: "apparel";
+      key: string;
+      product: Product;
+      matrix: ApparelMatrixRow[];
+      variantRows: StockTableRow[];
+      studio: number;
+      partner: number;
+      channel: number;
+      damaged: number;
+      total: number;
+      lowStock: boolean;
+      lowStockVariantIds: string[];
+      shopifyAdminUrl: string | null;
+    };
 
 function minQtyFor(rules: ReorderRule[], productId: string, variantId: string): number | undefined {
   const exact = rules.find(
@@ -89,6 +119,71 @@ export function buildStockTableRows(input: {
     }
   }
   return rows;
+}
+
+/**
+ * Collapse apparel (T-shirt) products into Colour × Size matrix entries so the
+ * stock screen is not one endless row per size. Other products stay flat.
+ */
+export function buildStockCatalogEntries(rows: StockTableRow[]): StockCatalogEntry[] {
+  const byProduct = new Map<string, StockTableRow[]>();
+  for (const row of rows) {
+    const list = byProduct.get(row.productId) ?? [];
+    list.push(row);
+    byProduct.set(row.productId, list);
+  }
+
+  const entries: StockCatalogEntry[] = [];
+  for (const [, variantRows] of byProduct) {
+    const product = variantRows[0]!.product;
+    if (resolvePresentation(product) === "matrix-apparel") {
+      const cells = variantRows.map((r) => r.cell);
+      const matrix = buildApparelMatrix(product, cells);
+      if (matrix.length > 0) {
+        const lowStockVariantIds = variantRows.filter((r) => r.lowStock).map((r) => r.variantId);
+        entries.push({
+          kind: "apparel",
+          key: `apparel:${product.id}`,
+          product,
+          matrix,
+          variantRows,
+          studio: variantRows.reduce((s, r) => s + r.studio, 0),
+          partner: variantRows.reduce((s, r) => s + r.partner, 0),
+          channel: variantRows.reduce((s, r) => s + r.channel, 0),
+          damaged: variantRows.reduce((s, r) => s + r.damaged, 0),
+          total: variantRows.reduce((s, r) => s + r.total, 0),
+          lowStock: lowStockVariantIds.length > 0,
+          lowStockVariantIds,
+          shopifyAdminUrl: product.shopifyAdminUrl ?? null,
+        });
+        continue;
+      }
+    }
+    for (const row of variantRows) {
+      entries.push({ kind: "variant", key: row.key, row });
+    }
+  }
+  return entries;
+}
+
+/**
+ * When filtering Zero/Low, keep the full apparel matrix for a product if any
+ * size matches — otherwise founders only see orphan sizes.
+ */
+export function rowsForStockCatalogView(
+  allRows: StockTableRow[],
+  filteredRows: StockTableRow[],
+): StockTableRow[] {
+  const matchedProductIds = new Set(
+    filteredRows
+      .filter((r) => resolvePresentation(r.product) === "matrix-apparel")
+      .map((r) => r.productId),
+  );
+  if (!matchedProductIds.size) return filteredRows;
+  const extras = allRows.filter(
+    (r) => matchedProductIds.has(r.productId) && !filteredRows.some((f) => f.key === r.key),
+  );
+  return extras.length ? [...filteredRows, ...extras] : filteredRows;
 }
 
 export function uniqueStockCategories(rows: StockTableRow[]): string[] {
@@ -145,6 +240,43 @@ export function sortStockTableRows(rows: StockTableRow[], sort: StockSortKey): S
       case "title-asc":
       default:
         return byTitle(a, b);
+    }
+  });
+  return copy;
+}
+
+/** Sort catalog entries (apparel blocks + flat variants) for the stock screen. */
+export function sortStockCatalogEntries(
+  entries: StockCatalogEntry[],
+  sort: StockSortKey,
+): StockCatalogEntry[] {
+  const copy = [...entries];
+  const title = (e: StockCatalogEntry) =>
+    e.kind === "apparel" ? e.product.title : e.row.productTitle;
+  const category = (e: StockCatalogEntry) =>
+    e.kind === "apparel" ? e.product.category || "Uncategorised" : e.row.category;
+  const total = (e: StockCatalogEntry) => (e.kind === "apparel" ? e.total : e.row.total);
+  const studio = (e: StockCatalogEntry) => (e.kind === "apparel" ? e.studio : e.row.studio);
+  const sku = (e: StockCatalogEntry) =>
+    e.kind === "apparel" ? e.product.sku : e.row.variantSku || e.row.productSku;
+
+  copy.sort((a, b) => {
+    switch (sort) {
+      case "title-desc":
+        return title(b).localeCompare(title(a));
+      case "category-asc":
+        return category(a).localeCompare(category(b)) || title(a).localeCompare(title(b));
+      case "total-desc":
+        return total(b) - total(a) || title(a).localeCompare(title(b));
+      case "total-asc":
+        return total(a) - total(b) || title(a).localeCompare(title(b));
+      case "studio-desc":
+        return studio(b) - studio(a) || title(a).localeCompare(title(b));
+      case "sku-asc":
+        return sku(a).localeCompare(sku(b)) || title(a).localeCompare(title(b));
+      case "title-asc":
+      default:
+        return title(a).localeCompare(title(b));
     }
   });
   return copy;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   manufactureReorderHref,
+  parseManufactureReorderLines,
   suggestedReorderQty,
 } from "@/lib/domain/manufacture-reorder-link";
 
@@ -22,6 +23,27 @@ describe("manufactureReorderHref", () => {
     expect(manufactureReorderHref({ productId: "", filter: "zero" })).toBe(
       "/manufacture/needs?filter=zero",
     );
+  });
+
+  it("encodes multi-line apparel reorder payloads", () => {
+    const href = manufactureReorderHref({
+      productId: "prod-tee",
+      variantId: "v1",
+      quantity: 10,
+      lines: [
+        { variantId: "v1", quantity: 10, label: "Black / S" },
+        { variantId: "v2", quantity: 5, label: "Black / M" },
+      ],
+    });
+    expect(href).toContain("make=prod-tee");
+    expect(href).toContain("lines=");
+    const lines = parseManufactureReorderLines(
+      new URL(href, "https://aarla.test").searchParams.get("lines"),
+    );
+    expect(lines).toEqual([
+      { variantId: "v1", quantity: 10, label: "Black / S" },
+      { variantId: "v2", quantity: 5, label: "Black / M" },
+    ]);
   });
 });
 

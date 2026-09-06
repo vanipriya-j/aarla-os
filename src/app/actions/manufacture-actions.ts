@@ -18,6 +18,10 @@ import {
   createMfgVendor,
   createVendorOrder,
   addVendorOrderItems,
+  addCustomVendorOrderItem,
+  addVendorOrderItemAttachments,
+  updateVendorOrderItem,
+  removeVendorOrderItem,
   getMfgVendor,
   getVendorOrder,
   getWorkflowInstanceForOrder,
@@ -251,6 +255,72 @@ export async function addVendorOrderItemsAction(
 ) {
   try {
     const order = await addVendorOrderItems(orderNumber, items);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Edit quantity / unit cost on a draft vendor PO line. */
+export async function updateVendorOrderItemAction(
+  orderNumber: string,
+  itemId: string,
+  patch: { quantity?: number; unitCost?: number | null },
+) {
+  try {
+    const order = await updateVendorOrderItem(orderNumber, itemId, patch);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Remove a line from a draft vendor PO. */
+export async function removeVendorOrderItemAction(orderNumber: string, itemId: string) {
+  try {
+    const order = await removeVendorOrderItem(orderNumber, itemId);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Add a custom (non-catalog) line with optional image/design files (base64). */
+export async function addCustomVendorOrderItemAction(
+  orderNumber: string,
+  input: {
+    name: string;
+    quantity: number;
+    description?: string;
+    attachments?: Array<{
+      kind: "image" | "design";
+      filename: string;
+      mimeType: string;
+      contentBase64: string;
+    }>;
+  },
+) {
+  try {
+    const order = await addCustomVendorOrderItem(orderNumber, input);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Append image/design files to an existing line. */
+export async function addVendorOrderItemAttachmentsAction(
+  orderNumber: string,
+  itemId: string,
+  files: Array<{
+    kind: "image" | "design";
+    filename: string;
+    mimeType: string;
+    contentBase64: string;
+  }>,
+) {
+  try {
+    const order = await addVendorOrderItemAttachments(orderNumber, itemId, files);
     return { ok: true as const, data: order };
   } catch (e) {
     return fail(e);

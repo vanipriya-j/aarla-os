@@ -8,11 +8,14 @@ import { DiagnosticsPagination } from "@/components/customer-calls/DiagnosticsPa
 import { inputClass, selectClass } from "@/components/ui/FormSection";
 import {
   STOCK_TABLE_PAGE_SIZE,
+  buildStockCatalogEntries,
   buildStockTableRows,
   filterStockTableRows,
   paginateStockTableRows,
-  sortStockTableRows,
+  rowsForStockCatalogView,
+  sortStockCatalogEntries,
   uniqueStockCategories,
+  type StockCatalogEntry,
   type StockSortKey,
   type StockStockFilter,
   type StockTableRow,
@@ -25,6 +28,8 @@ import {
 import { Search, RefreshCw } from "lucide-react";
 import { ShopifyIcon } from "@/components/icons/ShopifyIcon";
 import { Button } from "@/components/ui/Button";
+import { StockMatrix } from "@/components/inventory/StockMatrix";
+import { ApparelReorderModal } from "@/components/inventory/ApparelReorderModal";
 import { newCommerceSyncLockToken } from "@/lib/client/commerce-sync-auto-retry";
 import {
   pullShopifyAvailableRowViaApi,
@@ -87,11 +92,16 @@ export function StockCatalogPanel({
   const [page, setPage] = useState(1);
   const [rowSyncing, setRowSyncing] = useState<string | null>(null);
   const [rowSyncMsg, setRowSyncMsg] = useState<string | null>(null);
+  const [apparelReorder, setApparelReorder] = useState<StockCatalogEntry & { kind: "apparel" } | null>(
+    null,
+  );
 
   const allRows = useMemo(
     () => buildStockTableRows({ products, movements, locations, reorderRules }),
     [products, movements, locations, reorderRules],
   );
+
+  const allEntries = useMemo(() => buildStockCatalogEntries(allRows), [allRows]);
 
   const categories = useMemo(() => uniqueStockCategories(allRows), [allRows]);
 
@@ -105,14 +115,32 @@ export function StockCatalogPanel({
     [allRows, category, query, stockFilter],
   );
 
-  const sorted = useMemo(() => sortStockTableRows(filtered, sort), [filtered, sort]);
-
-  const paged = useMemo(
-    () => paginateStockTableRows(sorted, page, STOCK_TABLE_PAGE_SIZE),
-    [sorted, page],
+  const catalogRows = useMemo(
+    () => rowsForStockCatalogView(allRows, filtered),
+    [allRows, filtered],
   );
 
-  // Keep page in range when filters shrink the result set.
+  const entries = useMemo(() => {
+    const grouped = buildStockCatalogEntries(catalogRows);
+    return sortStockCatalogEntries(grouped, sort);
+  }, [catalogRows, sort]);
+
+  const paged = useMemo(
+    () => paginateStockTableRows(entries, page, STOCK_TABLE_PAGE_SIZE),
+    [entries, page],
+  );
+
+  const flatRowsOnPage = useMemo(
+    () =>
+      paged.pageRows.flatMap((e) => (e.kind === "variant" ? [e.row] : [])),
+    [paged.pageRows],
+  );
+
+  const apparelOnPage = useMemo(
+    () => paged.pageRows.filter((e): e is StockCatalogEntry & { kind: "apparel" } => e.kind === "apparel"),
+    [paged.pageRows],
+  );
+
   useEffect(() => {
     if (page !== paged.page) setPage(paged.page);
   }, [page, paged.page]);
@@ -187,6 +215,10 @@ export function StockCatalogPanel({
     }
   };
 
+  const selectFromCell = (product: Product, cell: StockTableRow["cell"], label: string) => {
+    onSelectVariant({ product, cell, variantLabel: label });
+  };
+
   return (
     <div className="space-y-4" data-testid="stock-catalog-panel">
       {rowSyncMsg ? (
@@ -206,10 +238,14 @@ export function StockCatalogPanel({
           }}
         >
           All types
-          <span className="ml-1.5 tabular-nums opacity-80">{allRows.length}</span>
+          <span className="ml-1.5 tabular-nums opacity-80">{allEntries.length}</span>
         </button>
         {categories.map((cat) => {
-          const count = allRows.filter((r) => r.category === cat).length;
+          const count = allEntries.filter((e) =>
+            e.kind === "apparel"
+              ? (e.product.category || "Uncategorised") === cat
+              : e.row.category === cat,
+          ).length;
           return (
             <button
               key={cat}
@@ -299,150 +335,228 @@ export function StockCatalogPanel({
         ) : null}
       </div>
 
-      <DataTable
-        rows={paged.pageRows}
-        rowKey={(r) => r.key}
-        emptyMessage={
-          query || category !== "all" || stockFilter !== "all"
-            ? "No variants match these filters."
-            : "No products in the catalog yet."
-        }
-        onRowClick={(r) =>
-          onSelectVariant({
-            product: r.product,
-            cell: r.cell,
-            variantLabel: r.variantLabel,
-          })
-        }
-        columns={[
-          {
-            key: "product",
-            header: "Product",
-            render: (r) => (
-              <div className="min-w-[10rem]">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
+      {apparelOnPage.length ? (
+        <div className="space-y-4" data-testid="stock-apparel-blocks">
+          {apparelOnPage.map((block) => (
+            <div
+              key={block.key}
+              className="rounded-2xl border border-border bg-white overflow-hidden"
+              data-testid={`stock-apparel-${block.product.id}`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-border bg-pale-cream/60">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Link
-                      href={`/products/${r.productId}`}
-                      onClick={(e) => e.stopPropagation()}
+                      href={`/products/${block.product.id}`}
                       className="font-medium text-deep-navy hover:text-aarla-red"
                     >
-                      {r.productTitle}
+                      {block.product.title}
                     </Link>
-                    <p className="text-xs text-charcoal/50">{r.productSku}</p>
+                    {block.shopifyAdminUrl ? (
+                      <a
+                        href={block.shopifyAdminUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Edit in Shopify Admin"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[#96bf48] hover:bg-[#96bf48]/15"
+                      >
+                        <ShopifyIcon className="h-4 w-4" />
+                      </a>
+                    ) : null}
+                    {block.lowStock ? <StatusChip label="Low stock" tone="warning" /> : null}
                   </div>
-                  {r.shopifyAdminUrl ? (
-                    <a
-                      href={r.shopifyAdminUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      title="Edit in Shopify Admin"
-                      aria-label={`Edit ${r.productTitle} in Shopify Admin`}
-                      data-testid="stock-shopify-admin-link"
-                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#96bf48] hover:bg-[#96bf48]/15 hover:text-[#5e8e3e]"
-                    >
-                      <ShopifyIcon className="h-4 w-4" />
-                    </a>
-                  ) : null}
-                  {r.shopifyVariantId || r.product.shopifyProductId || r.variantSku ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void syncShopifyRow(r);
-                      }}
-                      disabled={!!rowSyncing}
-                      title="Pull Shopify Available into Studio for this SKU"
-                      aria-label={`Pull Shopify stock for ${r.productTitle} into Studio`}
-                      data-testid="stock-row-sync"
-                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-deep-navy hover:bg-pale-cream disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        className={`h-3.5 w-3.5 ${rowSyncing === r.key ? "animate-spin" : ""}`}
-                      />
-                    </button>
+                  <p className="text-xs text-charcoal/50 mt-0.5">
+                    {block.product.category || "T-Shirt"} · {block.product.sku} · Colour × Size
+                  </p>
+                  <p className="text-xs text-charcoal/55 mt-1 tabular-nums">
+                    Studio {block.studio} · Partner {block.partner} · Channel {block.channel} ·
+                    Total {block.total}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={block.total <= 0 || block.lowStock ? "primary" : "outline"}
+                  onClick={() => setApparelReorder(block)}
+                  data-testid="stock-apparel-reorder"
+                >
+                  Reorder sizes
+                </Button>
+              </div>
+              <div className="p-2 md:p-3">
+                <StockMatrix
+                  rows={block.matrix}
+                  rowHeader="Colour"
+                  columnHeader="Size"
+                  lowStockVariantIds={new Set(block.lowStockVariantIds)}
+                  onCellClick={(cell) => {
+                    const variant = block.product.variants.find((v) => v.id === cell.variantId);
+                    selectFromCell(
+                      block.product,
+                      cell,
+                      variant?.label ?? cell.variantId,
+                    );
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {flatRowsOnPage.length ? (
+        <DataTable
+          rows={flatRowsOnPage}
+          rowKey={(r) => r.key}
+          emptyMessage={
+            query || category !== "all" || stockFilter !== "all"
+              ? "No variants match these filters."
+              : "No products in the catalog yet."
+          }
+          onRowClick={(r) =>
+            onSelectVariant({
+              product: r.product,
+              cell: r.cell,
+              variantLabel: r.variantLabel,
+            })
+          }
+          columns={[
+            {
+              key: "product",
+              header: "Product",
+              render: (r) => (
+                <div className="min-w-[10rem]">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`/products/${r.productId}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium text-deep-navy hover:text-aarla-red"
+                      >
+                        {r.productTitle}
+                      </Link>
+                      <p className="text-xs text-charcoal/50">{r.productSku}</p>
+                    </div>
+                    {r.shopifyAdminUrl ? (
+                      <a
+                        href={r.shopifyAdminUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Edit in Shopify Admin"
+                        aria-label={`Edit ${r.productTitle} in Shopify Admin`}
+                        data-testid="stock-shopify-admin-link"
+                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#96bf48] hover:bg-[#96bf48]/15 hover:text-[#5e8e3e]"
+                      >
+                        <ShopifyIcon className="h-4 w-4" />
+                      </a>
+                    ) : null}
+                    {r.shopifyVariantId || r.product.shopifyProductId || r.variantSku ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void syncShopifyRow(r);
+                        }}
+                        disabled={!!rowSyncing}
+                        title="Pull Shopify Available into Studio for this SKU"
+                        aria-label={`Pull Shopify stock for ${r.productTitle} into Studio`}
+                        data-testid="stock-row-sync"
+                        className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-deep-navy hover:bg-pale-cream disabled:opacity-50"
+                      >
+                        <RefreshCw
+                          className={`h-3.5 w-3.5 ${rowSyncing === r.key ? "animate-spin" : ""}`}
+                        />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "type",
+              header: "Type",
+              render: (r) => <span className="text-charcoal/70">{r.category}</span>,
+            },
+            {
+              key: "variant",
+              header: "Variant",
+              render: (r) => <span className="font-medium text-deep-navy">{r.variantLabel}</span>,
+            },
+            {
+              key: "sku",
+              header: "SKU",
+              render: (r) => r.variantSku || "—",
+            },
+            {
+              key: "studio",
+              header: "Studio",
+              render: (r) => <span className="tabular-nums">{r.studio}</span>,
+            },
+            {
+              key: "partner",
+              header: "Partner",
+              render: (r) => <span className="tabular-nums">{r.partner}</span>,
+            },
+            {
+              key: "channel",
+              header: "Channel",
+              render: (r) => <span className="tabular-nums">{r.channel}</span>,
+            },
+            {
+              key: "damaged",
+              header: "Damaged",
+              render: (r) => <span className="tabular-nums">{r.damaged}</span>,
+            },
+            {
+              key: "total",
+              header: "Total",
+              render: (r) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
+                  {r.lowStock && r.total > 0 ? (
+                    <StatusChip label="Low stock" tone="warning" />
                   ) : null}
                 </div>
-              </div>
-            ),
-          },
-          {
-            key: "type",
-            header: "Type",
-            render: (r) => <span className="text-charcoal/70">{r.category}</span>,
-          },
-          {
-            key: "variant",
-            header: "Variant",
-            render: (r) => <span className="font-medium text-deep-navy">{r.variantLabel}</span>,
-          },
-          {
-            key: "sku",
-            header: "SKU",
-            render: (r) => r.variantSku || "—",
-          },
-          {
-            key: "studio",
-            header: "Studio",
-            render: (r) => <span className="tabular-nums">{r.studio}</span>,
-          },
-          {
-            key: "partner",
-            header: "Partner",
-            render: (r) => <span className="tabular-nums">{r.partner}</span>,
-          },
-          {
-            key: "channel",
-            header: "Channel",
-            render: (r) => <span className="tabular-nums">{r.channel}</span>,
-          },
-          {
-            key: "damaged",
-            header: "Damaged",
-            render: (r) => <span className="tabular-nums">{r.damaged}</span>,
-          },
-          {
-            key: "total",
-            header: "Total",
-            render: (r) => (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium tabular-nums text-deep-navy">{r.total}</span>
-                {r.lowStock && r.total > 0 ? (
-                  <StatusChip label="Low stock" tone="warning" />
-                ) : null}
-              </div>
-            ),
-          },
-          {
-            key: "make",
-            header: "Reorder",
-            render: (r) => {
-              const suggested = suggestedReorderQty(r.total);
-              const label =
-                r.variantLabel && r.variantLabel !== "Default"
-                  ? `${r.productTitle} / ${r.variantLabel}`
-                  : r.productTitle;
-              return (
-                <Link
-                  href={manufactureReorderHref({
-                    productId: r.productId,
-                    variantId: r.variantId,
-                    quantity: suggested,
-                    label,
-                  })}
-                  onClick={(e) => e.stopPropagation()}
-                  data-testid="stock-row-reorder"
-                >
-                  <Button size="sm" variant={r.total <= 0 || r.lowStock ? "primary" : "outline"}>
-                    Reorder
-                  </Button>
-                </Link>
-              );
+              ),
             },
-          },
-        ]}
-      />
+            {
+              key: "make",
+              header: "Reorder",
+              render: (r) => {
+                const suggested = suggestedReorderQty(r.total);
+                const label =
+                  r.variantLabel && r.variantLabel !== "Default"
+                    ? `${r.productTitle} / ${r.variantLabel}`
+                    : r.productTitle;
+                return (
+                  <Link
+                    href={manufactureReorderHref({
+                      productId: r.productId,
+                      variantId: r.variantId,
+                      quantity: suggested,
+                      label,
+                    })}
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid="stock-row-reorder"
+                  >
+                    <Button size="sm" variant={r.total <= 0 || r.lowStock ? "primary" : "outline"}>
+                      Reorder
+                    </Button>
+                  </Link>
+                );
+              },
+            },
+          ]}
+        />
+      ) : null}
+
+      {!apparelOnPage.length && !flatRowsOnPage.length ? (
+        <p className="text-sm text-charcoal/55 rounded-xl border border-dashed border-border px-4 py-8 text-center">
+          {query || category !== "all" || stockFilter !== "all"
+            ? "No products match these filters."
+            : "No products in the catalog yet."}
+        </p>
+      ) : null}
 
       <DiagnosticsPagination
         page={paged.page}
@@ -454,10 +568,19 @@ export function StockCatalogPanel({
       />
 
       <p className="text-xs text-charcoal/50">
-        One row per variant. Click a row for location breakdown, transfer, or adjust.{" "}
-        <strong>Reorder</strong> opens Needs Making to add the SKU to a vendor PO (multi-product
-        orders supported). Filter Zero / Low stock for restock candidates.
+        T-shirts show as Colour × Size matrices (one block per design). Other products stay one row
+        per variant. Click a size cell for location breakdown.{" "}
+        <strong>Reorder sizes</strong> opens a colour/size qty popup, then Needs Making.
       </p>
+
+      {apparelReorder ? (
+        <ApparelReorderModal
+          open
+          onClose={() => setApparelReorder(null)}
+          product={apparelReorder.product}
+          cells={apparelReorder.variantRows.map((r) => r.cell)}
+        />
+      ) : null}
     </div>
   );
 }
