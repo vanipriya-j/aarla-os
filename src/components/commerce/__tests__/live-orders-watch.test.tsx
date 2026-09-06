@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { LiveOrdersWatch } from "@/components/commerce/LiveOrdersWatch";
+import {
+  formatLiveSyncAt,
+  LiveOrdersWatch,
+} from "@/components/commerce/LiveOrdersWatch";
 
 vi.mock("@/components/customer-calls/CommerceSyncProvider", () => ({
   useCommerceSync: () => ({ busy: false }),
 }));
+
+describe("formatLiveSyncAt", () => {
+  it("shows time only for today", () => {
+    const now = new Date("2026-09-06T12:00:00");
+    const at = new Date("2026-09-06T09:24:00");
+    expect(formatLiveSyncAt(at, now)).toMatch(/9:24/);
+  });
+});
 
 describe("LiveOrdersWatch", () => {
   beforeEach(() => {
@@ -17,13 +28,16 @@ describe("LiveOrdersWatch", () => {
           ok: true,
           data: {
             skipped: false,
-            ordersRead: 0,
-            ordersUpserted: 0,
-            fulfilCreated: 0,
-            salesPosted: 0,
+            ordersRead: 3,
+            ordersUpserted: 3,
+            fulfilCreated: 2,
+            salesPosted: 1,
             salesSkipped: 0,
-            newFulfilmentIds: [],
-            openStockCheck: [],
+            newFulfilmentIds: ["f1", "f2"],
+            openStockCheck: [
+              { id: "f1", orderNumber: "#1604", customerName: "NAGASIMHA S" },
+              { id: "f2", orderNumber: "#1609", customerName: "Sruti" },
+            ],
           },
         }),
       }),
@@ -38,5 +52,42 @@ describe("LiveOrdersWatch", () => {
     await user.click(enable);
     expect(localStorage.getItem("aarla.liveOrders.enabled")).toBe("1");
     expect(screen.getByRole("button", { name: /Pause/i })).toBeInTheDocument();
+  });
+
+  it("Check now walks checking → got orders → syncing → done with last sync", async () => {
+    localStorage.setItem("aarla.liveOrders.enabled", "1");
+    const user = userEvent.setup();
+    render(<LiveOrdersWatch />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("live-orders-check-now")).toBeInTheDocument();
+    });
+
+    // Wait for initial auto tick to finish seeding.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("live-orders-status").textContent).toMatch(
+          /Last sync at|Live watch on|Done/i,
+        );
+      },
+      { timeout: 3000 },
+    );
+
+    await user.click(screen.getByTestId("live-orders-check-now"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("live-orders-status").textContent).toMatch(
+        /Checking now|Got |Syncing|Done/i,
+      );
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("live-orders-status").textContent).toMatch(
+          /Last sync at/i,
+        );
+      },
+      { timeout: 5000 },
+    );
   });
 });

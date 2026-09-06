@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, BellOff, Volume2 } from "lucide-react";
+import { Bell, BellOff, Loader2, Volume2 } from "lucide-react";
 import { useCommerceSync } from "@/components/customer-calls/CommerceSyncProvider";
 
 const ENABLED_KEY = "aarla.liveOrders.enabled";
 const SEEN_KEY = "aarla.liveOrders.seenIds";
+const LAST_SYNC_KEY = "aarla.liveOrders.lastSyncAt";
 const POLL_MS = 45_000;
 const POLL_HIDDEN_MS = 90_000;
 
@@ -26,6 +27,33 @@ type TickData = {
   }>;
 };
 
+export type LiveCheckPhase = "idle" | "checking" | "got-orders" | "syncing" | "done";
+
+/** Founder-facing clock for “Last sync at …”. */
+export function formatLiveSyncAt(isoOrDate: string | Date, now = new Date()): string {
+  const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (sameDay) return time;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function newLockToken(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -38,6 +66,22 @@ function readEnabled(): boolean {
     return localStorage.getItem(ENABLED_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function readLastSyncAt(): string | null {
+  try {
+    return localStorage.getItem(LAST_SYNC_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSyncAt(iso: string) {
+  try {
+    localStorage.setItem(LAST_SYNC_KEY, iso);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -116,6 +160,13 @@ function notifyNewOrders(
   playOrderChime();
 }
 
+function idleStatus(lastSyncAt: string | null): string {
+  if (lastSyncAt) {
+    return `Live watch on · Last sync at ${formatLiveSyncAt(lastSyncAt)}`;
+  }
+  return "Live watch on — listening for new Shopify orders";
+}
+
 /**
  * App-wide live Shopify order desk: polls incremental sync, pulls into Fulfil,
  * plays sound + browser notification when new stock-check orders appear.
@@ -126,6 +177,8 @@ export function LiveOrdersWatch() {
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
+  const [phase, setPhase] = useState<LiveCheckPhase>("idle");
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const ticking = useRef(false);
   const seenRef = useRef<Set<string>>(new Set());
   const seededRef = useRef(false);
@@ -133,96 +186,141 @@ export function LiveOrdersWatch() {
   useEffect(() => {
     setEnabled(readEnabled());
     seenRef.current = readSeen();
+    const last = readLastSyncAt();
+    setLastSyncAt(last);
+    if (readEnabled() && last) {
+      setStatus(idleStatus(last));
+    }
     setHydrated(true);
   }, []);
 
-  const runTick = useCallback(async () => {
-    if (ticking.current || busy) return;
-    ticking.current = true;
-    const token = newLockToken();
-    try {
-      const res = await fetch("/api/commerce/live-orders/tick", {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ lockToken: token, maxChunks: 3 }),
-        cache: "no-store",
-      });
-      const json = (await res.json()) as
-        | { ok: true; data: TickData }
-        | { ok: false; error: string };
-      if (!json.ok) {
-        setStatus(json.error);
-        return;
-      }
-      const data = json.data;
-      if (data.skipped) {
-        setStatus(data.reason ?? "Live watch skipped (sync busy)");
-        return;
-      }
-
-      const openIds = data.openStockCheck.map((o) => o.id);
-      if (!seededRef.current) {
-        for (const id of openIds) seenRef.current.add(id);
-        writeSeen(seenRef.current);
-        seededRef.current = true;
-        setStatus(
-          data.fulfilCreated
-            ? `Live watch on — pulled ${data.fulfilCreated} order(s) into Fulfil`
-            : "Live watch on — listening for new Shopify orders",
-        );
-        return;
-      }
-
-      const fresh = data.openStockCheck.filter((o) => !seenRef.current.has(o.id));
-      for (const id of openIds) seenRef.current.add(id);
-      for (const id of data.newFulfilmentIds) seenRef.current.add(id);
-      writeSeen(seenRef.current);
-
-      if (fresh.length || data.fulfilCreated > 0) {
-        const alertOrders =
-          fresh.length > 0
-            ? fresh
-            : data.openStockCheck.filter((o) => data.newFulfilmentIds.includes(o.id));
-        if (alertOrders.length) {
-          notifyNewOrders(alertOrders);
-          setAlert(
-            alertOrders.length === 1
-              ? `New order ${alertOrders[0]?.orderNumber} — open Fulfil`
-              : `${alertOrders.length} new orders — open Fulfil`,
-          );
+  const runTick = useCallback(
+    async (opts?: { manual?: boolean }) => {
+      if (ticking.current || busy) return;
+      ticking.current = true;
+      const manual = Boolean(opts?.manual);
+      const token = newLockToken();
+      setPhase("checking");
+      setStatus("Checking now…");
+      try {
+        const res = await fetch("/api/commerce/live-orders/tick", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ lockToken: token, maxChunks: 3 }),
+          cache: "no-store",
+        });
+        const json = (await res.json()) as
+          | { ok: true; data: TickData }
+          | { ok: false; error: string };
+        if (!json.ok) {
+          setPhase("idle");
+          setStatus(json.error);
+          return;
         }
+        const data = json.data;
+        if (data.skipped) {
+          setPhase("idle");
+          setStatus(data.reason ?? "Live watch skipped (sync busy)");
+          return;
+        }
+
+        const gotCount = Math.max(data.ordersUpserted, data.ordersRead, data.fulfilCreated);
+        setPhase("got-orders");
+        if (gotCount > 0) {
+          setStatus(
+            gotCount === 1 ? "Got 1 order…" : `Got ${gotCount} orders…`,
+          );
+        } else {
+          setStatus("No new orders from Shopify…");
+        }
+        if (manual) await sleep(450);
+
+        setPhase("syncing");
         setStatus(
-          `Pulled ${data.fulfilCreated} · sales posted ${data.salesPosted}` +
-            (data.ordersRead ? ` · Shopify read ${data.ordersRead}` : ""),
+          data.fulfilCreated > 0
+            ? `Syncing details into Fulfil (${data.fulfilCreated})…`
+            : "Syncing details…",
         );
-      } else {
-        setStatus(
-          data.ordersRead
-            ? `Checked Shopify (${data.ordersRead} order rows) — no new fulfil work`
-            : "Checked Shopify — no new orders",
-        );
+        if (manual) await sleep(400);
+
+        const openIds = data.openStockCheck.map((o) => o.id);
+        const syncedAt = new Date().toISOString();
+        writeLastSyncAt(syncedAt);
+        setLastSyncAt(syncedAt);
+
+        if (!seededRef.current) {
+          for (const id of openIds) seenRef.current.add(id);
+          writeSeen(seenRef.current);
+          seededRef.current = true;
+          setPhase("done");
+          setStatus(
+            data.fulfilCreated
+              ? `Done — pulled ${data.fulfilCreated} into Fulfil · Last sync at ${formatLiveSyncAt(syncedAt)}`
+              : `Done · Last sync at ${formatLiveSyncAt(syncedAt)}`,
+          );
+          return;
+        }
+
+        const fresh = data.openStockCheck.filter((o) => !seenRef.current.has(o.id));
+        for (const id of openIds) seenRef.current.add(id);
+        for (const id of data.newFulfilmentIds) seenRef.current.add(id);
+        writeSeen(seenRef.current);
+
+        if (fresh.length || data.fulfilCreated > 0) {
+          const alertOrders =
+            fresh.length > 0
+              ? fresh
+              : data.openStockCheck.filter((o) => data.newFulfilmentIds.includes(o.id));
+          if (alertOrders.length) {
+            notifyNewOrders(alertOrders);
+            setAlert(
+              alertOrders.length === 1
+                ? `New order ${alertOrders[0]?.orderNumber} — open Fulfil`
+                : `${alertOrders.length} new orders — open Fulfil`,
+            );
+          }
+        }
+
+        setPhase("done");
+        const bits = ["Done"];
+        if (data.fulfilCreated > 0) bits.push(`pulled ${data.fulfilCreated}`);
+        if (data.salesPosted > 0) bits.push(`${data.salesPosted} Studio sale(s)`);
+        if (data.fulfilCreated === 0 && data.ordersRead === 0) {
+          bits.push("no new orders");
+        }
+        bits.push(`Last sync at ${formatLiveSyncAt(syncedAt)}`);
+        setStatus(bits.join(" · "));
+      } catch (err) {
+        setPhase("idle");
+        setStatus(err instanceof Error ? err.message : "Live watch failed");
+      } finally {
+        ticking.current = false;
+        // After a beat, settle to the idle “last sync” line if still enabled.
+        window.setTimeout(() => {
+          if (ticking.current) return;
+          setPhase("idle");
+          const last = readLastSyncAt();
+          if (last) setStatus(idleStatus(last));
+        }, 4000);
       }
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Live watch failed");
-    } finally {
-      ticking.current = false;
-    }
-  }, [busy]);
+    },
+    [busy],
+  );
 
   useEffect(() => {
     if (!hydrated || !enabled) return;
-    void runTick();
+    void runTick({ manual: false });
     let timer = window.setInterval(
-      () => void runTick(),
+      () => void runTick({ manual: false }),
       document.visibilityState === "hidden" ? POLL_HIDDEN_MS : POLL_MS,
     );
     const onVis = () => {
       window.clearInterval(timer);
       timer = window.setInterval(
-        () => void runTick(),
+        () => void runTick({ manual: false }),
         document.visibilityState === "hidden" ? POLL_HIDDEN_MS : POLL_MS,
       );
-      if (document.visibilityState === "visible") void runTick();
+      if (document.visibilityState === "visible") void runTick({ manual: false });
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
@@ -248,7 +346,8 @@ export function LiveOrdersWatch() {
     }
     setEnabled(true);
     setAlert(null);
-    setStatus("Live watch enabled");
+    setPhase("idle");
+    setStatus("Live watch enabled — checking…");
   };
 
   const disable = () => {
@@ -260,12 +359,19 @@ export function LiveOrdersWatch() {
     setEnabled(false);
     setStatus(null);
     setAlert(null);
+    setPhase("idle");
   };
 
   if (!hydrated) return null;
 
+  const checking =
+    phase === "checking" || phase === "got-orders" || phase === "syncing";
+
   return (
-    <div className="border-b border-border bg-white/90 px-4 py-2.5 flex flex-wrap items-center gap-3 justify-between">
+    <div
+      className="border-b border-border bg-white/90 px-4 py-2.5 flex flex-wrap items-center gap-3 justify-between"
+      data-testid="live-orders-watch"
+    >
       <div className="min-w-0 space-y-0.5">
         <p className="text-sm font-medium text-deep-navy flex items-center gap-2">
           {enabled ? (
@@ -275,9 +381,9 @@ export function LiveOrdersWatch() {
           )}
           Live Shopify orders
         </p>
-        <p className="text-xs text-charcoal/60">
+        <p className="text-xs text-charcoal/60" data-testid="live-orders-status">
           {enabled
-            ? status ?? "Watching for new paid orders → Fulfil + Studio stock"
+            ? status ?? idleStatus(lastSyncAt)
             : "Turn on to auto-pull new Shopify orders, alert with sound, and deduct Studio stock."}
         </p>
         {alert ? (
@@ -294,16 +400,26 @@ export function LiveOrdersWatch() {
           <>
             <button
               type="button"
-              onClick={() => void runTick()}
-              className="text-xs rounded-lg border border-border px-3 py-1.5 text-deep-navy hover:bg-pale-cream"
-              disabled={busy}
+              data-testid="live-orders-check-now"
+              onClick={() => void runTick({ manual: true })}
+              className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border px-3 py-1.5 text-deep-navy hover:bg-pale-cream disabled:opacity-60"
+              disabled={busy || checking}
+              aria-busy={checking}
             >
-              Check now
+              {checking ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+              {phase === "checking"
+                ? "Checking…"
+                : phase === "got-orders"
+                  ? "Got orders…"
+                  : phase === "syncing"
+                    ? "Syncing…"
+                    : "Check now"}
             </button>
             <button
               type="button"
               onClick={disable}
               className="text-xs rounded-lg border border-border px-3 py-1.5 text-charcoal/70 hover:bg-pale-cream"
+              disabled={checking}
             >
               Pause
             </button>
