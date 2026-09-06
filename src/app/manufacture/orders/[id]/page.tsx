@@ -490,9 +490,10 @@ function VendorOrderDetailInner() {
                             </Button>
                             <button
                               type="button"
-                              disabled={pending || order.items.length <= 1}
+                              disabled={pending}
                               className="text-xs text-aarla-red underline disabled:opacity-40"
                               onClick={() => removeLine(item.id)}
+                              data-testid={`vendor-order-line-remove-${item.id}`}
                             >
                               Remove
                             </button>

@@ -756,6 +756,16 @@ async function refreshVendorOrderPricing(orderId: string): Promise<void> {
   );
 }
 
+async function resolveVendorOrderUuid(orderNumber: string): Promise<string> {
+  const idRows = await query<{ id: string }>(
+    `select id from vendor_orders where organization_id = $1 and order_number = $2 limit 1`,
+    [ORG_ID, orderNumber],
+  );
+  const orderId = idRows[0]?.id;
+  if (!orderId) throw new Error("Order not found");
+  return String(orderId);
+}
+
 /** Update quantity (and optional unit cost / description) on a draft / ready-to-send line. */
 export async function updateVendorOrderItem(
   orderNumber: string,
@@ -793,13 +803,14 @@ export async function updateVendorOrderItem(
   const title =
     patch.title !== undefined ? String(patch.title).trim() || item.title : item.title;
 
+  const orderUuid = await resolveVendorOrderUuid(orderNumber);
   await query(
     `update vendor_order_items
      set quantity = $3, unit_cost = $4, line_total = $5, description = $6, title = $7
      where id = $1 and vendor_order_id = $2`,
-    [itemId, existing.id, quantity, unitCost, lineTotal, description, title],
+    [itemId, orderUuid, quantity, unitCost, lineTotal, description, title],
   );
-  await refreshVendorOrderPricing(existing.id);
+  await refreshVendorOrderPricing(orderUuid);
 
   const updated = await getVendorOrder(orderNumber);
   if (!updated) throw new Error("Order not found after update");
@@ -822,15 +833,18 @@ export async function removeVendorOrderItem(
   if (!existing.items.some((i) => i.id === itemId)) {
     throw new Error("Line item not found on this order.");
   }
-  if (existing.items.length <= 1) {
-    throw new Error("Order must keep at least one line. Add another product first, or cancel the PO.");
-  }
 
-  await query(
-    `delete from vendor_order_items where id = $1 and vendor_order_id = $2`,
-    [itemId, existing.id],
+  const orderUuid = await resolveVendorOrderUuid(orderNumber);
+  const deleted = await query<{ id: string }>(
+    `delete from vendor_order_items
+     where id = $1 and vendor_order_id = $2
+     returning id`,
+    [itemId, orderUuid],
   );
-  await refreshVendorOrderPricing(existing.id);
+  if (!deleted[0]) {
+    throw new Error("Could not remove that line — refresh and try again.");
+  }
+  await refreshVendorOrderPricing(orderUuid);
 
   const updated = await getVendorOrder(orderNumber);
   if (!updated) throw new Error("Order not found after update");
@@ -1123,7 +1137,7 @@ export async function getVendorOrder(orderNumber: string): Promise<VendorOrder |
     attachmentsByItem.set(String(a.vendor_order_item_id), list);
   }
   return {
-    id: String(r.order_number),
+    id: String(r.id),
     orderNumber: String(r.order_number),
     vendorId: String(r.vendor_code),
     orderDate: dateStr(r.order_date as string | Date) ?? "",
