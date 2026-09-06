@@ -12,6 +12,7 @@ import {
   listVendorOrderAttachmentContents,
   savePdfVersion,
 } from "@/lib/infra/repositories/postgres-manufacture";
+import { formatVendorFacingDate } from "@/lib/application/vendor-communication";
 
 type AttachmentBytes = Awaited<ReturnType<typeof listVendorOrderAttachmentContents>>[number];
 
@@ -131,12 +132,22 @@ export async function buildVendorOrderPdfBuffer(input: {
   doc.fillColor("#1B2A4A").fontSize(10).text("Dates", left, y);
   y += 14;
   doc.fillColor("#333333").fontSize(9);
-  doc.text(`Order date: ${order.orderDate}`, left, y);
+  doc.text(`Order date: ${formatVendorFacingDate(order.orderDate)}`, left, y);
   y += 12;
-  doc.text(`Requested delivery: ${order.requestedDeliveryDate ?? "—"}`, left, y);
+  doc.text(
+    `Requested delivery: ${
+      order.requestedDeliveryDate ? formatVendorFacingDate(order.requestedDeliveryDate) : "—"
+    }`,
+    left,
+    y,
+  );
   y += 12;
   if (order.vendorCommittedDate) {
-    doc.text(`Vendor committed: ${order.vendorCommittedDate}`, left, y);
+    doc.text(
+      `Vendor committed: ${formatVendorFacingDate(order.vendorCommittedDate)}`,
+      left,
+      y,
+    );
     y += 12;
   }
   y += 14;
