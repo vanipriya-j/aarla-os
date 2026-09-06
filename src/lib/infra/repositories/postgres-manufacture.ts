@@ -837,8 +837,8 @@ export async function removeVendorOrderItem(
   return updated;
 }
 
-const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024; // 8 MB
-const MAX_ATTACHMENTS_PER_KIND = 8;
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_ATTACHMENTS_PER_KIND = 5;
 
 export type VendorOrderAttachmentFileInput = {
   kind: "image" | "design";
@@ -934,7 +934,7 @@ async function insertVendorOrderItemAttachment(
   }
   if (content.byteLength === 0) throw new Error(`Empty file: ${filename}`);
   if (content.byteLength > MAX_ATTACHMENT_BYTES) {
-    throw new Error(`${filename} is larger than 8 MB.`);
+    throw new Error(`${filename} is larger than 2 MB.`);
   }
   await query(
     `insert into vendor_order_item_attachments

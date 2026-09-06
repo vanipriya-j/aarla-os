@@ -618,6 +618,9 @@ function VendorOrderDetailInner() {
                           className="mt-1 block w-full text-sm"
                           data-testid="custom-item-images"
                         />
+                        <span className="mt-1 block text-[11px] text-charcoal/45">
+                          Up to 5 images, 2 MB each
+                        </span>
                       </label>
                       <label className="text-xs text-charcoal/60">
                         Design files
@@ -629,6 +632,9 @@ function VendorOrderDetailInner() {
                           className="mt-1 block w-full text-sm"
                           data-testid="custom-item-designs"
                         />
+                        <span className="mt-1 block text-[11px] text-charcoal/45">
+                          PDF, AI, ZIP, etc. — up to 5 files, 2 MB each
+                        </span>
                       </label>
                     </div>
                     <Button
