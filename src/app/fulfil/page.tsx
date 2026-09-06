@@ -13,6 +13,7 @@ import {
   getFulfilmentDetailAction,
   getPackingSuggestionsAction,
   listFulfilmentWorkbenchAction,
+  markPartnerRecallInTransitAction,
   markStorePickupProgressAction,
   receivePartnerRecallAction,
   recordCustomerOutcomeAction,
@@ -382,7 +383,7 @@ export default function FulfilOrdersPage() {
 
                 <FormSection
                   title="Stock check"
-                  description="System qty is ledger projection — not physical truth. Found / Not found does not mutate inventory."
+                  description="Three paths: (1) Found all in studio → Ready to Pack. (2) Rest at reseller → message / pick-up → mark received → Pack. (3) Nowhere → Ask Vani → customer says wait, substitute, or cancel/refund."
                 >
                   <ul className="space-y-3">
                     {detail.lines.map((line) => (
@@ -409,17 +410,22 @@ export default function FulfilOrdersPage() {
                                 : "border-border"
                             }`}
                             onClick={() => {
-                              runAction(`Marking line found…`, async () => {
+                              runAction(`Marking line found in studio…`, async () => {
                                 const res = await setLinePhysicalCheckAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
                                   physicalStatus: "found",
                                 });
-                                await applyDetailResult(res);
+                                await applyDetailResult(
+                                  res,
+                                  "Marked found in studio. When every line is ready, order moves to Ready to Pack.",
+                                );
                               });
                             }}
                           >
-                            {line.physicalStatus === "found" ? "✓ Found physically" : "Found physically"}
+                            {line.physicalStatus === "found"
+                              ? "✓ Found in studio"
+                              : "Found in studio"}
                           </button>
                           <button
                             type="button"
@@ -430,30 +436,40 @@ export default function FulfilOrdersPage() {
                                 : "border-border"
                             }`}
                             onClick={() => {
-                              runAction(`Marking line not found…`, async () => {
+                              runAction(`Marking line not found in studio…`, async () => {
                                 const res = await setLinePhysicalCheckAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
                                   physicalStatus: "not-found",
                                 });
-                                await applyDetailResult(res);
+                                await applyDetailResult(
+                                  res,
+                                  line.partnerStock.length
+                                    ? "Not in studio — arrange from reseller below, or Ask Vani if nowhere."
+                                    : "Not in studio — Ask Vani to speak with the customer.",
+                                );
                               });
                             }}
                           >
-                            {line.physicalStatus === "not-found" ? "✓ Not found" : "Not found"}
+                            {line.physicalStatus === "not-found"
+                              ? "✓ Not in studio"
+                              : "Not in studio"}
                           </button>
                           <button
                             type="button"
                             disabled={pending}
                             className="text-xs px-3 py-1.5 rounded-full border border-border disabled:opacity-50"
                             onClick={() => {
-                              runAction("Escalating to Vani…", async () => {
+                              runAction("Opening Ask Vani (customer call)…", async () => {
                                 const res = await escalateFounderAvailabilityAction({
                                   fulfilmentOrderId: detail.id,
                                   lineId: line.id,
-                                  note: "No studio or partner stock confirmed",
+                                  note: "Not found in studio or reseller — speak to customer",
                                 });
-                                await applyDetailResult(res);
+                                await applyDetailResult(
+                                  res,
+                                  "Ask Vani open — record whether they wait, take a substitute, or cancel/refund.",
+                                );
                               });
                             }}
                           >
@@ -462,9 +478,14 @@ export default function FulfilOrdersPage() {
                         </div>
                         {line.partnerStock.length > 0 ? (
                           <div className="mt-2 text-xs text-charcoal/70 space-y-1">
-                            <p className="font-medium">Partner inventory (not ready until received)</p>
+                            <p className="font-medium">
+                              Reseller stock — arrange pick-up for what’s missing
+                            </p>
                             {line.partnerStock.map((p) => (
-                              <div key={`${p.partnerCode}-${p.locationCode}`} className="flex items-center gap-2">
+                              <div
+                                key={`${p.partnerCode}-${p.locationCode}`}
+                                className="flex items-center gap-2"
+                              >
                                 <span>
                                   {p.partnerName} — {p.qty}
                                 </span>
@@ -481,15 +502,22 @@ export default function FulfilOrdersPage() {
                                         partnerLocationCode: p.locationCode,
                                         quantity: Math.min(line.requiredQuantity, p.qty),
                                       });
-                                      await applyDetailResult(res);
+                                      await applyDetailResult(
+                                        res,
+                                        "Reseller arranged — message them / get it picked, then mark received.",
+                                      );
                                     });
                                   }}
                                 >
-                                  Arrange from partner
+                                  Found at reseller — arrange
                                 </button>
                               </div>
                             ))}
                           </div>
+                        ) : line.physicalStatus === "not-found" ? (
+                          <p className="mt-2 text-xs text-charcoal/55">
+                            No reseller match for this title — Ask Vani if it isn’t in studio.
+                          </p>
                         ) : null}
                       </li>
                     ))}
@@ -497,7 +525,10 @@ export default function FulfilOrdersPage() {
                 </FormSection>
 
                 {detail.tasks.length > 0 ? (
-                  <FormSection title="Open follow-ups" description="Partner recalls, founder and customer decisions.">
+                  <FormSection
+                    title="Open follow-ups"
+                    description="Reseller pick-ups and Ask Vani / customer decisions."
+                  >
                     <ul className="space-y-3 text-sm">
                       {detail.tasks.map((task) => (
                         <li key={task.id} className="border border-border rounded-lg px-3 py-2">
@@ -505,55 +536,97 @@ export default function FulfilOrdersPage() {
                             {task.title} · {task.status}
                           </p>
                           <p className="text-xs text-charcoal/60">{task.description}</p>
-                          {task.taskType === "partner-stock-recall" && task.status !== "received" ? (
-                            <button
-                              type="button"
-                              disabled={pending}
-                              className="mt-2 text-xs underline disabled:opacity-50"
-                              onClick={() => {
-                                const line = detail.lines.find((l) => l.id === task.fulfilmentLineId);
-                                if (!line?.catalogProductCode) {
-                                  setError("Link catalog product on the line before receiving recall.");
-                                  return;
-                                }
-                                runAction("Recording partner stock received…", async () => {
-                                  const res = await receivePartnerRecallAction({
-                                    fulfilmentOrderId: detail.id,
-                                    taskId: task.id,
-                                    productId: line.catalogProductCode!,
-                                    variantId: line.catalogVariantCode ?? undefined,
-                                  });
-                                  await applyDetailResult(res);
-                                });
-                              }}
-                            >
-                              Mark received at Studio (ledger transfer)
-                            </button>
-                          ) : null}
-                          {task.taskType === "founder-availability-decision" && task.status !== "completed" ? (
+                          {task.taskType === "partner-stock-recall" &&
+                          task.status !== "received" &&
+                          task.status !== "completed" ? (
                             <div className="flex flex-wrap gap-2 mt-2">
-                              {(["can-arrange", "cannot-arrange", "alternative-possible"] as const).map((d) => (
+                              {task.status === "requested" ? (
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  className="text-xs px-3 py-1.5 rounded-full border border-border disabled:opacity-50"
+                                  onClick={() => {
+                                    runAction("Recording reseller message / pick-up…", async () => {
+                                      const res = await markPartnerRecallInTransitAction({
+                                        fulfilmentOrderId: detail.id,
+                                        taskId: task.id,
+                                        note: "Message sent / pick-up arranged",
+                                      });
+                                      await applyDetailResult(
+                                        res,
+                                        "Reseller messaged — mark received when stock arrives at Studio.",
+                                      );
+                                    });
+                                  }}
+                                >
+                                  Message sent / pick-up arranged
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                disabled={pending}
+                                className="text-xs px-3 py-1.5 rounded-full border border-deep-navy text-deep-navy disabled:opacity-50"
+                                onClick={() => {
+                                  const line = detail.lines.find(
+                                    (l) => l.id === task.fulfilmentLineId,
+                                  );
+                                  if (!line?.catalogProductCode) {
+                                    setError(
+                                      "Link catalog product on the line before receiving reseller stock.",
+                                    );
+                                    return;
+                                  }
+                                  runAction("Marking received from reseller…", async () => {
+                                    const res = await receivePartnerRecallAction({
+                                      fulfilmentOrderId: detail.id,
+                                      taskId: task.id,
+                                      productId: line.catalogProductCode!,
+                                      variantId: line.catalogVariantCode ?? undefined,
+                                    });
+                                    await applyDetailResult(
+                                      res,
+                                      "Received from reseller — when all lines are ready, order moves to Pack.",
+                                    );
+                                  });
+                                }}
+                              >
+                                Mark received from reseller
+                              </button>
+                            </div>
+                          ) : null}
+                          {task.taskType === "founder-availability-decision" &&
+                          task.status !== "completed" ? (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {(
+                                [
+                                  ["can-arrange", "Can arrange"],
+                                  ["cannot-arrange", "Cannot arrange"],
+                                  ["alternative-possible", "Offer alternative"],
+                                ] as const
+                              ).map(([d, label]) => (
                                 <button
                                   key={d}
                                   type="button"
                                   disabled={pending}
                                   className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
                                   onClick={() => {
-                                    runAction(`Saving founder decision (${d})…`, async () => {
+                                    runAction(`Saving founder decision (${label})…`, async () => {
                                       const res = await recordFounderDecisionAction({
                                         fulfilmentOrderId: detail.id,
                                         taskId: task.id,
                                         decision: d,
                                         expectedAvailabilityAt:
                                           d === "can-arrange"
-                                            ? new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
+                                            ? new Date(Date.now() + 3 * 86400000)
+                                                .toISOString()
+                                                .slice(0, 10)
                                             : null,
                                       });
                                       await applyDetailResult(res);
                                     });
                                   }}
                                 >
-                                  {d}
+                                  {label}
                                 </button>
                               ))}
                             </div>
@@ -562,29 +635,42 @@ export default function FulfilOrdersPage() {
                             <div className="flex flex-wrap gap-2 mt-2">
                               {(
                                 [
-                                  "will-wait",
-                                  "chose-alternative",
-                                  "refund-cancel",
-                                  "follow-up-later",
+                                  ["will-wait", "Customer will wait"],
+                                  ["chose-alternative", "Take something else"],
+                                  ["refund-cancel", "Cancel / refund"],
+                                  ["follow-up-later", "Follow up later"],
                                 ] as const
-                              ).map((o) => (
+                              ).map(([o, label]) => (
                                 <button
                                   key={o}
                                   type="button"
                                   disabled={pending}
-                                  className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
+                                  className={`text-xs px-2 py-1 border rounded-full disabled:opacity-50 ${
+                                    o === "refund-cancel"
+                                      ? "border-aarla-red text-aarla-red"
+                                      : "border-border"
+                                  }`}
                                   onClick={() => {
-                                    runAction(`Saving customer outcome (${o})…`, async () => {
+                                    runAction(`Saving customer outcome (${label})…`, async () => {
                                       const res = await recordCustomerOutcomeAction({
                                         fulfilmentOrderId: detail.id,
                                         taskId: task.id,
                                         outcome: o,
                                       });
-                                      await applyDetailResult(res);
+                                      await applyDetailResult(
+                                        res,
+                                        o === "refund-cancel"
+                                          ? "Marked refund / cancel required."
+                                          : o === "will-wait"
+                                            ? "Customer will wait — keep order open."
+                                            : o === "chose-alternative"
+                                              ? "Customer takes something else — continue fulfilment."
+                                              : "Follow up later noted.",
+                                      );
                                     });
                                   }}
                                 >
-                                  {o}
+                                  {label}
                                 </button>
                               ))}
                             </div>
@@ -602,8 +688,8 @@ export default function FulfilOrdersPage() {
                     title="Picking"
                     description={
                       detail.pickedAt || detail.status === "ready-to-pack"
-                        ? "Physical pick confirmed."
-                        : "Confirm physical pick checklist."
+                        ? "Stock is confirmed — packing is next."
+                        : "Confirm physical pick checklist (legacy orders)."
                     }
                   >
                     <ul className="text-sm space-y-1 mb-3">
@@ -614,13 +700,15 @@ export default function FulfilOrdersPage() {
                         </li>
                       ))}
                     </ul>
-                    {detail.pickedAt || detail.status === "ready-to-pack" || detail.status === "ready-to-ship" ? (
+                    {detail.pickedAt ||
+                    detail.status === "ready-to-pack" ||
+                    detail.status === "ready-to-ship" ? (
                       <p
                         className="inline-flex items-center gap-2 text-sm text-deep-navy"
                         data-testid="fulfil-picked-done"
                       >
                         <CheckCircle2 className="h-4 w-4" />
-                        All items picked — continue with packing below.
+                        Ready to pack — continue with packing below.
                       </p>
                     ) : (
                       <button

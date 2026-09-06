@@ -173,8 +173,9 @@ export async function recomputeFulfilmentStatus(
 
   const lines = detail.lines;
   const readyLines = lines.every((l) => {
+    // Physically in studio (or received from reseller into studio).
     if (l.physicalStatus === "found" || l.resolution === "physical-found") return true;
-    if (l.resolution === "founder-arrange" || l.resolution === "customer-wait") return true;
+    // Substitute accepted — continue fulfilment (SKU swap may still be manual).
     if (l.resolution === "customer-alternative") return true;
     if (l.resolution === "partner-recall") {
       const task = detail.tasks.find(
@@ -182,6 +183,7 @@ export async function recomputeFulfilmentStatus(
       );
       return task?.status === "received";
     }
+    // customer-wait / founder-arrange = keep waiting for stock — not pack-ready.
     return false;
   });
 
@@ -213,9 +215,18 @@ export async function recomputeFulfilmentStatus(
     return "ready-to-pack";
   }
 
+  // Stock check already confirmed physical availability (studio found and/or
+  // reseller stock received). Skip the separate pick gate → Ready to Pack.
   if (readyLines && lines.length > 0) {
-    await r.setStatus(fulfilmentOrderId, "ready-to-pick");
-    return "ready-to-pick";
+    await r.confirmAllPicked(fulfilmentOrderId, "system");
+    await r.appendEvent({
+      fulfilmentOrderId,
+      eventType: "ready-to-pack",
+      summary: "All lines resolved — moved to Ready to Pack",
+      actor: "system",
+    });
+    await r.setStatus(fulfilmentOrderId, "ready-to-pack");
+    return "ready-to-pack";
   }
 
   const anyNotFound = lines.some((l) => l.physicalStatus === "not-found");
@@ -350,6 +361,9 @@ export async function setLinePhysicalCheck(input: {
 }): Promise<FulfilmentOrderDetail> {
   const r = repo();
   await r.setPhysicalStatus(input.lineId, input.physicalStatus, input.actor ?? null);
+  if (input.physicalStatus === "found") {
+    await r.setLineResolution(input.lineId, "physical-found");
+  }
   const detail = await r.getDetail(input.fulfilmentOrderId);
   const line = detail?.lines.find((l) => l.id === input.lineId);
   await r.appendEvent({
@@ -357,8 +371,8 @@ export async function setLinePhysicalCheck(input: {
     eventType: "physical-check",
     summary:
       input.physicalStatus === "found"
-        ? `Physical found: ${line?.title ?? "item"}`
-        : `Physical not found: ${line?.title ?? "item"}`,
+        ? `Found in studio: ${line?.title ?? "item"}`
+        : `Not found in studio: ${line?.title ?? "item"}`,
     actor: input.actor ?? null,
   });
   await recomputeFulfilmentStatus(input.fulfilmentOrderId, r);
@@ -394,7 +408,37 @@ export async function requestPartnerRecall(input: {
   await r.appendEvent({
     fulfilmentOrderId: input.fulfilmentOrderId,
     eventType: "partner-recall-requested",
-    summary: `Partner recall requested from ${input.partnerCode} for ${line?.title ?? "item"}`,
+    summary: `Reseller stock arranged from ${input.partnerCode} for ${line?.title ?? "item"} — message / pick-up next`,
+    actor: input.actor ?? null,
+  });
+  await recomputeFulfilmentStatus(input.fulfilmentOrderId, r);
+  return (await getFulfilmentDetail(input.fulfilmentOrderId))!;
+}
+
+/** Founder messaged the reseller / arranged pick-up — stock is on the way. */
+export async function markPartnerRecallInTransit(input: {
+  fulfilmentOrderId: string;
+  taskId: string;
+  actor?: string | null;
+  note?: string | null;
+}): Promise<FulfilmentOrderDetail> {
+  const r = repo();
+  const detail = await r.getDetail(input.fulfilmentOrderId);
+  const task = detail?.tasks.find((t) => t.id === input.taskId);
+  if (!task || task.taskType !== "partner-stock-recall") {
+    throw new Error("Partner recall task not found");
+  }
+  if (task.status === "received" || task.status === "completed") {
+    return (await getFulfilmentDetail(input.fulfilmentOrderId))!;
+  }
+  await r.updateTask(input.taskId, {
+    status: "in-transit",
+    notes: input.note ?? task.notes ?? "Message sent / pick-up arranged",
+  });
+  await r.appendEvent({
+    fulfilmentOrderId: input.fulfilmentOrderId,
+    eventType: "partner-recall-in-transit",
+    summary: `Reseller messaged / pick-up arranged (${task.partnerCode ?? "partner"})`,
     actor: input.actor ?? null,
   });
   await recomputeFulfilmentStatus(input.fulfilmentOrderId, r);
@@ -457,19 +501,32 @@ export async function escalateFounderAvailability(input: {
   const r = repo();
   const detail = await r.getDetail(input.fulfilmentOrderId);
   const line = detail?.lines.find((l) => l.id === input.lineId);
-  await r.createTask({
-    fulfilmentOrderId: input.fulfilmentOrderId,
-    fulfilmentLineId: input.lineId,
-    taskType: "founder-availability-decision",
-    status: "waiting",
-    title: "Ask Vani — availability decision",
-    description: `${line?.title ?? "Item"} × ${line?.requiredQuantity ?? 1}. ${input.note}`,
-    createdBy: input.actor ?? null,
-  });
+  // Ask Vani = speak to the customer (cancel/refund, wait, or substitute).
+  // Skip the intermediate founder triad for the primary desk path.
+  const existing = detail?.tasks.find(
+    (t) =>
+      t.fulfilmentLineId === input.lineId &&
+      t.taskType === "customer-contact" &&
+      ["open", "waiting"].includes(t.status),
+  );
+  if (!existing) {
+    await r.createTask({
+      fulfilmentOrderId: input.fulfilmentOrderId,
+      fulfilmentLineId: input.lineId,
+      taskType: "customer-contact",
+      status: "waiting",
+      title: "Ask Vani — speak to customer",
+      description: `${line?.title ?? "Item"} × ${line?.requiredQuantity ?? 1}. ${input.note}`,
+      createdBy: input.actor ?? null,
+    });
+  }
+  if (line && line.physicalStatus === "unchecked") {
+    await r.setPhysicalStatus(input.lineId, "not-found", input.actor ?? null);
+  }
   await r.appendEvent({
     fulfilmentOrderId: input.fulfilmentOrderId,
-    eventType: "founder-escalation",
-    summary: `Founder decision requested for ${line?.title ?? "item"}`,
+    eventType: "customer-escalation",
+    summary: `Ask Vani — contact customer about ${line?.title ?? "item"}`,
     actor: input.actor ?? null,
   });
   await recomputeFulfilmentStatus(input.fulfilmentOrderId, r);
@@ -514,6 +571,17 @@ export async function recordFounderDecision(input: {
       status: "waiting",
       title: "Contact customer — cannot arrange",
       description: input.note ?? "Stock unavailable",
+      createdBy: input.actor ?? null,
+    });
+  }
+  if (task?.fulfilmentLineId && input.decision === "alternative-possible") {
+    await r.createTask({
+      fulfilmentOrderId: input.fulfilmentOrderId,
+      fulfilmentLineId: task.fulfilmentLineId,
+      taskType: "customer-contact",
+      status: "waiting",
+      title: "Contact customer — offer alternative",
+      description: input.note ?? "Alternative product possible",
       createdBy: input.actor ?? null,
     });
   }
