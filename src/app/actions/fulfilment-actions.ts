@@ -74,6 +74,15 @@ export async function receivePartnerRecallAction(input: {
   return wrap(() => fulfilment.receivePartnerRecall(input));
 }
 
+export async function markPartnerRecallInTransitAction(input: {
+  fulfilmentOrderId: string;
+  taskId: string;
+  actor?: string | null;
+  note?: string | null;
+}) {
+  return wrap(() => fulfilment.markPartnerRecallInTransit(input));
+}
+
 export async function escalateFounderAvailabilityAction(input: {
   fulfilmentOrderId: string;
   lineId: string;

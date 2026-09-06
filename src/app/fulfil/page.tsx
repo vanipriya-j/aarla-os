@@ -13,6 +13,7 @@ import {
   getFulfilmentDetailAction,
   getPackingSuggestionsAction,
   listFulfilmentWorkbenchAction,
+  markPartnerRecallInTransitAction,
   markStorePickupProgressAction,
   receivePartnerRecallAction,
   recordCustomerOutcomeAction,
@@ -37,6 +38,7 @@ import {
   packingLineSignature,
 } from "@/lib/domain/fulfilment-decisions";
 import { CheckCircle2, Loader2, Package, Plus, RefreshCw, Truck, X } from "lucide-react";
+import { StockCheckFlowPanel } from "@/components/fulfil/StockCheckFlowPanel";
 
 export default function FulfilOrdersPage() {
   const [tab, setTab] = useState<FulfilmentTab>("stock-check");
@@ -382,215 +384,181 @@ export default function FulfilOrdersPage() {
 
                 <FormSection
                   title="Stock check"
-                  description="System qty is ledger projection — not physical truth. Found / Not found does not mutate inventory."
+                  description="Work each line in order — studio check, then reseller or Ask Vani, then pack."
                 >
-                  <ul className="space-y-3">
-                    {detail.lines.map((line) => (
-                      <li key={line.id} className="border border-border rounded-lg px-3 py-3">
-                        <p className="font-medium text-deep-navy">
-                          {line.title}
-                          {line.variantTitle ? ` — ${line.variantTitle}` : ""} × {line.requiredQuantity}
-                        </p>
-                        <p className="text-xs text-charcoal/55 mt-0.5">
-                          System at Studio:{" "}
-                          {line.systemStudioQty == null ? "unlinked / unknown" : line.systemStudioQty}
-                          {line.resolution ? ` · Resolution: ${line.resolution}` : ""}
-                          {line.physicalStatus !== "unchecked"
-                            ? ` · Physical: ${line.physicalStatus}`
-                            : " · Physical: not checked yet"}
-                        </p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <button
-                            type="button"
-                            disabled={pending}
-                            className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-50 ${
-                              line.physicalStatus === "found"
-                                ? "border-deep-navy bg-deep-navy text-white"
-                                : "border-border"
-                            }`}
-                            onClick={() => {
-                              runAction(`Marking line found…`, async () => {
-                                const res = await setLinePhysicalCheckAction({
-                                  fulfilmentOrderId: detail.id,
-                                  lineId: line.id,
-                                  physicalStatus: "found",
-                                });
-                                await applyDetailResult(res);
-                              });
-                            }}
-                          >
-                            {line.physicalStatus === "found" ? "✓ Found physically" : "Found physically"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={pending}
-                            className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-50 ${
-                              line.physicalStatus === "not-found"
-                                ? "border-aarla-red bg-aarla-red/10 text-aarla-red"
-                                : "border-border"
-                            }`}
-                            onClick={() => {
-                              runAction(`Marking line not found…`, async () => {
-                                const res = await setLinePhysicalCheckAction({
-                                  fulfilmentOrderId: detail.id,
-                                  lineId: line.id,
-                                  physicalStatus: "not-found",
-                                });
-                                await applyDetailResult(res);
-                              });
-                            }}
-                          >
-                            {line.physicalStatus === "not-found" ? "✓ Not found" : "Not found"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={pending}
-                            className="text-xs px-3 py-1.5 rounded-full border border-border disabled:opacity-50"
-                            onClick={() => {
-                              runAction("Escalating to Vani…", async () => {
-                                const res = await escalateFounderAvailabilityAction({
-                                  fulfilmentOrderId: detail.id,
-                                  lineId: line.id,
-                                  note: "No studio or partner stock confirmed",
-                                });
-                                await applyDetailResult(res);
-                              });
-                            }}
-                          >
-                            Ask Vani
-                          </button>
-                        </div>
-                        {line.partnerStock.length > 0 ? (
-                          <div className="mt-2 text-xs text-charcoal/70 space-y-1">
-                            <p className="font-medium">Partner inventory (not ready until received)</p>
-                            {line.partnerStock.map((p) => (
-                              <div key={`${p.partnerCode}-${p.locationCode}`} className="flex items-center gap-2">
-                                <span>
-                                  {p.partnerName} — {p.qty}
-                                </span>
-                                <button
-                                  type="button"
-                                  disabled={pending}
-                                  className="underline disabled:opacity-50"
-                                  onClick={() => {
-                                    runAction(`Arranging stock from ${p.partnerName}…`, async () => {
-                                      const res = await requestPartnerRecallAction({
-                                        fulfilmentOrderId: detail.id,
-                                        lineId: line.id,
-                                        partnerCode: p.partnerCode,
-                                        partnerLocationCode: p.locationCode,
-                                        quantity: Math.min(line.requiredQuantity, p.qty),
-                                      });
-                                      await applyDetailResult(res);
-                                    });
-                                  }}
-                                >
-                                  Arrange from partner
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
+                  <StockCheckFlowPanel
+                    detail={detail}
+                    pending={pending}
+                    onFoundInStudio={(line) => {
+                      runAction(`Marking line found in studio…`, async () => {
+                        const res = await setLinePhysicalCheckAction({
+                          fulfilmentOrderId: detail.id,
+                          lineId: line.id,
+                          physicalStatus: "found",
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Marked found in studio. When every line is ready, order moves to Ready to Pack.",
+                        );
+                      });
+                    }}
+                    onNotInStudio={(line) => {
+                      runAction(`Marking line not found in studio…`, async () => {
+                        const res = await setLinePhysicalCheckAction({
+                          fulfilmentOrderId: detail.id,
+                          lineId: line.id,
+                          physicalStatus: "not-found",
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Not in studio — arrange from a reseller or Ask Vani.",
+                        );
+                      });
+                    }}
+                    onAskVani={(line) => {
+                      runAction("Opening Ask Vani (customer call)…", async () => {
+                        const res = await escalateFounderAvailabilityAction({
+                          fulfilmentOrderId: detail.id,
+                          lineId: line.id,
+                          note: "Not found in studio or reseller — speak to customer",
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Ask Vani open — record whether they wait, take a substitute, or cancel/refund.",
+                        );
+                      });
+                    }}
+                    onArrangeReseller={(line, partner) => {
+                      runAction(`Arranging stock from ${partner.partnerName}…`, async () => {
+                        const qty =
+                          partner.qty != null
+                            ? Math.min(line.requiredQuantity, partner.qty)
+                            : line.requiredQuantity;
+                        const res = await requestPartnerRecallAction({
+                          fulfilmentOrderId: detail.id,
+                          lineId: line.id,
+                          partnerCode: partner.partnerCode,
+                          partnerLocationCode: partner.locationCode,
+                          quantity: qty,
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Reseller arranged — message them / get it picked, then mark received.",
+                        );
+                      });
+                    }}
+                    onResellerMessaged={(taskId) => {
+                      runAction("Recording reseller message / pick-up…", async () => {
+                        const res = await markPartnerRecallInTransitAction({
+                          fulfilmentOrderId: detail.id,
+                          taskId,
+                          note: "Message sent / pick-up arranged",
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Reseller messaged — mark received when stock arrives at Studio.",
+                        );
+                      });
+                    }}
+                    onResellerReceived={(taskId, line) => {
+                      if (!line.catalogProductCode) {
+                        setError(
+                          "Link catalog product on the line before receiving reseller stock.",
+                        );
+                        return;
+                      }
+                      runAction("Marking received from reseller…", async () => {
+                        const res = await receivePartnerRecallAction({
+                          fulfilmentOrderId: detail.id,
+                          taskId,
+                          productId: line.catalogProductCode!,
+                          variantId: line.catalogVariantCode ?? undefined,
+                        });
+                        await applyDetailResult(
+                          res,
+                          "Received from reseller — when all lines are ready, order moves to Pack.",
+                        );
+                      });
+                    }}
+                    onCustomerOutcome={(taskId, outcome) => {
+                      runAction(`Saving customer outcome…`, async () => {
+                        const res = await recordCustomerOutcomeAction({
+                          fulfilmentOrderId: detail.id,
+                          taskId,
+                          outcome,
+                        });
+                        await applyDetailResult(
+                          res,
+                          outcome === "refund-cancel"
+                            ? "Marked refund / cancel required."
+                            : outcome === "will-wait"
+                              ? "Customer will wait — keep order open."
+                              : outcome === "chose-alternative"
+                                ? "Customer takes something else — continue fulfilment."
+                                : "Follow up later noted.",
+                        );
+                      });
+                    }}
+                  />
                 </FormSection>
 
-                {detail.tasks.length > 0 ? (
-                  <FormSection title="Open follow-ups" description="Partner recalls, founder and customer decisions.">
+                {detail.tasks.some(
+                  (t) =>
+                    t.taskType === "founder-availability-decision" && t.status !== "completed",
+                ) ? (
+                  <FormSection
+                    title="Founder decisions"
+                    description="Legacy availability tasks still open on this order."
+                  >
                     <ul className="space-y-3 text-sm">
-                      {detail.tasks.map((task) => (
-                        <li key={task.id} className="border border-border rounded-lg px-3 py-2">
-                          <p className="font-medium text-deep-navy">
-                            {task.title} · {task.status}
-                          </p>
-                          <p className="text-xs text-charcoal/60">{task.description}</p>
-                          {task.taskType === "partner-stock-recall" && task.status !== "received" ? (
-                            <button
-                              type="button"
-                              disabled={pending}
-                              className="mt-2 text-xs underline disabled:opacity-50"
-                              onClick={() => {
-                                const line = detail.lines.find((l) => l.id === task.fulfilmentLineId);
-                                if (!line?.catalogProductCode) {
-                                  setError("Link catalog product on the line before receiving recall.");
-                                  return;
-                                }
-                                runAction("Recording partner stock received…", async () => {
-                                  const res = await receivePartnerRecallAction({
-                                    fulfilmentOrderId: detail.id,
-                                    taskId: task.id,
-                                    productId: line.catalogProductCode!,
-                                    variantId: line.catalogVariantCode ?? undefined,
-                                  });
-                                  await applyDetailResult(res);
-                                });
-                              }}
-                            >
-                              Mark received at Studio (ledger transfer)
-                            </button>
-                          ) : null}
-                          {task.taskType === "founder-availability-decision" && task.status !== "completed" ? (
+                      {detail.tasks
+                        .filter(
+                          (t) =>
+                            t.taskType === "founder-availability-decision" &&
+                            t.status !== "completed",
+                        )
+                        .map((task) => (
+                          <li key={task.id} className="border border-border rounded-lg px-3 py-2">
+                            <p className="font-medium text-deep-navy">
+                              {task.title} · {task.status}
+                            </p>
+                            <p className="text-xs text-charcoal/60">{task.description}</p>
                             <div className="flex flex-wrap gap-2 mt-2">
-                              {(["can-arrange", "cannot-arrange", "alternative-possible"] as const).map((d) => (
+                              {(
+                                [
+                                  ["can-arrange", "Can arrange"],
+                                  ["cannot-arrange", "Cannot arrange"],
+                                  ["alternative-possible", "Offer alternative"],
+                                ] as const
+                              ).map(([d, label]) => (
                                 <button
                                   key={d}
                                   type="button"
                                   disabled={pending}
                                   className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
                                   onClick={() => {
-                                    runAction(`Saving founder decision (${d})…`, async () => {
+                                    runAction(`Saving founder decision (${label})…`, async () => {
                                       const res = await recordFounderDecisionAction({
                                         fulfilmentOrderId: detail.id,
                                         taskId: task.id,
                                         decision: d,
                                         expectedAvailabilityAt:
                                           d === "can-arrange"
-                                            ? new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
+                                            ? new Date(Date.now() + 3 * 86400000)
+                                                .toISOString()
+                                                .slice(0, 10)
                                             : null,
                                       });
                                       await applyDetailResult(res);
                                     });
                                   }}
                                 >
-                                  {d}
+                                  {label}
                                 </button>
                               ))}
                             </div>
-                          ) : null}
-                          {task.taskType === "customer-contact" && task.status !== "completed" ? (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {(
-                                [
-                                  "will-wait",
-                                  "chose-alternative",
-                                  "refund-cancel",
-                                  "follow-up-later",
-                                ] as const
-                              ).map((o) => (
-                                <button
-                                  key={o}
-                                  type="button"
-                                  disabled={pending}
-                                  className="text-xs px-2 py-1 border border-border rounded-full disabled:opacity-50"
-                                  onClick={() => {
-                                    runAction(`Saving customer outcome (${o})…`, async () => {
-                                      const res = await recordCustomerOutcomeAction({
-                                        fulfilmentOrderId: detail.id,
-                                        taskId: task.id,
-                                        outcome: o,
-                                      });
-                                      await applyDetailResult(res);
-                                    });
-                                  }}
-                                >
-                                  {o}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </li>
-                      ))}
+                          </li>
+                        ))}
                     </ul>
                   </FormSection>
                 ) : null}
@@ -602,8 +570,8 @@ export default function FulfilOrdersPage() {
                     title="Picking"
                     description={
                       detail.pickedAt || detail.status === "ready-to-pack"
-                        ? "Physical pick confirmed."
-                        : "Confirm physical pick checklist."
+                        ? "Stock is confirmed — packing is next."
+                        : "Confirm physical pick checklist (legacy orders)."
                     }
                   >
                     <ul className="text-sm space-y-1 mb-3">
@@ -614,13 +582,15 @@ export default function FulfilOrdersPage() {
                         </li>
                       ))}
                     </ul>
-                    {detail.pickedAt || detail.status === "ready-to-pack" || detail.status === "ready-to-ship" ? (
+                    {detail.pickedAt ||
+                    detail.status === "ready-to-pack" ||
+                    detail.status === "ready-to-ship" ? (
                       <p
                         className="inline-flex items-center gap-2 text-sm text-deep-navy"
                         data-testid="fulfil-picked-done"
                       >
                         <CheckCircle2 className="h-4 w-4" />
-                        All items picked — continue with packing below.
+                        Ready to pack — continue with packing below.
                       </p>
                     ) : (
                       <button
