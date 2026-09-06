@@ -101,6 +101,7 @@ function VendorOrderDetailInner() {
   const [addVariantId, setAddVariantId] = useState(prefillVariant ?? "");
   const [addQty, setAddQty] = useState(Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+  const [pdfReadyUrl, setPdfReadyUrl] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
   const [customQty, setCustomQty] = useState(10);
   const [customDescription, setCustomDescription] = useState("");
@@ -249,6 +250,7 @@ function VendorOrderDetailInner() {
   function generatePdf() {
     // Open synchronously on click so popup blockers don't block the later navigation.
     const pdfUrl = `/api/manufacture/orders/${encodeURIComponent(orderNumber)}/pdf`;
+    setPdfReadyUrl(null);
     const tab = window.open("about:blank", "_blank");
     startTransition(async () => {
       const r = await generateOrderPdfAction(orderNumber);
@@ -259,9 +261,10 @@ function VendorOrderDetailInner() {
       }
       if (tab && !tab.closed) {
         tab.location.href = pdfUrl;
+        setPdfReadyUrl(null);
       } else {
-        // Fallback if the blank tab was blocked — use a same-tab navigation hint.
-        window.location.assign(pdfUrl);
+        // Popup blocked — offer a normal link (user click is allowed).
+        setPdfReadyUrl(pdfUrl);
       }
       load();
     });
@@ -393,6 +396,19 @@ function VendorOrderDetailInner() {
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-20 space-y-8 max-w-6xl">
         {error ? <p className="text-sm text-aarla-red">{error}</p> : null}
+        {pdfReadyUrl ? (
+          <p className="text-sm rounded-lg border border-deep-navy/20 bg-white px-3 py-2 text-deep-navy">
+            PDF ready — popup was blocked.{" "}
+            <a
+              className="underline font-medium"
+              href={pdfReadyUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open full tab
+            </a>
+          </p>
+        ) : null}
         {!order ? null : (
           <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
