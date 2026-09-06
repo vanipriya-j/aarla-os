@@ -28,6 +28,56 @@ describe("resolvePresentation", () => {
     expect(resolvePresentation(product)).toBe("matrix-apparel");
   });
 
+  it("infers matrix-apparel from Size + Color (US spelling)", () => {
+    const product: Pick<Product, "category" | "variants" | "inventoryPresentation"> = {
+      category: "Merch",
+      variants: [
+        {
+          id: "v1",
+          label: "Black / 10-11 years",
+          sku: "SKU-1",
+          options: { Color: "Black", Size: "10-11 years" },
+        },
+        {
+          id: "v2",
+          label: "Black / 12-13 years",
+          sku: "SKU-2",
+          options: { Color: "Black", Size: "12-13 years" },
+        },
+      ],
+    };
+    expect(resolvePresentation(product)).toBe("matrix-apparel");
+    const rows = buildApparelMatrix(product, [
+      {
+        productId: "p",
+        variantId: "v1",
+        total: 1,
+        studio: 1,
+        partner: 0,
+        channel: 0,
+        damaged: 0,
+        available: 1,
+        reserved: 0,
+        byLocation: [],
+      },
+      {
+        productId: "p",
+        variantId: "v2",
+        total: 2,
+        studio: 2,
+        partner: 0,
+        channel: 0,
+        damaged: 0,
+        available: 2,
+        reserved: 0,
+        byLocation: [],
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.rowLabel).toBe("Black");
+    expect(rows[0]!.columns).toEqual(["10-11 years", "12-13 years"]);
+  });
+
   it("infers matrix-art from category", () => {
     expect(resolvePresentation(art)).toBe("matrix-art");
   });
