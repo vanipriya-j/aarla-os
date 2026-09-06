@@ -9,6 +9,8 @@ import {
   getCommittedShopifyOrdersWatermark,
   getShopifyOrdersWatermark,
   noteShopifyOrdersSyncProgress,
+  shopifyOpenFulfilmentOrdersQuery,
+  shopifyOrdersByNamesQuery,
   shopifyOrdersCreatedAfterQuery,
 } from "@/lib/application/commerce-sync-watermarks";
 
@@ -19,6 +21,24 @@ describe("shopifyOrdersCreatedAfterQuery", () => {
     const q = shopifyOrdersCreatedAfterQuery("2026-08-03T12:00:00.000Z");
     expect(q).toMatch(/^created_at:>'/);
     expect(q).toContain("2026-08-03T11:58:00.000Z");
+  });
+});
+
+describe("shopifyOpenFulfilmentOrdersQuery", () => {
+  it("targets open unshipped/partial orders", () => {
+    const q = shopifyOpenFulfilmentOrdersQuery();
+    expect(q).toContain("status:open");
+    expect(q).toContain("fulfillment_status:unshipped");
+    expect(q).toContain("fulfillment_status:partial");
+  });
+});
+
+describe("shopifyOrdersByNamesQuery", () => {
+  it("builds OR-joined exact name filters", () => {
+    expect(shopifyOrdersByNamesQuery(["#1556", "1587"])).toBe(
+      'name:"#1556" OR name:"#1587"',
+    );
+    expect(shopifyOrdersByNamesQuery([])).toBe("");
   });
 });
 
@@ -96,5 +116,18 @@ describe.runIf(hasDb)("incremental Shopify watermark", () => {
     expect(incremental.ordersAdded).toBe(0);
     expect(incremental.ordersRead).toBeLessThan(full.ordersRead);
     expect(incremental.complete).toBe(true);
+
+    const tipBeforeOpen = await getCommittedShopifyOrdersWatermark();
+    const open = await syncShopifyCustomerCallData({
+      connector,
+      repo,
+      mode: "open-fulfilment",
+      runId: "open-run",
+    });
+    expect(open.mode).toBe("open-fulfilment");
+    expect(open.ordersRead).toBeGreaterThan(0);
+    expect(open.ordersRead).toBeLessThan(full.ordersRead);
+    // Must not move the incremental tip — Fulfil refresh is independent.
+    expect(await getCommittedShopifyOrdersWatermark()).toBe(tipBeforeOpen);
   });
 });

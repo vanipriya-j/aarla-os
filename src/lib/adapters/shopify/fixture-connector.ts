@@ -432,6 +432,25 @@ export class FixtureShopifyConnector implements ShopifyConnector {
       }
     }
 
+    // Open fulfilment desk: status:open + unshipped/partial
+    if (options.query && /fulfillment_status:/i.test(options.query)) {
+      orders = orders.filter((o) => {
+        if (o.cancelledAt) return false;
+        const s = (o.fulfilmentStatus ?? "").toUpperCase().replace(/\s+/g, "_");
+        return (
+          !s ||
+          s === "UNFULFILLED" ||
+          s === "UNSHIPPED" ||
+          s === "PARTIAL" ||
+          s === "PARTIALLY_FULFILLED"
+        );
+      });
+      const ids = new Set(
+        orders.map((o) => o.externalCustomerId).filter((id): id is string => Boolean(id)),
+      );
+      customers = customers.filter((c) => ids.has(c.externalId));
+    }
+
     // Targeted phone backfill: name:"#10450" OR name:#10451
     if (options.query && /name:/i.test(options.query)) {
       const names = [

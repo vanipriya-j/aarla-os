@@ -21,6 +21,7 @@ import {
   getShopifyOrdersWatermark,
   noteShopifyOrdersSyncProgress,
   seedShopifyOrdersWatermarkFromDbIfCaughtUp,
+  shopifyOpenFulfilmentOrdersQuery,
   shopifyOrdersCreatedAfterQuery,
 } from "@/lib/application/commerce-sync-watermarks";
 
@@ -34,8 +35,12 @@ export type SyncShopifyDeps = {
   /**
    * incremental (default): only orders after the last successful sync watermark.
    * full: walk the entire order catalog.
+   * open-fulfilment: current Unfulfilled/Partial opens — does not touch watermarks.
+   * targeted: caller-supplied searchQuery — does not touch watermarks.
    */
-  mode?: "incremental" | "full";
+  mode?: "incremental" | "full" | "open-fulfilment" | "targeted";
+  /** Required when mode is targeted — Shopify Admin orders search string */
+  searchQuery?: string | null;
   /** Sync run id (lock token) — required to commit the watermark after the last chunk */
   runId?: string | null;
 };
@@ -80,18 +85,40 @@ export async function syncShopifyCustomerCallData(
   const repo = deps.repo ?? createExternalCommerceRepository();
   const connector = resolveConnector(deps);
   const maxPages = deps.maxPages ?? defaultMaxPages();
-  const mode = deps.mode === "full" ? "full" : "incremental";
+  const mode =
+    deps.mode === "full"
+      ? "full"
+      : deps.mode === "open-fulfilment"
+        ? "open-fulfilment"
+        : deps.mode === "targeted"
+          ? "targeted"
+          : "incremental";
   summary.mode = mode;
 
   await repo.ensureOrderTaxSchema();
 
   let query: string | null = null;
+  // Open/targeted walks are independent of the incremental resume cursor —
+  // never load/save that tip or we corrupt Sync All / live catch-up.
+  const skipWatermark = mode === "open-fulfilment" || mode === "targeted";
   let resumeCursor: string | null = deps.cursor ?? null;
-  if (!resumeCursor) {
+  if (!skipWatermark && !resumeCursor) {
     resumeCursor = await getShopifyOrdersResumeCursor();
   }
 
-  if (mode === "incremental") {
+  if (mode === "open-fulfilment") {
+    summary.incrementalFrom = null;
+    query = shopifyOpenFulfilmentOrdersQuery();
+  } else if (mode === "targeted") {
+    summary.incrementalFrom = null;
+    const q = deps.searchQuery?.trim() || "";
+    if (!q) {
+      summary.complete = true;
+      summary.hasMore = false;
+      return summary;
+    }
+    query = q;
+  } else if (mode === "incremental") {
     let watermark = await getShopifyOrdersWatermark();
     // Tip watermark may have been wiped while orders are already in Postgres —
     // restore incremental when local count ≈ Shopify catalog (avoids re-walking 600+).
@@ -323,7 +350,9 @@ export async function syncShopifyCustomerCallData(
     }
   }
 
-  if (deps.runId) {
+  // Open/targeted refreshes must not advance the created_at watermark/resume —
+  // that tip is owned by incremental Sync All / customer-calls catch-up.
+  if (!skipWatermark && deps.runId) {
     // Advance resume cursor only after this chunk’s upserts finished.
     await noteShopifyOrdersSyncProgress({
       runId: deps.runId,
@@ -332,7 +361,7 @@ export async function syncShopifyCustomerCallData(
     });
   }
 
-  if (summary.complete && deps.runId) {
+  if (!skipWatermark && summary.complete && deps.runId) {
     await commitShopifyOrdersWatermark(deps.runId);
   }
 

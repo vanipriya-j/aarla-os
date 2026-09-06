@@ -39,8 +39,46 @@ export async function getFulfilmentDetailAction(id: string) {
   return wrap(() => fulfilment.getFulfilmentDetail(id));
 }
 
+/**
+ * Refresh current Shopify Unfulfilled/Partial opens, then pull into Fulfil.
+ * Falls back to DB-only ingest if the commerce sync lock is busy.
+ */
 export async function syncIncomingFulfilmentOrdersAction() {
-  return wrap(() => fulfilment.syncIncomingOrdersIntoFulfilment());
+  return wrap(async () => {
+    const { runLiveOrdersTick } = await import(
+      "@/lib/application/live-orders-service"
+    );
+    const lockToken =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `fulfil-pull-${Date.now()}`;
+    const tick = await runLiveOrdersTick({ lockToken, maxChunks: 5 });
+    if (tick.skipped) {
+      const dbOnly = await fulfilment.syncIncomingOrdersIntoFulfilment();
+      return {
+        created: dbOnly.created,
+        archived: dbOnly.archived,
+        ids: dbOnly.ids,
+        salesPosted: dbOnly.salesPosted,
+        salesSkipped: dbOnly.salesSkipped,
+        ordersRead: 0,
+        ordersUpserted: 0,
+        shopifyRefreshSkipped: true as const,
+        reason: tick.reason ?? "Sync busy",
+      };
+    }
+    return {
+      created: tick.fulfilCreated,
+      archived: tick.fulfilArchived,
+      ids: tick.newFulfilmentIds,
+      salesPosted: tick.salesPosted,
+      salesSkipped: tick.salesSkipped,
+      ordersRead: tick.ordersRead,
+      ordersUpserted: tick.ordersUpserted,
+      shopifyRefreshSkipped: false as const,
+      reason: undefined as string | undefined,
+    };
+  });
 }
 
 export async function setLinePhysicalCheckAction(input: {
