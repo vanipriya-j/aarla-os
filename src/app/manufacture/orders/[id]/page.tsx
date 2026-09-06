@@ -247,13 +247,23 @@ function VendorOrderDetailInner() {
   }
 
   function generatePdf() {
+    // Open synchronously on click so popup blockers don't block the later navigation.
+    const pdfUrl = `/api/manufacture/orders/${encodeURIComponent(orderNumber)}/pdf`;
+    const tab = window.open("about:blank", "_blank");
     startTransition(async () => {
       const r = await generateOrderPdfAction(orderNumber);
-      if (!r.ok) setError(r.error);
-      else {
-        window.open(`/api/manufacture/orders/${encodeURIComponent(orderNumber)}/pdf`, "_blank");
-        load();
+      if (!r.ok) {
+        setError(r.error);
+        tab?.close();
+        return;
       }
+      if (tab && !tab.closed) {
+        tab.location.href = pdfUrl;
+      } else {
+        // Fallback if the blank tab was blocked — use a same-tab navigation hint.
+        window.location.assign(pdfUrl);
+      }
+      load();
     });
   }
 
@@ -737,6 +747,15 @@ function VendorOrderDetailInner() {
                     />
                     <p className="mt-2 text-xs text-charcoal/50">
                       PDF v{preview.pdfVersionNumber ?? "—"} ·{" "}
+                      <a
+                        className="text-aarla-red underline"
+                        href={preview.pdfDownloadPath}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open full tab
+                      </a>
+                      {" · "}
                       <a
                         className="text-aarla-red underline"
                         href={preview.pdfDownloadPath}
