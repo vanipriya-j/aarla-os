@@ -54,9 +54,9 @@ function MobileSection({
 export function Header({ title, subtitle, actions }: HeaderProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const { role, authEnabled } = useAuth();
-  const nav = navForRole(role);
-  const homeHref = homePathForRole(role);
+  const { role, authEnabled, accessRoleCodes } = useAuth();
+  const nav = navForRole(role, accessRoleCodes);
+  const homeHref = homePathForRole(role, accessRoleCodes);
 
   return (
     <>

@@ -93,8 +93,9 @@ export default function PersonDetailPage() {
             ))}
           </div>
           <p className="mt-3 text-sm text-charcoal/65 leading-relaxed">
-            Customer places the order. User owns or uses the object. Community begins after
-            registration.
+            Customer places the order. Owner uses the object. Community begins after
+            registration. Internal Aarla staff are Team members (Admin → Team), not a
+            separate People type.
           </p>
         </section>
 

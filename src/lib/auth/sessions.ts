@@ -3,7 +3,9 @@ import "server-only";
 import type { QueryResultRow } from "pg";
 import { getPool } from "@/lib/infra/db/pool";
 import type { AppRole } from "@/lib/auth/roles";
+import { parseAccessRoleCodes } from "@/lib/auth/roles";
 import type { AuthSession } from "@/lib/auth/session-types";
+import type { AccessRoleCode } from "@/lib/domain/team-types";
 import {
   generateSessionToken,
   hashSessionToken,
@@ -19,10 +21,6 @@ export {
   sessionTtlSeconds,
 } from "@/lib/auth/sessions-crypto";
 
-/**
- * Direct pool query for auth (works in Node proxy + route handlers).
- * Avoids next/server `connection()` which is App Router request-scoped.
- */
 async function authQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
@@ -35,6 +33,9 @@ export type AuthSessionRow = {
   id: string;
   username: string;
   role: AppRole;
+  account_id: string | null;
+  person_id: string | null;
+  access_role_code: string | null;
   user_agent: string | null;
   ip: string | null;
   created_at: Date;
@@ -43,10 +44,14 @@ export type AuthSessionRow = {
 };
 
 function toSession(row: AuthSessionRow): AuthSession {
+  const codes = parseAccessRoleCodes(row.access_role_code);
   return {
     id: row.id,
     username: row.username,
     role: row.role,
+    accountId: row.account_id,
+    personId: row.person_id,
+    accessRoleCodes: codes,
     userAgent: row.user_agent,
     ip: row.ip,
     createdAt: row.created_at.toISOString(),
@@ -58,20 +63,27 @@ function toSession(row: AuthSessionRow): AuthSession {
 export async function createAuthSession(input: {
   username: string;
   role: AppRole;
+  accountId?: string | null;
+  personId?: string | null;
+  accessRoleCodes?: AccessRoleCode[];
   userAgent?: string | null;
   ip?: string | null;
 }): Promise<{ token: string; session: AuthSession }> {
   const token = generateSessionToken();
   const tokenHash = hashSessionToken(token);
   const ttlDays = sessionTtlDays();
+  const accessRoleCode = (input.accessRoleCodes ?? []).join(",") || null;
   const rows = await authQuery<AuthSessionRow>(
     `
     insert into auth_sessions (
-      token_hash, username, role, user_agent, ip, expires_at
+      token_hash, username, role, user_agent, ip, expires_at,
+      account_id, person_id, access_role_code
     ) values (
-      $1, $2, $3, $4, $5, now() + ($6::text || ' days')::interval
+      $1, $2, $3, $4, $5, now() + ($6::text || ' days')::interval,
+      $7::uuid, $8::uuid, $9
     )
-    returning id, username, role, user_agent, ip, created_at, last_seen_at, expires_at
+    returning id, username, role, account_id, person_id, access_role_code,
+      user_agent, ip, created_at, last_seen_at, expires_at
     `,
     [
       tokenHash,
@@ -80,6 +92,9 @@ export async function createAuthSession(input: {
       input.userAgent?.slice(0, 500) ?? null,
       input.ip?.slice(0, 80) ?? null,
       String(ttlDays),
+      input.accountId ?? null,
+      input.personId ?? null,
+      accessRoleCode,
     ],
   );
   const row = rows[0];
@@ -87,7 +102,6 @@ export async function createAuthSession(input: {
   return { token, session: toSession(row) };
 }
 
-/** Resolve an active session from the raw cookie token; touches last_seen_at. */
 export async function resolveAuthSession(
   token: string | null | undefined,
 ): Promise<AuthSession | null> {
@@ -100,7 +114,8 @@ export async function resolveAuthSession(
     where token_hash = $1
       and revoked_at is null
       and expires_at > now()
-    returning id, username, role, user_agent, ip, created_at, last_seen_at, expires_at
+    returning id, username, role, account_id, person_id, access_role_code,
+      user_agent, ip, created_at, last_seen_at, expires_at
     `,
     [tokenHash],
   );
@@ -160,7 +175,8 @@ export async function revokeOtherAuthSessions(
 export async function listActiveAuthSessions(): Promise<AuthSession[]> {
   const rows = await authQuery<AuthSessionRow>(
     `
-    select id, username, role, user_agent, ip, created_at, last_seen_at, expires_at
+    select id, username, role, account_id, person_id, access_role_code,
+      user_agent, ip, created_at, last_seen_at, expires_at
     from auth_sessions
     where revoked_at is null
       and expires_at > now()

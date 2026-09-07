@@ -42,8 +42,8 @@ function PeopleInner() {
   const filters: { id: Filter; label: string }[] = [
     { id: "all", label: "All" },
     { id: "customers", label: "Customers" },
-    { id: "users", label: "Users" },
-    { id: "both", label: "Both" },
+    { id: "users", label: "Owners" },
+    { id: "both", label: "Customer + Owner" },
     { id: "community", label: "Community" },
   ];
 
@@ -51,7 +51,7 @@ function PeopleInner() {
     <>
       <Header
         title="People"
-        subtitle="Customers pay. Users own. Community begins at registration."
+        subtitle="Customers pay. Owners use. Community begins at registration. Team lives under Admin → Team."
         actions={
           <Link href="/register">
             <Button size="sm">Register a product</Button>
@@ -67,7 +67,7 @@ function PeopleInner() {
             icon={Users}
           />
           <SummaryCard label="Customers" value={String(customers)} accent="navy" />
-          <SummaryCard label="Users" value={String(users)} accent="orange" />
+          <SummaryCard label="Owners" value={String(users)} accent="orange" />
           <SummaryCard label="Community Members" value={String(community)} accent="green" />
         </section>
 
