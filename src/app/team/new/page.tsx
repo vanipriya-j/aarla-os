@@ -24,7 +24,7 @@ import type {
 
 export default function NewTeamMemberPage() {
   const router = useRouter();
-  const [pending, start] = useTransition();
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locations, setLocations] = useState<WorkLocation[]>([]);
   const [roles, setRoles] = useState<AccessRole[]>([]);
