@@ -276,6 +276,51 @@ export class BusinessEngine {
     });
   }
 
+  /** Recall / return stock from a partner location back to Studio. */
+  async transferFromPartner(input: {
+    productId: string;
+    variantId?: string;
+    partnerId: string;
+    quantity: number;
+    notes?: string;
+    reference?: string;
+  }): Promise<StockMovement | null> {
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const locations = await tx.locations.list();
+      const loc = locations.find((l) => l.partnerId === input.partnerId);
+      if (!loc || input.quantity <= 0) return null;
+
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const available = Math.max(balanceAt(balances, input.productId, loc.id, input.variantId), 0);
+      if (available < input.quantity) return null;
+
+      const batch = batches.find((b) => b.productId === input.productId);
+      const partner = await tx.partners.getByCode(input.partnerId);
+      const reference =
+        input.reference ??
+        `RECALL-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
+          input.variantId ? `-${input.variantId}` : ""
+        }-${input.quantity}`;
+
+      const created = await this.appendMovementsTx(tx, [
+        {
+          productId: input.productId,
+          variantId: input.variantId,
+          batchId: batch?.id,
+          quantity: input.quantity,
+          fromLocationId: loc.id,
+          toLocationId: LOC_CODES.studio,
+          movementType: "Transfer",
+          reference,
+          notes: input.notes || `Recall to Studio from ${partner?.name ?? loc.name}`,
+        },
+      ]);
+      return created[0] ?? null;
+    });
+  }
+
   async recordPartnerSale(input: {
     productId: string;
     variantId?: string;

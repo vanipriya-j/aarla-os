@@ -3,7 +3,17 @@
 import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { partnerStockFor } from "@/lib/domain/ledger";
 import type { PartnerType, Product } from "@/lib/domain/types";
-import { useMemo, useState } from "react";
+import type {
+  PartnerInvoice,
+  UnbilledPartnerSale,
+} from "@/lib/domain/partner-commerce-types";
+import {
+  listPartnerInvoicesAction,
+  listUnbilledPartnerSalesAction,
+  raisePartnerInvoiceAction,
+  receivePartnerPaymentAction,
+} from "@/app/actions/partner-commerce-actions";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
@@ -22,16 +32,38 @@ const PARTNER_TYPES: PartnerType[] = [
   "Distributor",
 ];
 
-type ModalKind = "create" | "transfer" | "legacy" | "sale" | "payment" | null;
+type ModalKind =
+  | "create"
+  | "transfer"
+  | "recall"
+  | "legacy"
+  | "sale"
+  | "invoice"
+  | "payment"
+  | null;
 
 function firstVariantId(product: Product | undefined): string {
   return product?.variants[0]?.id ?? "";
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const base64 = result.includes(",") ? result.split(",")[1]! : result;
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function PartnersPage() {
   const {
     movements,
     transfer,
+    transferFromPartner,
     partnerSale,
     createPartner,
     establishPartnerOpeningBalances,
@@ -40,6 +72,7 @@ export default function PartnersPage() {
     locations,
     hydrated,
     error,
+    refresh,
   } = useAppLedger();
   const { registrations } = useAppNetwork();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -58,6 +91,18 @@ export default function PartnersPage() {
   const [newContact, setNewContact] = useState("");
   const [newMargin, setNewMargin] = useState(0);
   const [newNotes, setNewNotes] = useState("");
+
+  const [unbilled, setUnbilled] = useState<UnbilledPartnerSale[]>([]);
+  const [selectedSaleUuids, setSelectedSaleUuids] = useState<string[]>([]);
+  const [adjustedTotal, setAdjustedTotal] = useState(0);
+  const [invoiceNotes, setInvoiceNotes] = useState("");
+  const [invoicePreview, setInvoicePreview] = useState<PartnerInvoice | null>(null);
+
+  const [openInvoices, setOpenInvoices] = useState<PartnerInvoice[]>([]);
+  const [payInvoiceId, setPayInvoiceId] = useState("");
+  const [payAmount, setPayAmount] = useState(0);
+  const [payNotes, setPayNotes] = useState("");
+  const [payFile, setPayFile] = useState<File | null>(null);
 
   const selected =
     partners.find((p) => p.id === (selectedId ?? partners[0]?.id)) ?? partners[0];
@@ -109,11 +154,27 @@ export default function PartnersPage() {
       })
     : [];
 
-  const openStockModal = (kind: "transfer" | "legacy" | "sale") => {
+  const computedInvoiceTotal = useMemo(
+    () =>
+      Math.round(
+        unbilled
+          .filter((s) => selectedSaleUuids.includes(s.movementUuid))
+          .reduce((sum, s) => sum + s.lineTotal, 0) * 100,
+      ) / 100,
+    [unbilled, selectedSaleUuids],
+  );
+
+  useEffect(() => {
+    if (modal === "invoice") {
+      setAdjustedTotal(computedInvoiceTotal);
+    }
+  }, [computedInvoiceTotal, modal]);
+
+  const openStockModal = (kind: "transfer" | "recall" | "legacy" | "sale") => {
     const product = products[0];
     setXferProduct(product?.id ?? "");
     setXferVariant(firstVariantId(product));
-    setXferQty(kind === "sale" ? 1 : 5);
+    setXferQty(kind === "sale" || kind === "recall" ? 1 : 5);
     setXferNotes("");
     setModal(kind);
   };
@@ -128,9 +189,52 @@ export default function PartnersPage() {
     setModal("create");
   };
 
+  const openInvoiceModal = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setInvoicePreview(null);
+    setInvoiceNotes("");
+    try {
+      const res = await listUnbilledPartnerSalesAction(selected.id);
+      if (!res.ok) {
+        showToast(res.error);
+        return;
+      }
+      setUnbilled(res.data);
+      setSelectedSaleUuids(res.data.map((s) => s.movementUuid));
+      setModal("invoice");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openPaymentModal = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setPayFile(null);
+    setPayNotes("");
+    try {
+      const res = await listPartnerInvoicesAction(selected.id);
+      if (!res.ok) {
+        showToast(res.error);
+        return;
+      }
+      const open = res.data.filter((i) =>
+        ["issued", "partially_paid"].includes(i.status),
+      );
+      setOpenInvoices(open);
+      const first = open[0];
+      setPayInvoiceId(first?.id ?? "");
+      setPayAmount(first?.balanceDue ?? 0);
+      setModal("payment");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const showToast = (message: string) => {
     setToast(message);
-    setTimeout(() => setToast(null), 3200);
+    setTimeout(() => setToast(null), 4200);
   };
 
   const confirmModal = async () => {
@@ -180,6 +284,28 @@ export default function PartnersPage() {
           mv
             ? `Moved ${productTitle} ×${xferQty} from Studio → ${selected.name}`
             : "Transfer failed — check Studio available stock for this variant.",
+        );
+        if (mv) setModal(null);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    if (modal === "recall") {
+      setBusy(true);
+      try {
+        const mv = await transferFromPartner({
+          productId: xferProduct,
+          variantId,
+          partnerId: selected.id,
+          quantity: xferQty,
+          notes: xferNotes.trim() || undefined,
+        });
+        showToast(
+          mv
+            ? `Recalled ${productTitle} ×${xferQty} from ${selected.name} → Studio`
+            : "Recall failed — partner has insufficient stock for this variant.",
         );
         if (mv) setModal(null);
       } finally {
@@ -243,9 +369,73 @@ export default function PartnersPage() {
       return;
     }
 
+    if (modal === "invoice") {
+      if (!selectedSaleUuids.length) {
+        showToast("Select at least one unbilled sale.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const res = await raisePartnerInvoiceAction({
+          partnerId: selected.id,
+          movementUuids: selectedSaleUuids,
+          adjustedTotal,
+          notes: invoiceNotes,
+          issue: true,
+        });
+        if (!res.ok) {
+          showToast(res.error);
+          return;
+        }
+        setInvoicePreview(res.data);
+        showToast(
+          `Invoice ${res.data.code} issued · ₹${res.data.adjustedTotal.toLocaleString("en-IN")}`,
+        );
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     if (modal === "payment") {
-      showToast("Payment recorded (metadata only — not a stock movement).");
-      setModal(null);
+      if (!payInvoiceId) {
+        showToast("Select an invoice to pay against.");
+        return;
+      }
+      if (payAmount <= 0) {
+        showToast("Enter a payment amount.");
+        return;
+      }
+      setBusy(true);
+      try {
+        let screenshotBase64: string | null = null;
+        let screenshotFilename: string | undefined;
+        let screenshotMimeType: string | undefined;
+        if (payFile) {
+          screenshotBase64 = await fileToBase64(payFile);
+          screenshotFilename = payFile.name;
+          screenshotMimeType = payFile.type || "image/jpeg";
+        }
+        const res = await receivePartnerPaymentAction({
+          invoiceId: payInvoiceId,
+          amount: payAmount,
+          notes: payNotes,
+          screenshotBase64,
+          screenshotFilename,
+          screenshotMimeType,
+        });
+        if (!res.ok) {
+          showToast(res.error);
+          return;
+        }
+        showToast(
+          `Payment ${res.data.payment.code} received · invoice now ${res.data.invoice.status}`,
+        );
+        setModal(null);
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
     }
   };
 
@@ -254,13 +444,28 @@ export default function PartnersPage() {
       ? "Add partner"
       : modal === "transfer"
         ? "Transfer from Studio"
-        : modal === "legacy"
-          ? "Add legacy stock"
-          : modal === "sale"
-            ? "Record sale"
-            : modal === "payment"
-              ? "Record payment"
-              : "";
+        : modal === "recall"
+          ? "Recall to Studio"
+          : modal === "legacy"
+            ? "Add legacy stock"
+            : modal === "sale"
+              ? "Record sale"
+              : modal === "invoice"
+                ? invoicePreview
+                  ? `Preview · ${invoicePreview.code}`
+                  : "Raise invoice"
+                : modal === "payment"
+                  ? "Receive payment"
+                  : "";
+
+  const modalConfirmLabel =
+    modal === "invoice"
+      ? invoicePreview
+        ? "Done"
+        : "Generate & issue"
+      : modal === "payment"
+        ? "Receive payment"
+        : "Confirm";
 
   if (!hydrated) {
     return (
@@ -277,7 +482,7 @@ export default function PartnersPage() {
     <>
       <Header
         title="Partners"
-        subtitle="Add partners, move Studio stock to them, record legacy stock already on hand, and deduct sales."
+        subtitle="Stock in and out of partners, collate sales into invoices, and receive payments."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         {toast ? (
@@ -304,7 +509,7 @@ export default function PartnersPage() {
             <p className="font-display text-xl text-deep-navy">No partners yet</p>
             <p className="text-sm text-charcoal/60 max-w-md mx-auto">
               Add a retail partner, then record legacy stock they already hold or transfer units
-              from Studio. Sales deduct from their location.
+              from Studio. Sales deduct from their location; raise an invoice later.
             </p>
             <Button onClick={openCreateModal}>
               <Plus className="size-4" />
@@ -358,14 +563,20 @@ export default function PartnersPage() {
                     <Button size="sm" variant="outline" onClick={() => openStockModal("transfer")}>
                       Transfer from Studio
                     </Button>
+                    <Button size="sm" variant="outline" onClick={() => openStockModal("recall")}>
+                      Recall to Studio
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => openStockModal("legacy")}>
                       Add legacy stock
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => openStockModal("sale")}>
                       Record sale
                     </Button>
-                    <Button size="sm" onClick={() => setModal("payment")}>
-                      Record payment
+                    <Button size="sm" variant="outline" onClick={() => void openInvoiceModal()}>
+                      Raise invoice
+                    </Button>
+                    <Button size="sm" onClick={() => void openPaymentModal()}>
+                      Receive payment
                     </Button>
                   </div>
                 </div>
@@ -435,13 +646,27 @@ export default function PartnersPage() {
       <Modal
         open={modal !== null}
         onClose={() => {
-          if (!busy) setModal(null);
+          if (!busy) {
+            setModal(null);
+            setInvoicePreview(null);
+          }
         }}
         title={modalTitle}
         footer={
-          <Button onClick={() => void confirmModal()} disabled={busy}>
-            {busy ? "Saving…" : "Confirm"}
-          </Button>
+          modal === "invoice" && invoicePreview ? (
+            <Button
+              onClick={() => {
+                setModal(null);
+                setInvoicePreview(null);
+              }}
+            >
+              Done
+            </Button>
+          ) : (
+            <Button onClick={() => void confirmModal()} disabled={busy}>
+              {busy ? "Saving…" : modalConfirmLabel}
+            </Button>
+          )
         }
       >
         {modal === "create" ? (
@@ -502,10 +727,151 @@ export default function PartnersPage() {
               />
             </Field>
           </div>
+        ) : modal === "invoice" ? (
+          invoicePreview ? (
+            <div className="space-y-3 text-sm" data-testid="partner-invoice-preview">
+              <p className="font-display text-xl text-deep-navy">{invoicePreview.code}</p>
+              <p className="text-charcoal/60">
+                {invoicePreview.partnerName} · {invoicePreview.status}
+              </p>
+              <ul className="space-y-1 border-y border-border py-2">
+                {invoicePreview.lines.map((l) => (
+                  <li key={l.id} className="flex justify-between gap-3">
+                    <span>{l.description}</span>
+                    <span>₹{l.lineTotal.toLocaleString("en-IN")}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="flex justify-between">
+                <span className="text-charcoal/55">Computed</span>
+                <span>₹{invoicePreview.computedTotal.toLocaleString("en-IN")}</span>
+              </p>
+              <p className="flex justify-between font-medium text-deep-navy">
+                <span>Invoice value</span>
+                <span>₹{invoicePreview.adjustedTotal.toLocaleString("en-IN")}</span>
+              </p>
+              {invoicePreview.notes ? (
+                <p className="text-charcoal/60">{invoicePreview.notes}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-3" data-testid="partner-raise-invoice">
+              {!unbilled.length ? (
+                <p className="text-sm text-charcoal/60">
+                  No unbilled partner sales since the last invoice. Record sales first.
+                </p>
+              ) : (
+                <ul className="space-y-2 max-h-56 overflow-y-auto">
+                  {unbilled.map((s) => {
+                    const checked = selectedSaleUuids.includes(s.movementUuid);
+                    return (
+                      <li key={s.movementUuid}>
+                        <label className="flex items-start gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedSaleUuids((prev) =>
+                                checked
+                                  ? prev.filter((id) => id !== s.movementUuid)
+                                  : [...prev, s.movementUuid],
+                              );
+                            }}
+                          />
+                          <span className="flex-1">
+                            {s.date} · {s.productTitle}
+                            {s.variantLabel ? ` · ${s.variantLabel}` : ""} ×{s.quantity}
+                            <span className="block text-xs text-charcoal/50">
+                              ₹{s.lineTotal.toLocaleString("en-IN")} · {s.reference}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="text-sm text-charcoal/60">
+                Computed from catalog prices: ₹{computedInvoiceTotal.toLocaleString("en-IN")}
+              </p>
+              <Field label="Invoice value (adjust if needed)">
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={adjustedTotal}
+                  onChange={(e) => setAdjustedTotal(Number(e.target.value))}
+                  data-testid="partner-invoice-adjusted"
+                />
+              </Field>
+              <Field label="Notes">
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  value={invoiceNotes}
+                  onChange={(e) => setInvoiceNotes(e.target.value)}
+                />
+              </Field>
+            </div>
+          )
         ) : modal === "payment" ? (
-          <p className="text-sm text-charcoal/70">
-            Payment status is partner metadata (not a stock movement).
-          </p>
+          <div className="space-y-3" data-testid="partner-receive-payment">
+            {!openInvoices.length ? (
+              <p className="text-sm text-charcoal/60">
+                No issued invoices with a balance due. Raise an invoice first.
+              </p>
+            ) : (
+              <>
+                <Field label="Invoice">
+                  <select
+                    className={selectClass}
+                    value={payInvoiceId}
+                    onChange={(e) => {
+                      const inv = openInvoices.find((i) => i.id === e.target.value);
+                      setPayInvoiceId(e.target.value);
+                      setPayAmount(inv?.balanceDue ?? 0);
+                    }}
+                  >
+                    {openInvoices.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.code} · due ₹{i.balanceDue.toLocaleString("en-IN")} ({i.status})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Amount received">
+                  <input
+                    className={inputClass}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(Number(e.target.value))}
+                    data-testid="partner-payment-amount"
+                  />
+                </Field>
+                <Field label="Transaction screenshot">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="block w-full text-sm text-charcoal/70"
+                    onChange={(e) => setPayFile(e.target.files?.[0] ?? null)}
+                    data-testid="partner-payment-screenshot"
+                  />
+                </Field>
+                <Field label="Notes">
+                  <input
+                    className={inputClass}
+                    value={payNotes}
+                    onChange={(e) => setPayNotes(e.target.value)}
+                    placeholder="UPI ref / bank transfer id"
+                  />
+                </Field>
+              </>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             <Field label="Product">
@@ -562,9 +928,11 @@ export default function PartnersPage() {
             <p className="text-xs text-charcoal/55">
               {modal === "transfer"
                 ? "Writes a Transfer: Studio → Partner. Deducts from Studio available stock."
-                : modal === "legacy"
-                  ? "One-time opening: External → Partner. Use when stock is already at the partner (does not leave Studio). Skipped if this variant already has partner qty."
-                  : "Writes a Partner Sale: Partner → Sold. Deducts from partner stock."}
+                : modal === "recall"
+                  ? "Writes a Transfer: Partner → Studio (recall). Deducts from partner stock."
+                  : modal === "legacy"
+                    ? "One-time opening: External → Partner. Use when stock is already at the partner (does not leave Studio). Skipped if this variant already has partner qty."
+                    : "Writes a Partner Sale: Partner → Sold. Deducts from partner stock. Raise an invoice later to bill these sales."}
             </p>
           </div>
         )}

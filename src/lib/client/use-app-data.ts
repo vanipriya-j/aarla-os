@@ -14,6 +14,7 @@ import {
   transferStockAction,
   transferToPartnerAction,
 } from "@/app/actions/app-actions";
+import { transferFromPartnerAction } from "@/app/actions/partner-commerce-actions";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
 import type {
   AdjustmentReason,
@@ -111,6 +112,26 @@ export function useAppLedger() {
       reference?: string;
     }) => {
       const result = await transferToPartnerAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      await refresh();
+      return result.data;
+    },
+    [refresh],
+  );
+
+  const transferFromPartner = useCallback(
+    async (input: {
+      productId: string;
+      variantId?: string;
+      partnerId: string;
+      quantity: number;
+      notes?: string;
+      reference?: string;
+    }) => {
+      const result = await transferFromPartnerAction(input);
       if (!result.ok) {
         setError(result.error);
         return null;
@@ -260,6 +281,7 @@ export function useAppLedger() {
     error,
     receive,
     transfer,
+    transferFromPartner,
     partnerSale,
     transferStock,
     adjustStock,
