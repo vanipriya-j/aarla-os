@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { FormSection, Field, inputClass } from "@/components/ui/FormSection";
 import { Button } from "@/components/ui/Button";
@@ -23,7 +22,6 @@ import type {
 } from "@/lib/domain/team-types";
 
 export default function NewTeamMemberPage() {
-  const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locations, setLocations] = useState<WorkLocation[]>([]);
@@ -92,60 +90,62 @@ export default function NewTeamMemberPage() {
     return () => clearTimeout(t);
   }, [personQuery]);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    start(async () => {
-      try {
-        const res = await createTeamMemberAction({
-          existingPersonCode,
-          displayName,
-          phone,
-          relationshipType,
-          roleTitle,
-          teamFunction,
-          defaultLocationId: locationId || null,
-          attendanceRequired,
-          expectedStartTime: startTime || null,
-          expectedEndTime: endTime || null,
-          username,
-          temporaryPin: tempPin,
-          accessRoleCodes: [accessRole],
-          personal: {
-            legalName: legalName || displayName,
-            dateOfBirth: dateOfBirth || null,
-            gender,
-            bloodGroup,
-            personalEmail,
-            alternatePhone,
-            addressLine1,
-            addressLine2,
-            city,
-            state,
-            pincode,
-            emergencyContactName: emergencyName,
-            emergencyContactPhone: emergencyPhone,
-            emergencyContactRelation: emergencyRelation,
-            idDocumentType: idType,
-            idDocumentNumber: idNumber,
-            startDate: startDate || null,
-            notes: personalNotes,
-          },
-        });
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        router.push(`/team/${res.member.id}`);
-        router.refresh();
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Create stalled — check /setup was run, then retry with a username that isn’t admin/crm.",
-        );
+    setSubmitting(true);
+    try {
+      const res = await createTeamMemberAction({
+        existingPersonCode,
+        displayName,
+        phone,
+        relationshipType,
+        roleTitle,
+        teamFunction,
+        defaultLocationId: locationId || null,
+        attendanceRequired,
+        expectedStartTime: startTime || null,
+        expectedEndTime: endTime || null,
+        username,
+        temporaryPin: tempPin,
+        accessRoleCodes: [accessRole],
+        personal: {
+          legalName: legalName || displayName,
+          dateOfBirth: dateOfBirth || null,
+          gender,
+          bloodGroup,
+          personalEmail,
+          alternatePhone,
+          addressLine1,
+          addressLine2,
+          city,
+          state,
+          pincode,
+          emergencyContactName: emergencyName,
+          emergencyContactPhone: emergencyPhone,
+          emergencyContactRelation: emergencyRelation,
+          idDocumentType: idType,
+          idDocumentNumber: idNumber,
+          startDate: startDate || null,
+          notes: personalNotes,
+        },
+      });
+      if (!res.ok) {
+        setError(res.error);
+        setSubmitting(false);
+        return;
       }
-    });
+      // Hard navigate — soft router.push inside useTransition left "Creating…" stuck
+      // even after the member was saved (as with Vanipriya).
+      window.location.assign(`/team/${res.member.id}`);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Create stalled — check /setup was run, then retry with a username that isn’t admin/crm.",
+      );
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -552,8 +552,8 @@ export default function NewTeamMemberPage() {
             </p>
           ) : null}
 
-          <Button type="submit" disabled={pending} data-testid="team-add-submit">
-            {pending ? "Creating…" : "Create team member"}
+          <Button type="submit" disabled={submitting} data-testid="team-add-submit">
+            {submitting ? "Creating…" : "Create team member"}
           </Button>
         </form>
       </main>

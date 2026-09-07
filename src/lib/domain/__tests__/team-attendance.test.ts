@@ -28,6 +28,8 @@ describe("team credential hash", () => {
     expect(normalizeUsername(" Shreen ")).toBe("shreen");
     expect(isValidUsername("dhilip")).toBe(true);
     expect(isValidUsername("a")).toBe(false);
+    expect(isReservedUsername("admin")).toBe(true);
+    expect(isReservedUsername("shreen")).toBe(false);
   });
 });
 
