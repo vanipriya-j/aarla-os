@@ -38,6 +38,13 @@ export function isValidUsername(raw: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{1,31}$/.test(u);
 }
 
+/** Reserved for env founder/CRM shared logins — not team accounts. */
+const RESERVED_USERNAMES = new Set(["admin", "crm", "local", "root", "system"]);
+
+export function isReservedUsername(raw: string): boolean {
+  return RESERVED_USERNAMES.has(normalizeUsername(raw));
+}
+
 export function isValidPinOrPassword(raw: string): boolean {
   return raw.length >= 4 && raw.length <= 128;
 }

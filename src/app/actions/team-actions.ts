@@ -42,14 +42,20 @@ export async function searchPeopleForTeamAction(query: string) {
 }
 
 export async function createTeamMemberAction(input: CreateTeamMemberInput) {
-  await requireAdmin();
   try {
+    await requireAdmin();
     const member = await TeamService.createTeamMember(input);
     return { ok: true as const, member };
   } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Could not create team member";
+    const hint =
+      /team_personal_profiles|relation .* does not exist/i.test(message)
+        ? " Run /setup to apply the latest Team migrations, then try again."
+        : "";
     return {
       ok: false as const,
-      error: err instanceof Error ? err.message : "Could not create team member",
+      error: `${message}${hint}`,
     };
   }
 }

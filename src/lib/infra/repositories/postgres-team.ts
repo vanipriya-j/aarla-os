@@ -5,6 +5,7 @@ import { getPool } from "@/lib/infra/db/pool";
 import { ORG_ID, stableId } from "@/lib/infra/db/ids";
 import {
   hashCredential,
+  isReservedUsername,
   isValidPinOrPassword,
   isValidUsername,
   normalizeUsername,
@@ -474,6 +475,11 @@ export function createTeamRepository(q: Q = poolQ()): TeamRepository {
     async createTeamMember(input: CreateTeamMemberInput) {
       if (!isValidUsername(input.username)) {
         throw new Error("Username must be 2–32 chars: letters, numbers, . _ -");
+      }
+      if (isReservedUsername(input.username)) {
+        throw new Error(
+          `Username “${normalizeUsername(input.username)}” is reserved for the founder/CRM login. Pick something like shreen or dhilip.`,
+        );
       }
       if (!isValidPinOrPassword(input.temporaryPin)) {
         throw new Error("Temporary PIN/password must be at least 4 characters");

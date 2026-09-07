@@ -6,6 +6,7 @@ import {
 } from "@/lib/domain/team-types";
 import {
   hashCredential,
+  isReservedUsername,
   isValidUsername,
   normalizeUsername,
   verifyCredential,

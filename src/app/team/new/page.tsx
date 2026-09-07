@@ -96,47 +96,55 @@ export default function NewTeamMemberPage() {
     e.preventDefault();
     setError(null);
     start(async () => {
-      const res = await createTeamMemberAction({
-        existingPersonCode,
-        displayName,
-        phone,
-        relationshipType,
-        roleTitle,
-        teamFunction,
-        defaultLocationId: locationId || null,
-        attendanceRequired,
-        expectedStartTime: startTime || null,
-        expectedEndTime: endTime || null,
-        username,
-        temporaryPin: tempPin,
-        accessRoleCodes: [accessRole],
-        personal: {
-          legalName: legalName || displayName,
-          dateOfBirth: dateOfBirth || null,
-          gender,
-          bloodGroup,
-          personalEmail,
-          alternatePhone,
-          addressLine1,
-          addressLine2,
-          city,
-          state,
-          pincode,
-          emergencyContactName: emergencyName,
-          emergencyContactPhone: emergencyPhone,
-          emergencyContactRelation: emergencyRelation,
-          idDocumentType: idType,
-          idDocumentNumber: idNumber,
-          startDate: startDate || null,
-          notes: personalNotes,
-        },
-      });
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      try {
+        const res = await createTeamMemberAction({
+          existingPersonCode,
+          displayName,
+          phone,
+          relationshipType,
+          roleTitle,
+          teamFunction,
+          defaultLocationId: locationId || null,
+          attendanceRequired,
+          expectedStartTime: startTime || null,
+          expectedEndTime: endTime || null,
+          username,
+          temporaryPin: tempPin,
+          accessRoleCodes: [accessRole],
+          personal: {
+            legalName: legalName || displayName,
+            dateOfBirth: dateOfBirth || null,
+            gender,
+            bloodGroup,
+            personalEmail,
+            alternatePhone,
+            addressLine1,
+            addressLine2,
+            city,
+            state,
+            pincode,
+            emergencyContactName: emergencyName,
+            emergencyContactPhone: emergencyPhone,
+            emergencyContactRelation: emergencyRelation,
+            idDocumentType: idType,
+            idDocumentNumber: idNumber,
+            startDate: startDate || null,
+            notes: personalNotes,
+          },
+        });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        router.push(`/team/${res.member.id}`);
+        router.refresh();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Create stalled — check /setup was run, then retry with a username that isn’t admin/crm.",
+        );
       }
-      router.push(`/team/${res.member.id}`);
-      router.refresh();
     });
   };
 
@@ -504,6 +512,10 @@ export default function NewTeamMemberPage() {
                 data-testid="team-username"
               />
             </Field>
+            <p className="text-xs text-charcoal/50 -mt-2">
+              Use their name (e.g. shreen) — not <code>admin</code> or <code>crm</code>, those are
+              the founder logins.
+            </p>
             <Field label="Temporary PIN / password">
               <input
                 className={inputClass}
