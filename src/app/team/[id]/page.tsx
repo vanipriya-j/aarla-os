@@ -105,6 +105,79 @@ export default function TeamMemberDetailPage() {
           </p>
         </FormSection>
 
+        <FormSection title="Personal details">
+          {member.personal ? (
+            <div className="space-y-2 text-sm text-charcoal/75" data-testid="team-personal-details">
+              <p>
+                <span className="text-charcoal/45">Legal name · </span>
+                {member.personal.legalName || "—"}
+              </p>
+              <p>
+                <span className="text-charcoal/45">Date of birth · </span>
+                {member.personal.dateOfBirth || "—"}
+                {member.personal.bloodGroup
+                  ? ` · Blood ${member.personal.bloodGroup}`
+                  : ""}
+              </p>
+              <p>
+                <span className="text-charcoal/45">Phone · </span>
+                {member.phone || "—"}
+                {member.personal.alternatePhone
+                  ? ` · Alt ${member.personal.alternatePhone}`
+                  : ""}
+              </p>
+              {member.personal.personalEmail ? (
+                <p>
+                  <span className="text-charcoal/45">Personal email · </span>
+                  {member.personal.personalEmail}
+                </p>
+              ) : null}
+              <p>
+                <span className="text-charcoal/45">Address · </span>
+                {[
+                  member.personal.addressLine1,
+                  member.personal.addressLine2,
+                  member.personal.city,
+                  member.personal.state,
+                  member.personal.pincode,
+                ]
+                  .filter(Boolean)
+                  .join(", ") || "—"}
+              </p>
+              <p>
+                <span className="text-charcoal/45">Emergency · </span>
+                {member.personal.emergencyContactName || "—"}
+                {member.personal.emergencyContactPhone
+                  ? ` · ${member.personal.emergencyContactPhone}`
+                  : ""}
+                {member.personal.emergencyContactRelation
+                  ? ` (${member.personal.emergencyContactRelation})`
+                  : ""}
+              </p>
+              <p>
+                <span className="text-charcoal/45">ID · </span>
+                {member.personal.idDocumentType
+                  ? `${member.personal.idDocumentType.replaceAll("_", " ")} ${member.personal.idDocumentNumber}`.trim()
+                  : "—"}
+              </p>
+              {member.personal.startDate ? (
+                <p>
+                  <span className="text-charcoal/45">Started · </span>
+                  {member.personal.startDate}
+                </p>
+              ) : null}
+              {member.personal.notes ? (
+                <p>
+                  <span className="text-charcoal/45">Notes · </span>
+                  {member.personal.notes}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-charcoal/50">No personal details on file yet.</p>
+          )}
+        </FormSection>
+
         <FormSection title="Actions">
           <div className="flex flex-wrap gap-2">
             <Button

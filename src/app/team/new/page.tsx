@@ -16,6 +16,8 @@ import type {
   AccessRole,
   AccessRoleCode,
   TeamFunction,
+  TeamGender,
+  TeamIdDocumentType,
   TeamRelationshipType,
   WorkLocation,
 } from "@/lib/domain/team-types";
@@ -34,6 +36,24 @@ export default function NewTeamMemberPage() {
 
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [gender, setGender] = useState<TeamGender>("");
+  const [bloodGroup, setBloodGroup] = useState("");
+  const [personalEmail, setPersonalEmail] = useState("");
+  const [alternatePhone, setAlternatePhone] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [pincode, setPincode] = useState("");
+  const [emergencyName, setEmergencyName] = useState("");
+  const [emergencyPhone, setEmergencyPhone] = useState("");
+  const [emergencyRelation, setEmergencyRelation] = useState("");
+  const [idType, setIdType] = useState<TeamIdDocumentType>("");
+  const [idNumber, setIdNumber] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [personalNotes, setPersonalNotes] = useState("");
   const [roleTitle, setRoleTitle] = useState("");
   const [teamFunction, setTeamFunction] = useState<TeamFunction>("Operations");
   const [relationshipType, setRelationshipType] =
@@ -90,6 +110,26 @@ export default function NewTeamMemberPage() {
         username,
         temporaryPin: tempPin,
         accessRoleCodes: [accessRole],
+        personal: {
+          legalName: legalName || displayName,
+          dateOfBirth: dateOfBirth || null,
+          gender,
+          bloodGroup,
+          personalEmail,
+          alternatePhone,
+          addressLine1,
+          addressLine2,
+          city,
+          state,
+          pincode,
+          emergencyContactName: emergencyName,
+          emergencyContactPhone: emergencyPhone,
+          emergencyContactRelation: emergencyRelation,
+          idDocumentType: idType,
+          idDocumentNumber: idNumber,
+          startDate: startDate || null,
+          notes: personalNotes,
+        },
       });
       if (!res.ok) {
         setError(res.error);
@@ -179,6 +219,186 @@ export default function NewTeamMemberPage() {
                 onChange={(e) => setPhone(e.target.value)}
               />
             </Field>
+          </FormSection>
+
+          <FormSection
+            title="Personal details"
+            description="Office onboarding — kept for Team admins only. Not shown on CRM People."
+          >
+            <Field label="Legal / full name">
+              <input
+                className={inputClass}
+                value={legalName}
+                onChange={(e) => setLegalName(e.target.value)}
+                placeholder="As on ID document"
+                data-testid="team-legal-name"
+              />
+            </Field>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <Field label="Date of birth">
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  data-testid="team-dob"
+                />
+              </Field>
+              <Field label="Gender">
+                <select
+                  className={inputClass}
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value as TeamGender)}
+                >
+                  <option value="">—</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="non_binary">Non-binary</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                  <option value="other">Other</option>
+                </select>
+              </Field>
+              <Field label="Blood group">
+                <input
+                  className={inputClass}
+                  value={bloodGroup}
+                  onChange={(e) => setBloodGroup(e.target.value)}
+                  placeholder="e.g. B+"
+                />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Personal email (optional)">
+                <input
+                  type="email"
+                  className={inputClass}
+                  value={personalEmail}
+                  onChange={(e) => setPersonalEmail(e.target.value)}
+                  placeholder="Not required for login"
+                />
+              </Field>
+              <Field label="Alternate phone">
+                <input
+                  className={inputClass}
+                  value={alternatePhone}
+                  onChange={(e) => setAlternatePhone(e.target.value)}
+                />
+              </Field>
+            </div>
+            <Field label="Address">
+              <input
+                className={inputClass}
+                value={addressLine1}
+                onChange={(e) => setAddressLine1(e.target.value)}
+                placeholder="Flat / street"
+                data-testid="team-address"
+              />
+            </Field>
+            <Field label="Address line 2">
+              <input
+                className={inputClass}
+                value={addressLine2}
+                onChange={(e) => setAddressLine2(e.target.value)}
+                placeholder="Area / landmark"
+              />
+            </Field>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <Field label="City">
+                <input
+                  className={inputClass}
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                />
+              </Field>
+              <Field label="State">
+                <input
+                  className={inputClass}
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                />
+              </Field>
+              <Field label="PIN code">
+                <input
+                  className={inputClass}
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <Field label="Emergency contact">
+                <input
+                  className={inputClass}
+                  value={emergencyName}
+                  onChange={(e) => setEmergencyName(e.target.value)}
+                  data-testid="team-emergency-name"
+                />
+              </Field>
+              <Field label="Emergency phone">
+                <input
+                  className={inputClass}
+                  value={emergencyPhone}
+                  onChange={(e) => setEmergencyPhone(e.target.value)}
+                  data-testid="team-emergency-phone"
+                />
+              </Field>
+              <Field label="Relation">
+                <input
+                  className={inputClass}
+                  value={emergencyRelation}
+                  onChange={(e) => setEmergencyRelation(e.target.value)}
+                  placeholder="Parent / spouse / …"
+                />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="ID document">
+                <select
+                  className={inputClass}
+                  value={idType}
+                  onChange={(e) => setIdType(e.target.value as TeamIdDocumentType)}
+                  data-testid="team-id-type"
+                >
+                  <option value="">—</option>
+                  <option value="aadhaar">Aadhaar</option>
+                  <option value="pan">PAN</option>
+                  <option value="driving_licence">Driving licence</option>
+                  <option value="passport">Passport</option>
+                  <option value="voter_id">Voter ID</option>
+                  <option value="other">Other</option>
+                </select>
+              </Field>
+              <Field label="ID number">
+                <input
+                  className={inputClass}
+                  value={idNumber}
+                  onChange={(e) => setIdNumber(e.target.value)}
+                  data-testid="team-id-number"
+                />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Start / joining date">
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </Field>
+              <Field label="Notes">
+                <input
+                  className={inputClass}
+                  value={personalNotes}
+                  onChange={(e) => setPersonalNotes(e.target.value)}
+                  placeholder="Anything the office should know"
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-charcoal/45">
+              ID and contact details are for office records only — not used for login or face
+              recognition.
+            </p>
           </FormSection>
 
           <FormSection title="Team relationship">

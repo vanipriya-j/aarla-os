@@ -35,6 +35,20 @@ Credentials are **scrypt**-hashed. Never stored plaintext.
 
 Camera captures are **not** facial recognition. Images are stored as `bytea` and served only via authenticated `/api/attendance/evidence/[id]`. Retention: keep while operationally needed; deletion/expiry can be added as policy without schema rewrite.
 
+## Personal details (onboarding)
+
+When adding a team member, Admin can capture office onboarding details in `team_personal_profiles`:
+
+- Legal name, DOB, gender, blood group
+- Personal email / alternate phone (optional — **not** used for login)
+- Address
+- Emergency contact
+- ID document type + number (Aadhaar / PAN / …)
+- Start date + notes
+
+These stay under Team admin views — not mixed into CRM People filters.
+
 ## Setup
 
-Run `/setup` (or `npm run db:migrate`) so `20260906190000_team_attendance_access.sql` applies.
+Run `/setup` (or `npm run db:migrate`) so team migrations apply, including `20260907010000_team_personal_profiles.sql`.
+

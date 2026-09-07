@@ -19,8 +19,11 @@ import type {
   InternalAccount,
   InternalAccountStatus,
   TeamFunction,
+  TeamGender,
+  TeamIdDocumentType,
   TeamMemberCard,
   TeamOverviewMetrics,
+  TeamPersonalProfile,
   TeamRelationship,
   TeamRelationshipType,
   WorkLocation,
@@ -54,6 +57,175 @@ function iso(v: Date | string | null | undefined): string | null {
   if (!v) return null;
   if (v instanceof Date) return v.toISOString();
   return new Date(v).toISOString();
+}
+
+function dateOnly(v: Date | string | null | undefined): string | null {
+  if (!v) return null;
+  if (typeof v === "string") return v.slice(0, 10);
+  return v.toISOString().slice(0, 10);
+}
+
+function emptyPersonal(): TeamPersonalProfile {
+  return {
+    legalName: "",
+    dateOfBirth: null,
+    gender: "",
+    bloodGroup: "",
+    personalEmail: "",
+    alternatePhone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    pincode: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    emergencyContactRelation: "",
+    idDocumentType: "",
+    idDocumentNumber: "",
+    startDate: null,
+    notes: "",
+  };
+}
+
+function mapPersonal(r: {
+  legal_name: string;
+  date_of_birth: Date | string | null;
+  gender: TeamGender;
+  blood_group: string;
+  personal_email: string;
+  alternate_phone: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  emergency_contact_relation: string;
+  id_document_type: TeamIdDocumentType;
+  id_document_number: string;
+  start_date: Date | string | null;
+  notes: string;
+}): TeamPersonalProfile {
+  return {
+    legalName: r.legal_name ?? "",
+    dateOfBirth: dateOnly(r.date_of_birth),
+    gender: r.gender ?? "",
+    bloodGroup: r.blood_group ?? "",
+    personalEmail: r.personal_email ?? "",
+    alternatePhone: r.alternate_phone ?? "",
+    addressLine1: r.address_line1 ?? "",
+    addressLine2: r.address_line2 ?? "",
+    city: r.city ?? "",
+    state: r.state ?? "",
+    pincode: r.pincode ?? "",
+    emergencyContactName: r.emergency_contact_name ?? "",
+    emergencyContactPhone: r.emergency_contact_phone ?? "",
+    emergencyContactRelation: r.emergency_contact_relation ?? "",
+    idDocumentType: r.id_document_type ?? "",
+    idDocumentNumber: r.id_document_number ?? "",
+    startDate: dateOnly(r.start_date),
+    notes: r.notes ?? "",
+  };
+}
+
+async function loadPersonal(q: Q, personId: string): Promise<TeamPersonalProfile | null> {
+  try {
+    const rows = await q<Parameters<typeof mapPersonal>[0]>(
+      `select legal_name, date_of_birth, gender, blood_group, personal_email,
+              alternate_phone, address_line1, address_line2, city, state, pincode,
+              emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+              id_document_type, id_document_number, start_date, notes
+       from team_personal_profiles
+       where organization_id = $1 and person_id = $2`,
+      [ORG_ID, personId],
+    );
+    return rows[0] ? mapPersonal(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function upsertPersonal(
+  q: Q,
+  input: {
+    personId: string;
+    teamRelationshipId: string;
+    personal: Partial<TeamPersonalProfile> | null | undefined;
+    displayName: string;
+  },
+) {
+  const p = { ...emptyPersonal(), ...(input.personal ?? {}) };
+  if (!p.legalName.trim()) p.legalName = input.displayName.trim();
+  await q(
+    `insert into team_personal_profiles (
+       organization_id, person_id, team_relationship_id,
+       legal_name, date_of_birth, gender, blood_group,
+       personal_email, alternate_phone,
+       address_line1, address_line2, city, state, pincode,
+       emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+       id_document_type, id_document_number, start_date, notes
+     ) values (
+       $1, $2, $3::uuid,
+       $4, $5::date, $6, $7,
+       $8, $9,
+       $10, $11, $12, $13, $14,
+       $15, $16, $17,
+       $18, $19, $20::date, $21
+     )
+     on conflict (organization_id, person_id) do update set
+       team_relationship_id = excluded.team_relationship_id,
+       legal_name = excluded.legal_name,
+       date_of_birth = excluded.date_of_birth,
+       gender = excluded.gender,
+       blood_group = excluded.blood_group,
+       personal_email = excluded.personal_email,
+       alternate_phone = excluded.alternate_phone,
+       address_line1 = excluded.address_line1,
+       address_line2 = excluded.address_line2,
+       city = excluded.city,
+       state = excluded.state,
+       pincode = excluded.pincode,
+       emergency_contact_name = excluded.emergency_contact_name,
+       emergency_contact_phone = excluded.emergency_contact_phone,
+       emergency_contact_relation = excluded.emergency_contact_relation,
+       id_document_type = excluded.id_document_type,
+       id_document_number = excluded.id_document_number,
+       start_date = excluded.start_date,
+       notes = excluded.notes,
+       updated_at = now()`,
+    [
+      ORG_ID,
+      input.personId,
+      input.teamRelationshipId,
+      p.legalName.trim(),
+      p.dateOfBirth || null,
+      p.gender || "",
+      p.bloodGroup.trim(),
+      p.personalEmail.trim(),
+      p.alternatePhone.trim(),
+      p.addressLine1.trim(),
+      p.addressLine2.trim(),
+      p.city.trim(),
+      p.state.trim(),
+      p.pincode.trim(),
+      p.emergencyContactName.trim(),
+      p.emergencyContactPhone.trim(),
+      p.emergencyContactRelation.trim(),
+      p.idDocumentType || "",
+      p.idDocumentNumber.trim(),
+      p.startDate || null,
+      p.notes.trim(),
+    ],
+  );
+  if (p.city.trim()) {
+    await q(
+      `update people set city = case when city = '' then $3 else city end, updated_at = now()
+       where id = $1 and organization_id = $2`,
+      [input.personId, ORG_ID, p.city.trim()],
+    );
+  }
 }
 
 function mapLocation(r: {
@@ -105,6 +277,7 @@ async function mapTeamRow(
      where ia.person_id = $1 and ia.organization_id = $2`,
     [r.person_id, ORG_ID],
   );
+  const personal = await loadPersonal(q, r.person_id);
   return {
     id: r.id,
     personId: r.person_id,
@@ -125,6 +298,7 @@ async function mapTeamRow(
     username: r.username,
     accountStatus: r.account_status,
     accessRoleCodes: roles.map((x) => x.code),
+    personal,
   };
 }
 
@@ -416,6 +590,13 @@ export function createTeamRepository(q: Q = poolQ()): TeamRepository {
       );
 
       await this.setAccountRoles(accountId, input.accessRoleCodes);
+
+      await upsertPersonal(q, {
+        personId,
+        teamRelationshipId: teamId,
+        personal: input.personal,
+        displayName: input.displayName,
+      });
 
       const member = await this.getTeamMember(teamId);
       if (!member) throw new Error("Failed to load created team member");

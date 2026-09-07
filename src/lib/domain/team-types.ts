@@ -59,6 +59,45 @@ export type WorkLocation = {
   active: boolean;
 };
 
+/** Office onboarding / personal details — not CRM People fields. */
+export type TeamIdDocumentType =
+  | ""
+  | "aadhaar"
+  | "pan"
+  | "driving_licence"
+  | "passport"
+  | "voter_id"
+  | "other";
+
+export type TeamGender =
+  | ""
+  | "female"
+  | "male"
+  | "non_binary"
+  | "prefer_not_to_say"
+  | "other";
+
+export type TeamPersonalProfile = {
+  legalName: string;
+  dateOfBirth: string | null; // YYYY-MM-DD
+  gender: TeamGender;
+  bloodGroup: string;
+  personalEmail: string;
+  alternatePhone: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  emergencyContactRelation: string;
+  idDocumentType: TeamIdDocumentType;
+  idDocumentNumber: string;
+  startDate: string | null;
+  notes: string;
+};
+
 export type TeamRelationship = {
   id: string;
   personId: string;
@@ -79,6 +118,7 @@ export type TeamRelationship = {
   username: string | null;
   accountStatus: InternalAccountStatus | null;
   accessRoleCodes: AccessRoleCode[];
+  personal: TeamPersonalProfile | null;
 };
 
 export type InternalAccount = {

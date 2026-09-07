@@ -11,6 +11,7 @@ import type {
   TeamFunction,
   TeamMemberCard,
   TeamOverviewMetrics,
+  TeamPersonalProfile,
   TeamRelationship,
   TeamRelationshipType,
   WorkLocation,
@@ -34,6 +35,8 @@ export type CreateTeamMemberInput = {
   username: string;
   temporaryPin: string;
   accessRoleCodes: AccessRoleCode[];
+  /** Office onboarding / personal details (optional fields allowed). */
+  personal?: Partial<TeamPersonalProfile> | null;
 };
 
 export type TeamRepository = {
