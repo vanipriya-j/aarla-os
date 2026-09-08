@@ -65,6 +65,20 @@ function newMovementId(prefix = "mv"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Unique suffix so same partner/SKU/qty can transfer more than once (fingerprint uses reference). */
+function uniqueMovementRef(
+  kind: "TR" | "RECALL" | "PSALE",
+  partnerId: string,
+  productId: string,
+  variantId: string | undefined,
+  quantity: number,
+): string {
+  const partner = partnerId.toUpperCase().replace(/^PARTNER-/, "");
+  const variant = variantId ? `-${variantId}` : "";
+  const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${kind}-${partner}-${productId}${variant}-${quantity}-${nonce}`;
+}
+
 /**
  * Only mutator of business state. Repositories persist; this layer owns rules.
  */
@@ -241,7 +255,8 @@ export class BusinessEngine {
       const tx = createPostgresUnitOfWork(client);
       const locations = await tx.locations.list();
       const loc = locations.find((l) => l.partnerId === input.partnerId);
-      if (!loc || input.quantity <= 0) return null;
+      if (!loc) throw new Error("Partner location not found");
+      if (input.quantity <= 0) throw new Error("Quantity must be positive");
 
       const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
       const balances = deriveBalances(movements);
@@ -249,15 +264,17 @@ export class BusinessEngine {
         balanceAt(balances, input.productId, LOC_CODES.studio, input.variantId),
         0,
       );
-      if (available < input.quantity) return null;
+      if (available < input.quantity) {
+        throw new Error(
+          `Studio has ${available} available for this variant; need ${input.quantity}.`,
+        );
+      }
 
       const batch = batches.find((b) => b.productId === input.productId);
       const partner = await tx.partners.getByCode(input.partnerId);
       const reference =
         input.reference ??
-        `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
-          input.variantId ? `-${input.variantId}` : ""
-        }-${input.quantity}`;
+        uniqueMovementRef("TR", input.partnerId, input.productId, input.variantId, input.quantity);
 
       const created = await this.appendMovementsTx(tx, [
         {
@@ -272,7 +289,10 @@ export class BusinessEngine {
           notes: input.notes || `Transfer to ${partner?.name ?? loc.name}`,
         },
       ]);
-      return created[0] ?? null;
+      if (!created[0]) {
+        throw new Error("Transfer not written — duplicate movement fingerprint.");
+      }
+      return created[0];
     });
   }
 
@@ -289,20 +309,29 @@ export class BusinessEngine {
       const tx = createPostgresUnitOfWork(client);
       const locations = await tx.locations.list();
       const loc = locations.find((l) => l.partnerId === input.partnerId);
-      if (!loc || input.quantity <= 0) return null;
+      if (!loc) throw new Error("Partner location not found");
+      if (input.quantity <= 0) throw new Error("Quantity must be positive");
 
       const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
       const balances = deriveBalances(movements);
       const available = Math.max(balanceAt(balances, input.productId, loc.id, input.variantId), 0);
-      if (available < input.quantity) return null;
+      if (available < input.quantity) {
+        throw new Error(
+          `Partner has ${available} available for this variant; need ${input.quantity}.`,
+        );
+      }
 
       const batch = batches.find((b) => b.productId === input.productId);
       const partner = await tx.partners.getByCode(input.partnerId);
       const reference =
         input.reference ??
-        `RECALL-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
-          input.variantId ? `-${input.variantId}` : ""
-        }-${input.quantity}`;
+        uniqueMovementRef(
+          "RECALL",
+          input.partnerId,
+          input.productId,
+          input.variantId,
+          input.quantity,
+        );
 
       const created = await this.appendMovementsTx(tx, [
         {
@@ -317,7 +346,10 @@ export class BusinessEngine {
           notes: input.notes || `Recall to Studio from ${partner?.name ?? loc.name}`,
         },
       ]);
-      return created[0] ?? null;
+      if (!created[0]) {
+        throw new Error("Recall not written — duplicate movement fingerprint.");
+      }
+      return created[0];
     });
   }
 
@@ -333,19 +365,28 @@ export class BusinessEngine {
       const tx = createPostgresUnitOfWork(client);
       const locations = await tx.locations.list();
       const loc = locations.find((l) => l.partnerId === input.partnerId);
-      if (!loc || input.quantity <= 0) return null;
+      if (!loc) throw new Error("Partner location not found");
+      if (input.quantity <= 0) throw new Error("Quantity must be positive");
 
       const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
       const balances = deriveBalances(movements);
       const bal = Math.max(balanceAt(balances, input.productId, loc.id, input.variantId), 0);
-      if (bal < input.quantity) return null;
+      if (bal < input.quantity) {
+        throw new Error(
+          `Partner has ${bal} available for this variant; need ${input.quantity}.`,
+        );
+      }
 
       const batch = batches.find((b) => b.productId === input.productId);
       const reference =
         input.reference ??
-        `PSALE-${input.partnerId}-${input.productId}${
-          input.variantId ? `-${input.variantId}` : ""
-        }-${input.quantity}`;
+        uniqueMovementRef(
+          "PSALE",
+          input.partnerId,
+          input.productId,
+          input.variantId,
+          input.quantity,
+        );
 
       const created = await this.appendMovementsTx(tx, [
         {
@@ -360,7 +401,10 @@ export class BusinessEngine {
           notes: input.notes || "Partner sale",
         },
       ]);
-      return created[0] ?? null;
+      if (!created[0]) {
+        throw new Error("Sale not written — duplicate movement fingerprint.");
+      }
+      return created[0];
     });
   }
 

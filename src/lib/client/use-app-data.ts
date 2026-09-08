@@ -110,14 +110,19 @@ export function useAppLedger() {
       quantity: number;
       notes?: string;
       reference?: string;
-    }) => {
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
       const result = await transferToPartnerAction(input);
       if (!result.ok) {
         setError(result.error);
-        return null;
+        return result;
+      }
+      if (!result.data) {
+        const error = "Transfer failed — check Studio stock for this variant.";
+        setError(error);
+        return { ok: false, error };
       }
       await refresh();
-      return result.data;
+      return { ok: true, data: result.data };
     },
     [refresh],
   );
@@ -130,14 +135,19 @@ export function useAppLedger() {
       quantity: number;
       notes?: string;
       reference?: string;
-    }) => {
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
       const result = await transferFromPartnerAction(input);
       if (!result.ok) {
         setError(result.error);
-        return null;
+        return result;
+      }
+      if (!result.data) {
+        const error = "Recall failed — partner has insufficient stock for this variant.";
+        setError(error);
+        return { ok: false, error };
       }
       await refresh();
-      return result.data;
+      return { ok: true, data: result.data };
     },
     [refresh],
   );
@@ -150,14 +160,19 @@ export function useAppLedger() {
       quantity: number;
       notes?: string;
       reference?: string;
-    }) => {
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
       const result = await partnerSaleAction(input);
       if (!result.ok) {
         setError(result.error);
-        return null;
+        return result;
+      }
+      if (!result.data) {
+        const error = "Sale failed — partner has insufficient stock for this variant.";
+        setError(error);
+        return { ok: false, error };
       }
       await refresh();
-      return result.data;
+      return { ok: true, data: result.data };
     },
     [refresh],
   );

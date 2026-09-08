@@ -1,7 +1,8 @@
 "use client";
 
 import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
-import { partnerStockFor } from "@/lib/domain/ledger";
+import { balanceAt, deriveBalances, partnerStockFor } from "@/lib/domain/ledger";
+import { LOC } from "@/lib/domain/catalog";
 import type { PartnerType, Product } from "@/lib/domain/types";
 import type {
   PartnerInvoice,
@@ -82,8 +83,9 @@ export default function PartnersPage() {
 
   const [xferProduct, setXferProduct] = useState(products[0]?.id ?? "prod-kolam-bottle");
   const [xferVariant, setXferVariant] = useState("");
-  const [xferQty, setXferQty] = useState(5);
+  const [xferQty, setXferQty] = useState(1);
   const [xferNotes, setXferNotes] = useState("");
+  const [productQuery, setProductQuery] = useState("");
 
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<PartnerType>("Retail Partner");
@@ -139,20 +141,59 @@ export default function PartnersPage() {
       ? Math.round((partnerRegs.length / selected.productsSold) * 100)
       : 0;
 
-  const partnerMoves = selected
-    ? movements.filter((m) => {
-        const loc = locations.find((l) => l.partnerId === selected.id);
-        if (loc) {
-          return m.toLocationId === loc.id || m.fromLocationId === loc.id;
-        }
-        const locHint = selected.id.replace("partner-", "");
-        return (
-          m.toLocationId.includes(locHint) ||
-          m.fromLocationId.includes(locHint) ||
-          m.notes.toLowerCase().includes(selected.name.toLowerCase())
-        );
-      })
-    : [];
+  const partnerMoves = useMemo(() => {
+    if (!selected) return [];
+    const loc = locations.find((l) => l.partnerId === selected.id);
+    const locHint = selected.id.replace("partner-", "");
+    const filtered = movements.filter((m) => {
+      if (loc) {
+        return m.toLocationId === loc.id || m.fromLocationId === loc.id;
+      }
+      return (
+        m.toLocationId.includes(locHint) ||
+        m.fromLocationId.includes(locHint) ||
+        m.notes.toLowerCase().includes(selected.name.toLowerCase())
+      );
+    });
+    // Newest first — previously slice(0,12) kept the oldest and hid new transfers.
+    return [...filtered].sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return b.id.localeCompare(a.id);
+    });
+  }, [movements, selected, locations]);
+
+  const balances = useMemo(() => deriveBalances(movements), [movements]);
+
+  const partnerLocId = selected
+    ? locations.find((l) => l.partnerId === selected.id)?.id
+    : undefined;
+
+  const studioAvailable = balanceAt(
+    balances,
+    xferProduct,
+    LOC.studio,
+    activeVariantId || undefined,
+  );
+  const studioProductTotal = balanceAt(balances, xferProduct, LOC.studio);
+  const partnerAvailable =
+    partnerLocId != null
+      ? balanceAt(balances, xferProduct, partnerLocId, activeVariantId || undefined)
+      : 0;
+  const partnerProductTotal =
+    partnerLocId != null ? balanceAt(balances, xferProduct, partnerLocId) : 0;
+
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) => {
+      if (p.title.toLowerCase().includes(q)) return true;
+      return p.variants.some(
+        (v) =>
+          v.label.toLowerCase().includes(q) ||
+          (v.sku || "").toLowerCase().includes(q),
+      );
+    });
+  }, [products, productQuery]);
 
   const computedInvoiceTotal = useMemo(
     () =>
@@ -174,8 +215,9 @@ export default function PartnersPage() {
     const product = products[0];
     setXferProduct(product?.id ?? "");
     setXferVariant(firstVariantId(product));
-    setXferQty(kind === "sale" || kind === "recall" ? 1 : 5);
+    setXferQty(1);
     setXferNotes("");
+    setProductQuery("");
     setModal(kind);
   };
 
@@ -273,19 +315,19 @@ export default function PartnersPage() {
     if (modal === "transfer") {
       setBusy(true);
       try {
-        const mv = await transfer({
+        const res = await transfer({
           productId: xferProduct,
           variantId,
           partnerId: selected.id,
           quantity: xferQty,
           notes: xferNotes.trim() || undefined,
         });
-        showToast(
-          mv
-            ? `Moved ${productTitle} ×${xferQty} from Studio → ${selected.name}`
-            : "Transfer failed — check Studio available stock for this variant.",
-        );
-        if (mv) setModal(null);
+        if (res.ok) {
+          showToast(`Moved ${productTitle} ×${xferQty} from Studio → ${selected.name}`);
+          setModal(null);
+        } else {
+          showToast(res.error);
+        }
       } finally {
         setBusy(false);
       }
@@ -295,19 +337,19 @@ export default function PartnersPage() {
     if (modal === "recall") {
       setBusy(true);
       try {
-        const mv = await transferFromPartner({
+        const res = await transferFromPartner({
           productId: xferProduct,
           variantId,
           partnerId: selected.id,
           quantity: xferQty,
           notes: xferNotes.trim() || undefined,
         });
-        showToast(
-          mv
-            ? `Recalled ${productTitle} ×${xferQty} from ${selected.name} → Studio`
-            : "Recall failed — partner has insufficient stock for this variant.",
-        );
-        if (mv) setModal(null);
+        if (res.ok) {
+          showToast(`Recalled ${productTitle} ×${xferQty} from ${selected.name} → Studio`);
+          setModal(null);
+        } else {
+          showToast(res.error);
+        }
       } finally {
         setBusy(false);
       }
@@ -350,19 +392,19 @@ export default function PartnersPage() {
     if (modal === "sale") {
       setBusy(true);
       try {
-        const mv = await partnerSale({
+        const res = await partnerSale({
           productId: xferProduct,
           variantId,
           partnerId: selected.id,
           quantity: xferQty,
           notes: xferNotes.trim() || undefined,
         });
-        showToast(
-          mv
-            ? `Sale recorded: ${productTitle} ×${xferQty} deducted from ${selected.name}`
-            : "Sale failed — partner has insufficient stock for this variant.",
-        );
-        if (mv) setModal(null);
+        if (res.ok) {
+          showToast(`Sale recorded: ${productTitle} ×${xferQty} deducted from ${selected.name}`);
+          setModal(null);
+        } else {
+          showToast(res.error);
+        }
       } finally {
         setBusy(false);
       }
@@ -620,7 +662,7 @@ export default function PartnersPage() {
                 <section className="card-surface p-5">
                   <h3 className="font-display text-lg text-deep-navy mb-3">Stock movement</h3>
                   <ul className="space-y-2 text-sm">
-                    {partnerMoves.slice(0, 12).map((m) => (
+                    {partnerMoves.slice(0, 20).map((m) => (
                       <li
                         key={m.id}
                         className="flex justify-between gap-3 border-b border-border pb-2"
@@ -629,13 +671,20 @@ export default function PartnersPage() {
                           {m.date} · {m.movementType} · {getProductTitle(m.productId)} ×
                           {m.quantity}
                         </span>
-                        <span className="text-charcoal/50">{m.reference}</span>
+                        <span className="text-charcoal/50 break-all text-right max-w-[45%]">
+                          {m.reference}
+                        </span>
                       </li>
                     ))}
                     {!partnerMoves.length ? (
                       <li className="text-charcoal/50">No linked movements yet</li>
                     ) : null}
                   </ul>
+                  {partnerMoves.length > 20 ? (
+                    <p className="text-xs text-charcoal/50 mt-2">
+                      Showing 20 of {partnerMoves.length} newest movements
+                    </p>
+                  ) : null}
                 </section>
               </div>
             ) : null}
@@ -874,6 +923,37 @@ export default function PartnersPage() {
           </div>
         ) : (
           <div className="space-y-3">
+            <Field label="Search product">
+              <input
+                className={inputClass}
+                value={productQuery}
+                onChange={(e) => {
+                  const q = e.target.value;
+                  setProductQuery(q);
+                  const match = products.find((p) => {
+                    const needle = q.trim().toLowerCase();
+                    if (!needle) return false;
+                    return (
+                      p.title.toLowerCase().includes(needle) ||
+                      p.variants.some(
+                        (v) =>
+                          v.label.toLowerCase().includes(needle) ||
+                          (v.sku || "").toLowerCase().includes(needle),
+                      )
+                    );
+                  });
+                  if (match && match.id !== xferProduct) {
+                    setXferProduct(match.id);
+                    const blue = match.variants.find((v) =>
+                      /blue/i.test(v.label),
+                    );
+                    setXferVariant(blue?.id ?? firstVariantId(match));
+                  }
+                }}
+                placeholder="e.g. Kolam bottle Blue"
+                data-testid="partner-stock-product-search"
+              />
+            </Field>
             <Field label="Product">
               <select
                 className={selectClass}
@@ -885,7 +965,12 @@ export default function PartnersPage() {
                 }}
                 data-testid="partner-stock-product"
               >
-                {products.map((p) => (
+                {((): Product[] => {
+                  const list = filteredProducts.length ? filteredProducts : products;
+                  if (list.some((p) => p.id === xferProduct)) return list;
+                  const current = products.find((p) => p.id === xferProduct);
+                  return current ? [current, ...list] : list;
+                })().map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.title}
                   </option>
@@ -918,6 +1003,11 @@ export default function PartnersPage() {
                 data-testid="partner-stock-qty"
               />
             </Field>
+            <p className="text-xs text-charcoal/70" data-testid="partner-stock-available">
+              {modal === "transfer" || modal === "legacy"
+                ? `Studio available: ${studioAvailable} on this variant · ${studioProductTotal} across all variants`
+                : `Partner available: ${partnerAvailable} on this variant · ${partnerProductTotal} across all variants`}
+            </p>
             <Field label="Notes (optional)">
               <input
                 className={inputClass}
