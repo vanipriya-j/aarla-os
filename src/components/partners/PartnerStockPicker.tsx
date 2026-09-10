@@ -1,6 +1,7 @@
 "use client";
 
-import { useDeferredValue, useMemo } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { Field, inputClass } from "@/components/ui/FormSection";
 import {
   filterStockOptions,
@@ -17,7 +18,8 @@ type PartnerStockPickerProps = {
   excludeKeys?: Set<string>;
   query: string;
   onQueryChange: (query: string) => void;
-  onAdd: (option: PartnerStockOption) => void;
+  /** Add one or many checked results to the draft. */
+  onAddMany: (options: PartnerStockOption[]) => void;
   requireQuery?: boolean;
   emptyHint?: string;
   testIdPrefix?: string;
@@ -29,12 +31,14 @@ export function PartnerStockPicker({
   excludeKeys,
   query,
   onQueryChange,
-  onAdd,
+  onAddMany,
   requireQuery = true,
   emptyHint = "Type to search available stock…",
   testIdPrefix = "partner-stock",
 }: PartnerStockPickerProps) {
   const deferredQuery = useDeferredValue(query.trim());
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+
   const results = useMemo(() => {
     if (requireQuery && deferredQuery.length < 1) return [];
     const raw = searchOptions
@@ -44,56 +48,154 @@ export function PartnerStockPicker({
     return raw.filter((o) => !excludeKeys.has(optionKey(o))).slice(0, 25);
   }, [options, searchOptions, deferredQuery, requireQuery, excludeKeys]);
 
+  const resultKeys = useMemo(() => new Set(results.map(optionKey)), [results]);
+
+  // Drop checks that are no longer in the visible result set.
+  useEffect(() => {
+    setChecked((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (resultKeys.has(key)) next.add(key);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [resultKeys]);
+
+  const selectedOptions = results.filter((o) => checked.has(optionKey(o)));
+  const allVisibleChecked =
+    results.length > 0 && results.every((o) => checked.has(optionKey(o)));
+
+  const toggle = (key: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setChecked((prev) => {
+      if (allVisibleChecked) {
+        const next = new Set(prev);
+        for (const o of results) next.delete(optionKey(o));
+        return next;
+      }
+      const next = new Set(prev);
+      for (const o of results) next.add(optionKey(o));
+      return next;
+    });
+  };
+
+  const addSelected = () => {
+    if (!selectedOptions.length) return;
+    onAddMany(selectedOptions);
+    setChecked(new Set());
+    onQueryChange("");
+  };
+
   return (
     <div className="space-y-3">
-      <Field label="Add products">
+      <Field label="Search products">
         <input
           className={inputClass}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search to add — e.g. Kolam bottle Blue"
+          placeholder="Search — e.g. Kolam, then multi-select"
           data-testid={`${testIdPrefix}-product-search`}
           autoComplete="off"
         />
       </Field>
 
       <div
-        className="max-h-48 overflow-y-auto rounded-xl border border-border divide-y divide-border"
-        data-testid={`${testIdPrefix}-results`}
+        className="rounded-xl border border-border overflow-hidden"
+        data-testid={`${testIdPrefix}-multiselect`}
       >
-        {!results.length ? (
-          <p className="px-3 py-3 text-sm text-charcoal/55">
-            {requireQuery && !deferredQuery
-              ? emptyHint
-              : options.length || searchOptions
-                ? "No matches for that search."
-                : "No available stock at this location."}
-          </p>
-        ) : (
-          results.map((o) => (
-            <button
-              key={optionKey(o)}
-              type="button"
-              onClick={() => onAdd(o)}
-              className="w-full text-left px-3 py-2.5 text-sm transition hover:bg-pale-cream"
-              data-testid={`${testIdPrefix}-option`}
-            >
-              <span className="block text-deep-navy font-medium">
-                {o.productTitle}
-                <span className="font-normal text-charcoal/70"> · {o.variantLabel}</span>
-              </span>
-              <span className="block text-xs text-charcoal/55 mt-0.5">
-                {o.available > 0 ? `Available ${o.available} · ` : null}
-                {o.sku ? `SKU ${o.sku} · ` : null}
-                Add
-              </span>
-            </button>
-          ))
-        )}
+        {results.length ? (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-pale-cream/60">
+            <label className="flex items-center gap-2 text-xs text-charcoal/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allVisibleChecked}
+                onChange={toggleAllVisible}
+                data-testid={`${testIdPrefix}-select-all`}
+              />
+              Select all visible ({results.length})
+            </label>
+            <span className="text-xs text-charcoal/55">{checked.size} selected</span>
+          </div>
+        ) : null}
+
+        <div
+          className="max-h-48 overflow-y-auto divide-y divide-border"
+          data-testid={`${testIdPrefix}-results`}
+        >
+          {!results.length ? (
+            <p className="px-3 py-3 text-sm text-charcoal/55">
+              {requireQuery && !deferredQuery
+                ? emptyHint
+                : options.length || searchOptions
+                  ? "No matches for that search."
+                  : "No available stock at this location."}
+            </p>
+          ) : (
+            results.map((o) => {
+              const key = optionKey(o);
+              const isChecked = checked.has(key);
+              return (
+                <label
+                  key={key}
+                  className={`flex items-start gap-3 px-3 py-2.5 text-sm cursor-pointer transition ${
+                    isChecked ? "bg-aarla-red/5" : "hover:bg-pale-cream"
+                  }`}
+                  data-testid={`${testIdPrefix}-option`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={isChecked}
+                    onChange={() => toggle(key)}
+                    data-testid={`${testIdPrefix}-option-check`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-deep-navy font-medium">
+                      {o.productTitle}
+                      <span className="font-normal text-charcoal/70">
+                        {" "}
+                        · {o.variantLabel}
+                      </span>
+                    </span>
+                    <span className="block text-xs text-charcoal/55 mt-0.5">
+                      {o.available > 0 ? `Available ${o.available}` : null}
+                      {o.available > 0 && o.sku ? " · " : null}
+                      {o.sku ? `SKU ${o.sku}` : null}
+                    </span>
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
       </div>
-      {results.length === 25 ? (
-        <p className="text-xs text-charcoal/50">Showing first 25 matches — refine search.</p>
-      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!selectedOptions.length}
+          onClick={addSelected}
+          data-testid={`${testIdPrefix}-add-selected`}
+        >
+          {selectedOptions.length
+            ? `Add ${selectedOptions.length} selected`
+            : "Add selected"}
+        </Button>
+        {results.length === 25 ? (
+          <p className="text-xs text-charcoal/50">Showing first 25 — refine search.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

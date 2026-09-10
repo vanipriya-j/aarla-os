@@ -214,19 +214,24 @@ export default function PartnersPage() {
     setModal(kind);
   };
 
-  const addDraftLine = (option: PartnerStockOption) => {
+  const addDraftLines = (added: PartnerStockOption[]) => {
+    if (!added.length) return;
     setDraftLines((prev) => {
-      const key = optionKey(option);
-      const existing = prev.find((l) => draftLineKey(l) === key);
-      if (existing) {
-        const nextQty = existing.quantity + 1;
-        const capped =
-          option.available > 0 ? Math.min(nextQty, option.available) : nextQty;
-        return prev.map((l) =>
-          draftLineKey(l) === key ? { ...l, quantity: capped, available: option.available } : l,
-        );
+      const next = [...prev];
+      for (const option of added) {
+        const key = optionKey(option);
+        const idx = next.findIndex((l) => draftLineKey(l) === key);
+        if (idx >= 0) {
+          const existing = next[idx]!;
+          const bumped = existing.quantity + 1;
+          const capped =
+            option.available > 0 ? Math.min(bumped, option.available) : bumped;
+          next[idx] = { ...existing, quantity: capped, available: option.available };
+        } else {
+          next.push(toDraftLine(option, 1));
+        }
       }
-      return [...prev, toDraftLine(option, 1)];
+      return next;
     });
     setProductQuery("");
   };
@@ -933,14 +938,14 @@ export default function PartnersPage() {
               excludeKeys={draftExcludeKeys}
               query={productQuery}
               onQueryChange={setProductQuery}
-              onAdd={addDraftLine}
+              onAddMany={addDraftLines}
               requireQuery
               emptyHint={
                 modal === "legacy"
-                  ? "Type to search the catalog, then add lines…"
+                  ? "Type to search the catalog, multi-select, then Add selected…"
                   : modal === "transfer"
-                    ? "Type to add from Studio available stock…"
-                    : "Type to add from this partner’s stock…"
+                    ? "Type to find Studio stock, multi-select, then Add selected…"
+                    : "Type to find partner stock, multi-select, then Add selected…"
               }
             />
             <PartnerStockDraftLines
@@ -972,12 +977,12 @@ export default function PartnersPage() {
             </Field>
             <p className="text-xs text-charcoal/55">
               {modal === "transfer"
-                ? "Add multiple Studio SKUs, edit quantities, then confirm once — all lines post in one save."
+                ? "Multi-select Studio SKUs, edit quantities on the draft, confirm once — one save for all lines."
                 : modal === "recall"
-                  ? "Add multiple partner SKUs to recall to Studio, edit quantities, confirm once."
+                  ? "Multi-select partner SKUs to recall, edit quantities, confirm once."
                   : modal === "legacy"
-                    ? "Add catalog lines for opening stock already at the partner; skipped if that variant already has qty."
-                    : "Add multiple sale lines from partner stock, edit quantities, confirm once."}
+                    ? "Multi-select catalog lines for opening stock; skipped if that variant already has qty."
+                    : "Multi-select sale lines from partner stock, edit quantities, confirm once."}
             </p>
           </div>
         )}
