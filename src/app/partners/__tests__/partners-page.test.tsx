@@ -5,17 +5,13 @@ import PartnersPage from "@/app/partners/page";
 
 const createPartner = vi.fn();
 const establishPartnerOpeningBalances = vi.fn();
-const transfer = vi.fn();
-const transferFromPartner = vi.fn();
-const partnerSale = vi.fn();
+const postPartnerStockBatch = vi.fn();
 const refresh = vi.fn();
 
 vi.mock("@/lib/client/use-app-data", () => ({
   useAppLedger: () => ({
     movements: [],
-    transfer,
-    transferFromPartner,
-    partnerSale,
+    postPartnerStockBatch,
     createPartner,
     establishPartnerOpeningBalances,
     partners: [
@@ -55,15 +51,14 @@ vi.mock("@/app/actions/partner-commerce-actions", () => ({
   listPartnerInvoicesAction: vi.fn(async () => ({ ok: true, data: [] })),
   raisePartnerInvoiceAction: vi.fn(),
   receivePartnerPaymentAction: vi.fn(),
+  postPartnerStockBatchAction: vi.fn(),
 }));
 
 describe("PartnersPage", () => {
   beforeEach(() => {
     createPartner.mockReset();
     establishPartnerOpeningBalances.mockReset();
-    transfer.mockReset();
-    transferFromPartner.mockReset();
-    partnerSale.mockReset();
+    postPartnerStockBatch.mockReset();
     refresh.mockReset();
   });
 

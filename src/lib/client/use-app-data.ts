@@ -14,7 +14,7 @@ import {
   transferStockAction,
   transferToPartnerAction,
 } from "@/app/actions/app-actions";
-import { transferFromPartnerAction } from "@/app/actions/partner-commerce-actions";
+import { transferFromPartnerAction, postPartnerStockBatchAction } from "@/app/actions/partner-commerce-actions";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
 import type {
   AdjustmentReason,
@@ -177,6 +177,28 @@ export function useAppLedger() {
     [refresh],
   );
 
+  const postPartnerStockBatch = useCallback(
+    async (input: {
+      kind: "transfer" | "recall" | "sale";
+      partnerId: string;
+      notes?: string;
+      lines: Array<{
+        productId: string;
+        variantId: string;
+        quantity: number;
+      }>;
+    }): Promise<{ ok: true; data: StockMovement[] } | { ok: false; error: string }> => {
+      const result = await postPartnerStockBatchAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return result;
+      }
+      await refresh();
+      return { ok: true, data: result.data };
+    },
+    [refresh],
+  );
+
   const transferStock = useCallback(
     async (input: {
       productId: string;
@@ -298,6 +320,7 @@ export function useAppLedger() {
     transfer,
     transferFromPartner,
     partnerSale,
+    postPartnerStockBatch,
     transferStock,
     adjustStock,
     createManufacturingPO,

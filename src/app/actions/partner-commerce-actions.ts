@@ -36,6 +36,20 @@ export async function transferFromPartnerAction(input: {
   return wrap(() => services.transferFromPartner(input));
 }
 
+export async function postPartnerStockBatchAction(input: {
+  kind: "transfer" | "recall" | "sale";
+  partnerId: string;
+  notes?: string;
+  lines: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    reference?: string;
+  }>;
+}) {
+  return wrap(() => services.postPartnerStockBatch(input));
+}
+
 export async function listUnbilledPartnerSalesAction(partnerId: string) {
   return wrap(() => PartnerCommerceService.listUnbilledSales(partnerId));
 }

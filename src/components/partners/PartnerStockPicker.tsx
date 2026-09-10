@@ -13,10 +13,11 @@ type PartnerStockPickerProps = {
   options: PartnerStockOption[];
   /** When set, search runs against this instead of filtering `options` (lazy catalog). */
   searchOptions?: (query: string) => PartnerStockOption[];
+  /** Hide options already on the draft. */
+  excludeKeys?: Set<string>;
   query: string;
   onQueryChange: (query: string) => void;
-  selected: PartnerStockOption | null;
-  onSelect: (option: PartnerStockOption) => void;
+  onAdd: (option: PartnerStockOption) => void;
   requireQuery?: boolean;
   emptyHint?: string;
   testIdPrefix?: string;
@@ -25,10 +26,10 @@ type PartnerStockPickerProps = {
 export function PartnerStockPicker({
   options,
   searchOptions,
+  excludeKeys,
   query,
   onQueryChange,
-  selected,
-  onSelect,
+  onAdd,
   requireQuery = true,
   emptyHint = "Type to search available stock…",
   testIdPrefix = "partner-stock",
@@ -36,44 +37,28 @@ export function PartnerStockPicker({
   const deferredQuery = useDeferredValue(query.trim());
   const results = useMemo(() => {
     if (requireQuery && deferredQuery.length < 1) return [];
-    if (searchOptions) return searchOptions(deferredQuery);
-    return filterStockOptions(options, deferredQuery, 25);
-  }, [options, searchOptions, deferredQuery, requireQuery]);
+    const raw = searchOptions
+      ? searchOptions(deferredQuery)
+      : filterStockOptions(options, deferredQuery, 40);
+    if (!excludeKeys?.size) return raw.slice(0, 25);
+    return raw.filter((o) => !excludeKeys.has(optionKey(o))).slice(0, 25);
+  }, [options, searchOptions, deferredQuery, requireQuery, excludeKeys]);
 
   return (
     <div className="space-y-3">
-      <Field label="Search product / variant">
+      <Field label="Add products">
         <input
           className={inputClass}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="e.g. Kolam bottle Blue"
+          placeholder="Search to add — e.g. Kolam bottle Blue"
           data-testid={`${testIdPrefix}-product-search`}
           autoComplete="off"
         />
       </Field>
 
-      {selected ? (
-        <div
-          className="rounded-xl border border-deep-navy/15 bg-pale-cream px-3 py-2 text-sm"
-          data-testid={`${testIdPrefix}-selected`}
-        >
-          <p className="font-medium text-deep-navy">
-            {selected.productTitle}
-            {selected.variantLabel ? ` · ${selected.variantLabel}` : ""}
-          </p>
-          <p className="text-xs text-charcoal/55 mt-0.5">
-            {selected.available > 0
-              ? `Available ${selected.available}`
-              : selected.sku
-                ? `SKU ${selected.sku}`
-                : "Selected"}
-          </p>
-        </div>
-      ) : null}
-
       <div
-        className="max-h-56 overflow-y-auto rounded-xl border border-border divide-y divide-border"
+        className="max-h-48 overflow-y-auto rounded-xl border border-border divide-y divide-border"
         data-testid={`${testIdPrefix}-results`}
       >
         {!results.length ? (
@@ -85,36 +70,25 @@ export function PartnerStockPicker({
                 : "No available stock at this location."}
           </p>
         ) : (
-          results.map((o) => {
-            const selectedRow =
-              selected != null &&
-              o.productId === selected.productId &&
-              o.variantId === selected.variantId;
-            return (
-              <button
-                key={optionKey(o)}
-                type="button"
-                onClick={() => onSelect(o)}
-                className={`w-full text-left px-3 py-2.5 text-sm transition ${
-                  selectedRow ? "bg-aarla-red/5" : "hover:bg-pale-cream"
-                }`}
-                data-testid={`${testIdPrefix}-option`}
-              >
-                <span className="block text-deep-navy font-medium">
-                  {o.productTitle}
-                  <span className="font-normal text-charcoal/70">
-                    {" "}
-                    · {o.variantLabel}
-                  </span>
-                </span>
-                <span className="block text-xs text-charcoal/55 mt-0.5">
-                  {o.available > 0 ? `Available ${o.available}` : null}
-                  {o.available > 0 && o.sku ? " · " : null}
-                  {o.sku ? `SKU ${o.sku}` : null}
-                </span>
-              </button>
-            );
-          })
+          results.map((o) => (
+            <button
+              key={optionKey(o)}
+              type="button"
+              onClick={() => onAdd(o)}
+              className="w-full text-left px-3 py-2.5 text-sm transition hover:bg-pale-cream"
+              data-testid={`${testIdPrefix}-option`}
+            >
+              <span className="block text-deep-navy font-medium">
+                {o.productTitle}
+                <span className="font-normal text-charcoal/70"> · {o.variantLabel}</span>
+              </span>
+              <span className="block text-xs text-charcoal/55 mt-0.5">
+                {o.available > 0 ? `Available ${o.available} · ` : null}
+                {o.sku ? `SKU ${o.sku} · ` : null}
+                Add
+              </span>
+            </button>
+          ))
         )}
       </div>
       {results.length === 25 ? (

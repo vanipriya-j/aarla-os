@@ -10,6 +10,7 @@ import type {
 } from "@/lib/domain/partner-commerce-types";
 import {
   buildAvailableStockOptions,
+  optionKey,
   searchCatalogStockOptions,
   type PartnerStockOption,
 } from "@/lib/domain/partner-stock-options";
@@ -28,6 +29,12 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Field, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
 import { PartnerStockPicker } from "@/components/partners/PartnerStockPicker";
+import {
+  PartnerStockDraftLines,
+  draftLineKey,
+  toDraftLine,
+  type PartnerDraftLine,
+} from "@/components/partners/PartnerStockDraftLines";
 import { Package, Plus, ScanLine, Store, ShoppingBag } from "lucide-react";
 
 const PARTNER_TYPES: PartnerType[] = [
@@ -65,9 +72,7 @@ function fileToBase64(file: File): Promise<string> {
 export default function PartnersPage() {
   const {
     movements,
-    transfer,
-    transferFromPartner,
-    partnerSale,
+    postPartnerStockBatch,
     createPartner,
     establishPartnerOpeningBalances,
     partners,
@@ -83,12 +88,9 @@ export default function PartnersPage() {
   const [modal, setModal] = useState<ModalKind>(null);
   const [busy, setBusy] = useState(false);
 
-  const [xferProduct, setXferProduct] = useState("");
-  const [xferVariant, setXferVariant] = useState("");
-  const [xferQty, setXferQty] = useState(1);
+  const [draftLines, setDraftLines] = useState<PartnerDraftLine[]>([]);
   const [xferNotes, setXferNotes] = useState("");
   const [productQuery, setProductQuery] = useState("");
-  const [pickedStock, setPickedStock] = useState<PartnerStockOption | null>(null);
 
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<PartnerType>("Retail Partner");
@@ -200,14 +202,33 @@ export default function PartnersPage() {
     }
   }, [computedInvoiceTotal, modal]);
 
+  const draftExcludeKeys = useMemo(
+    () => new Set(draftLines.map((l) => draftLineKey(l))),
+    [draftLines],
+  );
+
   const openStockModal = (kind: "transfer" | "recall" | "legacy" | "sale") => {
-    setXferProduct("");
-    setXferVariant("");
-    setXferQty(1);
+    setDraftLines([]);
     setXferNotes("");
     setProductQuery("");
-    setPickedStock(null);
     setModal(kind);
+  };
+
+  const addDraftLine = (option: PartnerStockOption) => {
+    setDraftLines((prev) => {
+      const key = optionKey(option);
+      const existing = prev.find((l) => draftLineKey(l) === key);
+      if (existing) {
+        const nextQty = existing.quantity + 1;
+        const capped =
+          option.available > 0 ? Math.min(nextQty, option.available) : nextQty;
+        return prev.map((l) =>
+          draftLineKey(l) === key ? { ...l, quantity: capped, available: option.available } : l,
+        );
+      }
+      return [...prev, toDraftLine(option, 1)];
+    });
+    setProductQuery("");
   };
 
   const openCreateModal = () => {
@@ -304,58 +325,46 @@ export default function PartnersPage() {
       modal === "legacy" ||
       modal === "sale"
     ) {
-      if (!pickedStock || !xferProduct) {
-        showToast("Search and select a product variant first.");
+      if (!draftLines.length) {
+        showToast("Add at least one product line.");
         return;
       }
-    }
-    // Preserve empty-string variantId for unlabelled stock (do not coerce to undefined).
-    const variantId = xferVariant;
-    const productTitle = pickedStock?.productTitle ?? getProductTitle(xferProduct);
-    const variantLabel = pickedStock?.variantLabel;
-
-    if (modal === "transfer") {
-      setBusy(true);
-      try {
-        const res = await transfer({
-          productId: xferProduct,
-          variantId,
-          partnerId: selected.id,
-          quantity: xferQty,
-          notes: xferNotes.trim() || undefined,
-        });
-        if (res.ok) {
-          showToast(
-            `Moved ${productTitle}${variantLabel ? ` · ${variantLabel}` : ""} ×${xferQty} from Studio → ${selected.name}`,
-          );
-          setModal(null);
-        } else {
-          showToast(res.error);
+      for (const [i, line] of draftLines.entries()) {
+        if (line.quantity <= 0) {
+          showToast(`Line ${i + 1}: quantity must be positive.`);
+          return;
         }
-      } finally {
-        setBusy(false);
+        if (modal !== "legacy" && line.available > 0 && line.quantity > line.available) {
+          showToast(
+            `Line ${i + 1}: only ${line.available} available for ${line.productTitle} · ${line.variantLabel}.`,
+          );
+          return;
+        }
       }
-      return;
     }
 
-    if (modal === "recall") {
+    if (modal === "transfer" || modal === "recall" || modal === "sale") {
       setBusy(true);
       try {
-        const res = await transferFromPartner({
-          productId: xferProduct,
-          variantId,
+        const res = await postPartnerStockBatch({
+          kind: modal,
           partnerId: selected.id,
-          quantity: xferQty,
           notes: xferNotes.trim() || undefined,
+          lines: draftLines.map((l) => ({
+            productId: l.productId,
+            variantId: l.variantId,
+            quantity: l.quantity,
+          })),
         });
-        if (res.ok) {
-          showToast(
-            `Recalled ${productTitle}${variantLabel ? ` · ${variantLabel}` : ""} ×${xferQty} from ${selected.name} → Studio`,
-          );
-          setModal(null);
-        } else {
+        if (!res.ok) {
           showToast(res.error);
+          return;
         }
+        const units = draftLines.reduce((s, l) => s + l.quantity, 0);
+        const verb =
+          modal === "transfer" ? "Transferred" : modal === "recall" ? "Recalled" : "Recorded sale of";
+        showToast(`${verb} ${draftLines.length} lines · ${units} units · ${selected.name}`);
+        setModal(null);
       } finally {
         setBusy(false);
       }
@@ -363,55 +372,35 @@ export default function PartnersPage() {
     }
 
     if (modal === "legacy") {
-      if (!variantId) {
-        showToast("Select a product variant for legacy stock.");
+      const missingVariant = draftLines.find((l) => !l.variantId);
+      if (missingVariant) {
+        showToast(`Select a variant for ${missingVariant.productTitle}.`);
         return;
       }
       setBusy(true);
       try {
-        const result = await establishPartnerOpeningBalances(selected.id, [
-          {
-            productId: xferProduct,
-            variantId,
-            quantity: xferQty,
+        const result = await establishPartnerOpeningBalances(
+          selected.id,
+          draftLines.map((l) => ({
+            productId: l.productId,
+            variantId: l.variantId,
+            quantity: l.quantity,
             notes: xferNotes.trim() || undefined,
-          },
-        ]);
+          })),
+        );
         if (!result) {
           showToast("Could not record legacy stock.");
         } else if (result.written.length) {
           showToast(
-            `Legacy stock recorded: ${productTitle}${variantLabel ? ` · ${variantLabel}` : ""} ×${xferQty} at ${selected.name}`,
+            `Legacy stock: ${result.written.length} lines written` +
+              (result.skipped ? ` · ${result.skipped} skipped` : "") +
+              ` at ${selected.name}`,
           );
           setModal(null);
         } else {
           showToast(
-            "Skipped — this variant already has stock at the partner (use Transfer for more).",
+            "Skipped — those variants already have partner stock (use Transfer for more).",
           );
-        }
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-
-    if (modal === "sale") {
-      setBusy(true);
-      try {
-        const res = await partnerSale({
-          productId: xferProduct,
-          variantId,
-          partnerId: selected.id,
-          quantity: xferQty,
-          notes: xferNotes.trim() || undefined,
-        });
-        if (res.ok) {
-          showToast(
-            `Sale recorded: ${productTitle}${variantLabel ? ` · ${variantLabel}` : ""} ×${xferQty} deducted from ${selected.name}`,
-          );
-          setModal(null);
-        } else {
-          showToast(res.error);
         }
       } finally {
         setBusy(false);
@@ -515,7 +504,14 @@ export default function PartnersPage() {
         : "Generate & issue"
       : modal === "payment"
         ? "Receive payment"
-        : "Confirm";
+        : modal === "transfer" ||
+            modal === "recall" ||
+            modal === "sale" ||
+            modal === "legacy"
+          ? draftLines.length
+            ? `Confirm ${draftLines.length} line${draftLines.length === 1 ? "" : "s"}`
+            : "Confirm"
+          : "Confirm";
 
   if (!hydrated) {
     return (
@@ -930,51 +926,44 @@ export default function PartnersPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <PartnerStockPicker
               options={stockOptions}
               searchOptions={catalogSearch}
+              excludeKeys={draftExcludeKeys}
               query={productQuery}
               onQueryChange={setProductQuery}
-              selected={pickedStock}
-              onSelect={(option) => {
-                setXferProduct(option.productId);
-                setXferVariant(option.variantId);
-                setPickedStock(option);
-                if (option.available > 0) {
-                  setXferQty(Math.min(Math.max(1, xferQty), option.available));
-                }
-              }}
+              onAdd={addDraftLine}
               requireQuery
               emptyHint={
                 modal === "legacy"
-                  ? "Type to search the catalog (product or variant)…"
+                  ? "Type to search the catalog, then add lines…"
                   : modal === "transfer"
-                    ? "Type to search Studio available stock…"
-                    : "Type to search stock at this partner…"
+                    ? "Type to add from Studio available stock…"
+                    : "Type to add from this partner’s stock…"
               }
             />
-            <Field label="Quantity">
-              <input
-                className={inputClass}
-                type="number"
-                min={1}
-                max={
-                  pickedStock && pickedStock.available > 0
-                    ? pickedStock.available
-                    : undefined
-                }
-                value={xferQty}
-                onChange={(e) => setXferQty(Number(e.target.value))}
-                data-testid="partner-stock-qty"
-              />
-            </Field>
-            {pickedStock && pickedStock.available > 0 ? (
-              <p className="text-xs text-charcoal/70" data-testid="partner-stock-available">
-                Available on this variant: {pickedStock.available}
-              </p>
-            ) : null}
-            <Field label="Notes (optional)">
+            <PartnerStockDraftLines
+              lines={draftLines}
+              enforceAvailable={modal !== "legacy"}
+              onQuantityChange={(key, quantity) => {
+                setDraftLines((prev) =>
+                  prev.map((l) => {
+                    if (draftLineKey(l) !== key) return l;
+                    const qty = Math.max(1, Math.floor(quantity) || 1);
+                    const capped =
+                      modal !== "legacy" && l.available > 0
+                        ? Math.min(qty, l.available)
+                        : qty;
+                    return { ...l, quantity: capped };
+                  }),
+                );
+              }}
+              onRemove={(key) => {
+                setDraftLines((prev) => prev.filter((l) => draftLineKey(l) !== key));
+              }}
+            />
+            <Field label="Notes (optional — applied to all lines)">
               <input
                 className={inputClass}
                 value={xferNotes}
@@ -983,12 +972,12 @@ export default function PartnersPage() {
             </Field>
             <p className="text-xs text-charcoal/55">
               {modal === "transfer"
-                ? "Only Studio rows with available qty appear. Selecting a row sets product and variant together."
+                ? "Add multiple Studio SKUs, edit quantities, then confirm once — all lines post in one save."
                 : modal === "recall"
-                  ? "Only this partner’s available product×variant rows appear."
+                  ? "Add multiple partner SKUs to recall to Studio, edit quantities, confirm once."
                   : modal === "legacy"
-                    ? "One-time opening: External → Partner. Search the catalog; skipped if this variant already has partner qty."
-                    : "Only this partner’s available stock can be sold."}
+                    ? "Add catalog lines for opening stock already at the partner; skipped if that variant already has qty."
+                    : "Add multiple sale lines from partner stock, edit quantities, confirm once."}
             </p>
           </div>
         )}

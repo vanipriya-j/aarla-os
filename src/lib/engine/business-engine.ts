@@ -409,6 +409,128 @@ export class BusinessEngine {
   }
 
   /**
+   * Shopify-style multi-line partner stock post — one transaction for all lines.
+   * Validates availability sequentially so later lines see earlier deductions.
+   */
+  async postPartnerStockBatch(input: {
+    kind: "transfer" | "recall" | "sale";
+    partnerId: string;
+    notes?: string;
+    lines: Array<{
+      productId: string;
+      variantId: string;
+      quantity: number;
+      reference?: string;
+    }>;
+  }): Promise<StockMovement[]> {
+    if (!input.lines.length) throw new Error("Add at least one line");
+
+    return withTransaction(async (client) => {
+      const tx = createPostgresUnitOfWork(client);
+      const locations = await tx.locations.list();
+      const loc = locations.find((l) => l.partnerId === input.partnerId);
+      if (!loc) throw new Error("Partner location not found");
+
+      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const balances = deriveBalances(movements);
+      const availableMap = new Map<string, number>();
+      for (const b of balances) {
+        availableMap.set(`${b.productId}::${b.variantId}::${b.locationId}`, b.quantity);
+      }
+      const avail = (productId: string, variantId: string, locationId: string) =>
+        Math.max(availableMap.get(`${productId}::${variantId}::${locationId}`) ?? 0, 0);
+      const bump = (
+        productId: string,
+        variantId: string,
+        locationId: string,
+        delta: number,
+      ) => {
+        const key = `${productId}::${variantId}::${locationId}`;
+        availableMap.set(key, avail(productId, variantId, locationId) + delta);
+      };
+
+      const partner = await tx.partners.getByCode(input.partnerId);
+      const partnerName = partner?.name ?? loc.name;
+      const sharedNotes = input.notes?.trim();
+      const planned: AppendMovementInput[] = [];
+      const seen = new Set<string>();
+
+      for (const [index, line] of input.lines.entries()) {
+        const qty = Math.floor(line.quantity);
+        if (qty <= 0) {
+          throw new Error(`Line ${index + 1}: quantity must be positive`);
+        }
+        const variantId = line.variantId;
+        const lineKey = `${line.productId}::${variantId}`;
+        if (seen.has(lineKey)) {
+          throw new Error(`Duplicate line for the same product/variant (line ${index + 1})`);
+        }
+        seen.add(lineKey);
+
+        const fromLocationId = input.kind === "transfer" ? LOC_CODES.studio : loc.id;
+        const toLocationId =
+          input.kind === "transfer"
+            ? loc.id
+            : input.kind === "recall"
+              ? LOC_CODES.studio
+              : LOC_CODES.sold;
+        const movementType =
+          input.kind === "sale" ? ("Partner Sale" as const) : ("Transfer" as const);
+        const refKind =
+          input.kind === "transfer" ? "TR" : input.kind === "recall" ? "RECALL" : "PSALE";
+
+        const onHand = avail(line.productId, variantId, fromLocationId);
+        if (onHand < qty) {
+          const where = input.kind === "transfer" ? "Studio" : "Partner";
+          throw new Error(
+            `Line ${index + 1}: ${where} has ${onHand} available; need ${qty}.`,
+          );
+        }
+
+        const batch = batches.find((b) => b.productId === line.productId);
+        const reference =
+          line.reference ??
+          uniqueMovementRef(
+            refKind,
+            input.partnerId,
+            line.productId,
+            variantId || undefined,
+            qty,
+          );
+
+        const defaultNotes =
+          input.kind === "transfer"
+            ? `Transfer to ${partnerName}`
+            : input.kind === "recall"
+              ? `Recall to Studio from ${partnerName}`
+              : "Partner sale";
+
+        planned.push({
+          productId: line.productId,
+          variantId: variantId || undefined,
+          batchId: batch?.id,
+          quantity: qty,
+          fromLocationId,
+          toLocationId,
+          movementType,
+          reference,
+          notes: sharedNotes || defaultNotes,
+        });
+        bump(line.productId, variantId, fromLocationId, -qty);
+        bump(line.productId, variantId, toLocationId, qty);
+      }
+
+      const created = await this.appendMovementsTx(tx, planned);
+      if (created.length !== planned.length) {
+        throw new Error(
+          `Only ${created.length} of ${planned.length} lines were written — check for duplicates or stock rules.`,
+        );
+      }
+      return created;
+    });
+  }
+
+  /**
    * Online sale against the shared Studio / Aarla Office pool.
    * Idempotent via stable reference (fingerprint). Returns null if insufficient stock.
    */
