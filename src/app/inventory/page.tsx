@@ -22,6 +22,7 @@ import { ShopifyCatalogSyncButton } from "@/components/inventory/ShopifyCatalogS
 import { InventoryShopifySyncPanel } from "@/components/inventory/InventoryShopifySyncPanel";
 import { DEFAULT_INVENTORY_LOC, computeReplenishment } from "@/lib/domain";
 import type { ReplenishmentItem } from "@/lib/domain/inventory-replenishment";
+import { filterActiveCatalogProducts } from "@/lib/domain/product-status";
 import {
   manufactureReorderHref,
   suggestedReorderQty,
@@ -91,6 +92,9 @@ function InventoryInner() {
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
 
+  /** Stock / replenishment: hide Shopify drafts & archived. */
+  const activeProducts = useMemo(() => filterActiveCatalogProducts(products), [products]);
+
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 8000);
@@ -112,13 +116,13 @@ function InventoryInner() {
   const replenishmentItems = useMemo(
     () =>
       computeReplenishment({
-        products,
+        products: activeProducts,
         movements,
         locations,
         partners,
         rules: reorderRules,
       }),
-    [products, movements, locations, partners, reorderRules],
+    [activeProducts, movements, locations, partners, reorderRules],
   );
   const aarlaLow = replenishmentItems.filter((i) => i.kind === "aarla-low");
   const partnerNeed = replenishmentItems.filter((i) => i.kind === "partner-need");
@@ -241,19 +245,23 @@ function InventoryInner() {
 
         {tab === "stock" ? (
           <div className="space-y-4">
-            {hydrated && !products.length ? (
+            {hydrated && !activeProducts.length ? (
               <div className="rounded-xl border border-border bg-pale-cream p-5 space-y-3 text-sm text-charcoal/70">
-                <p className="font-medium text-deep-navy">No products in the Aarla catalog yet</p>
+                <p className="font-medium text-deep-navy">
+                  {products.length
+                    ? "No active products to show"
+                    : "No products in the Aarla catalog yet"}
+                </p>
                 <p>
-                  1) Sync catalog from Shopify. 2) Import base inventory once (Shopify available →
-                  Studio opening receipts). After that manage with Receive / Transfer and use Shopify
-                  sync to keep ATP aligned.
+                  {products.length
+                    ? "Draft and archived Shopify products are hidden here. Publish them in Shopify (or sync after marking Active), then refresh."
+                    : "1) Sync catalog from Shopify. 2) Import base inventory once (Shopify available → Studio opening receipts). After that manage with Receive / Transfer and use Shopify sync to keep ATP aligned."}
                 </p>
                 <ShopifyCatalogSyncButton onDone={reload} />
               </div>
             ) : (
               <StockCatalogPanel
-                products={products}
+                products={activeProducts}
                 movements={movements}
                 locations={locations}
                 reorderRules={reorderRules}
