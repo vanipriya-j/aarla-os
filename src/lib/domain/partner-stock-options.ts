@@ -9,8 +9,16 @@ export type PartnerStockOption = {
   available: number;
 };
 
+/** Slim catalog shape shared by Partners, Manufacture, Campaigns. */
+export type CatalogProductLike = {
+  id: string;
+  title: string;
+  sku?: string;
+  variants: Array<{ id: string; label: string; sku?: string }>;
+};
+
 function variantLabelFor(
-  product: Product | undefined,
+  product: CatalogProductLike | undefined,
   variantId: string,
 ): { label: string; sku: string } {
   if (!variantId) return { label: "No variant", sku: "" };
@@ -49,8 +57,8 @@ export function buildAvailableStockOptions(
   });
 }
 
-/** Catalog product×variant rows for legacy opening (no stock gate). */
-export function buildCatalogStockOptions(products: Product[]): PartnerStockOption[] {
+/** Catalog product×variant rows (no stock gate). */
+export function buildCatalogStockOptions(products: CatalogProductLike[]): PartnerStockOption[] {
   const rows: PartnerStockOption[] = [];
   for (const product of products) {
     if (!product.variants.length) {
@@ -80,7 +88,7 @@ export function buildCatalogStockOptions(products: Product[]): PartnerStockOptio
 
 /** Catalog search without dumping the full product×variant matrix into the UI. */
 export function searchCatalogStockOptions(
-  products: Product[],
+  products: CatalogProductLike[],
   query: string,
   limit = 25,
 ): PartnerStockOption[] {
@@ -91,7 +99,7 @@ export function searchCatalogStockOptions(
   for (const product of products) {
     if (rows.length >= limit) break;
     if (!product.variants.length) {
-      const haystack = `${product.title} ${product.sku} ${product.id}`.toLowerCase();
+      const haystack = `${product.title} ${product.sku || ""} ${product.id}`.toLowerCase();
       if (tokens.every((t) => haystack.includes(t))) {
         rows.push({
           productId: product.id,

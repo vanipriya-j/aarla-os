@@ -10,6 +10,7 @@ export type PartnerDraftLine = {
   variantLabel: string;
   available: number;
   quantity: number;
+  sku?: string;
 };
 
 type PartnerStockDraftLinesProps = {
@@ -31,6 +32,7 @@ export function toDraftLine(option: PartnerStockOption, quantity = 1): PartnerDr
     productTitle: option.productTitle,
     variantLabel: option.variantLabel,
     available: option.available,
+    sku: option.sku,
     quantity:
       option.available > 0 ? Math.min(Math.max(1, quantity), option.available) : Math.max(1, quantity),
   };

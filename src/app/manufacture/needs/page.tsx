@@ -7,6 +7,10 @@ import { Suspense } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import {
+  CatalogProductAddPanel,
+  type CatalogAddLine,
+} from "@/components/catalog/CatalogProductAddPanel";
+import {
   addVendorOrderItemsAction,
   createVendorOrderAction,
   getNeedsMakingAction,
@@ -66,8 +70,6 @@ function NeedsInner() {
   const [vendorCode, setVendorCode] = useState("");
   const [qty, setQty] = useState(Number.isFinite(makeQty) ? makeQty : 20);
   const [query, setQuery] = useState("");
-  const [pickProductId, setPickProductId] = useState("");
-  const [pickVariantId, setPickVariantId] = useState("");
   const [filter, setFilter] = useState<"all" | "zero" | "low">(
     makeFilter === "zero" || makeFilter === "low" ? makeFilter : "all",
   );
@@ -145,8 +147,6 @@ function NeedsInner() {
       );
     });
   }, [board, filter, query]);
-
-  const pickProduct = products.find((p) => p.id === pickProductId);
 
   function createOrder(opts: {
     productId: string;
@@ -265,18 +265,33 @@ function NeedsInner() {
     });
   }
 
-  function createFromPicker() {
-    if (!pickProduct) {
-      setError("Choose a product to make.");
-      return;
+  function createFromCatalogLines(lines: CatalogAddLine[]): Promise<void> {
+    if (!lines.length) {
+      setError("Add at least one product line.");
+      return Promise.reject(new Error("empty"));
     }
-    const variant = pickProduct.variants.find((v) => v.id === pickVariantId);
-    createOrder({
-      productId: pickProduct.id,
-      variantId: variant?.id ?? null,
-      title: variant ? `${pickProduct.title} / ${variant.label}` : pickProduct.title,
-      sku: variant?.sku || pickProduct.sku,
-      quantity: qty,
+    if (!vendorCode) {
+      setError("Pick a vendor first — add one under Vendors if the list is empty.");
+      return Promise.reject(new Error("vendor"));
+    }
+    return new Promise((resolve, reject) => {
+      startTransition(async () => {
+        const result = await createVendorOrderAction({
+          vendorCode,
+          items: lines,
+          notes:
+            lines.length === 1
+              ? `From Needs Making · ${lines[0]!.title}`
+              : `From Needs Making · ${lines.length} catalog lines`,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          reject(new Error(result.error));
+          return;
+        }
+        resolve();
+        router.push(`/manufacture/orders/${encodeURIComponent(result.data.orderNumber)}`);
+      });
     });
   }
 
@@ -393,70 +408,30 @@ function NeedsInner() {
       <section className="card-surface p-4 space-y-3">
         <h2 className="font-display text-lg text-deep-navy">Make any product</h2>
         <p className="text-sm text-charcoal/60">
-          Not only low-stock alerts — pick anything from the catalog to reorder.
+          Not only low-stock alerts — multi-select from the catalog, edit quantities, create one PO.
         </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="text-xs text-charcoal/60">
-            Product
-            <select
-              value={pickProductId}
-              onChange={(e) => {
-                setPickProductId(e.target.value);
-                setPickVariantId("");
-              }}
-              className="mt-1 block min-w-[16rem] max-w-full rounded-lg border border-border px-2 py-1.5 text-sm"
-            >
-              <option value="">Select…</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-charcoal/60">
-            Variant
-            <select
-              value={pickVariantId}
-              onChange={(e) => setPickVariantId(e.target.value)}
-              className="mt-1 block min-w-[10rem] rounded-lg border border-border px-2 py-1.5 text-sm"
-            >
-              <option value="">—</option>
-              {(pickProduct?.variants ?? []).map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-charcoal/60">
-            Qty
-            <input
-              type="number"
-              min={1}
-              value={qty}
-              onChange={(e) => setQty(Number(e.target.value))}
-              className="mt-1 block w-20 rounded-lg border border-border px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="text-xs text-charcoal/60">
-            Vendor
-            <select
-              value={vendorCode}
-              onChange={(e) => setVendorCode(e.target.value)}
-              className="mt-1 block min-w-[12rem] rounded-lg border border-border px-2 py-1.5 text-sm"
-            >
-              {vendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button onClick={createFromPicker} disabled={pending || !pickProductId || !vendorCode}>
-            Create order
-          </Button>
-        </div>
+        <label className="text-xs text-charcoal/60 block max-w-md">
+          Vendor
+          <select
+            value={vendorCode}
+            onChange={(e) => setVendorCode(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-border px-2 py-1.5 text-sm"
+          >
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <CatalogProductAddPanel
+          products={products}
+          defaultQty={qty > 0 ? qty : 20}
+          submitLabel="Create order"
+          pending={pending}
+          onSubmit={createFromCatalogLines}
+          testIdPrefix="mfg-needs-add"
+        />
       </section>
 
       <section className="space-y-3">
