@@ -187,7 +187,31 @@ export function useAppLedger() {
         variantId: string;
         quantity: number;
       }>;
-    }): Promise<{ ok: true; data: StockMovement[] } | { ok: false; error: string }> => {
+    }): Promise<
+      | {
+          ok: true;
+          data: {
+            movements: StockMovement[];
+            batch: {
+              reference: string;
+              kind: "transfer" | "recall" | "sale";
+              partnerId: string;
+              partnerName: string;
+              notes: string;
+              lines: Array<{
+                productId: string;
+                variantId: string;
+                productTitle: string;
+                variantLabel: string;
+                quantity: number;
+              }>;
+              totalUnits: number;
+              shareText: string;
+            };
+          };
+        }
+      | { ok: false; error: string }
+    > => {
       const result = await postPartnerStockBatchAction(input);
       if (!result.ok) {
         setError(result.error);
