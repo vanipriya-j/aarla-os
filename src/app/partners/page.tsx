@@ -15,6 +15,10 @@ import {
   type PartnerStockOption,
 } from "@/lib/domain/partner-stock-options";
 import {
+  isPartnerStockBatchReference,
+  type PartnerStockBatchSummary,
+} from "@/lib/domain/partner-transfer-batch";
+import {
   listPartnerInvoicesAction,
   listUnbilledPartnerSalesAction,
   raisePartnerInvoiceAction,
@@ -54,6 +58,7 @@ type ModalKind =
   | "sale"
   | "invoice"
   | "payment"
+  | "batch-share"
   | null;
 
 function fileToBase64(file: File): Promise<string> {
@@ -110,6 +115,7 @@ export default function PartnersPage() {
   const [payAmount, setPayAmount] = useState(0);
   const [payNotes, setPayNotes] = useState("");
   const [payFile, setPayFile] = useState<File | null>(null);
+  const [lastBatch, setLastBatch] = useState<PartnerStockBatchSummary | null>(null);
 
   const selected =
     partners.find((p) => p.id === (selectedId ?? partners[0]?.id)) ?? partners[0];
@@ -161,6 +167,39 @@ export default function PartnersPage() {
       return b.id.localeCompare(a.id);
     });
   }, [movements, selected, locations]);
+
+  const partnerMoveGroups = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      reference: string;
+      date: string;
+      movementType: string;
+      isBatch: boolean;
+      lines: typeof partnerMoves;
+      totalUnits: number;
+    }> = [];
+    const seen = new Set<string>();
+    for (const m of partnerMoves) {
+      const batchKey = isPartnerStockBatchReference(m.reference)
+        ? m.reference
+        : m.id;
+      if (seen.has(batchKey)) continue;
+      seen.add(batchKey);
+      const lines = isPartnerStockBatchReference(m.reference)
+        ? partnerMoves.filter((x) => x.reference === m.reference)
+        : [m];
+      groups.push({
+        key: batchKey,
+        reference: m.reference,
+        date: m.date,
+        movementType: m.movementType,
+        isBatch: isPartnerStockBatchReference(m.reference) && lines.length > 1,
+        lines,
+        totalUnits: lines.reduce((s, l) => s + l.quantity, 0),
+      });
+    }
+    return groups;
+  }, [partnerMoves]);
 
   const balances = useMemo(() => deriveBalances(movements), [movements]);
 
@@ -365,11 +404,14 @@ export default function PartnersPage() {
           showToast(res.error);
           return;
         }
-        const units = draftLines.reduce((s, l) => s + l.quantity, 0);
+        const batch = res.data.batch;
         const verb =
           modal === "transfer" ? "Transferred" : modal === "recall" ? "Recalled" : "Recorded sale of";
-        showToast(`${verb} ${draftLines.length} lines · ${units} units · ${selected.name}`);
-        setModal(null);
+        showToast(
+          `${verb} ${batch.lines.length} lines · ${batch.totalUnits} units · batch ${batch.reference}`,
+        );
+        setLastBatch(batch);
+        setModal("batch-share");
       } finally {
         setBusy(false);
       }
@@ -500,7 +542,9 @@ export default function PartnersPage() {
                   : "Raise invoice"
                 : modal === "payment"
                   ? "Receive payment"
-                  : "";
+                  : modal === "batch-share"
+                    ? "Share stock batch"
+                    : "";
 
   const modalConfirmLabel =
     modal === "invoice"
@@ -509,14 +553,16 @@ export default function PartnersPage() {
         : "Generate & issue"
       : modal === "payment"
         ? "Receive payment"
-        : modal === "transfer" ||
-            modal === "recall" ||
-            modal === "sale" ||
-            modal === "legacy"
-          ? draftLines.length
-            ? `Confirm ${draftLines.length} line${draftLines.length === 1 ? "" : "s"}`
-            : "Confirm"
-          : "Confirm";
+        : modal === "batch-share"
+          ? "Done"
+          : modal === "transfer" ||
+              modal === "recall" ||
+              modal === "sale" ||
+              modal === "legacy"
+            ? draftLines.length
+              ? `Confirm ${draftLines.length} line${draftLines.length === 1 ? "" : "s"} as one batch`
+              : "Confirm"
+            : "Confirm";
 
   if (!hydrated) {
     return (
@@ -670,28 +716,45 @@ export default function PartnersPage() {
 
                 <section className="card-surface p-5">
                   <h3 className="font-display text-lg text-deep-navy mb-3">Stock movement</h3>
-                  <ul className="space-y-2 text-sm">
-                    {partnerMoves.slice(0, 20).map((m) => (
+                  <ul className="space-y-3 text-sm">
+                    {partnerMoveGroups.slice(0, 20).map((group) => (
                       <li
-                        key={m.id}
-                        className="flex justify-between gap-3 border-b border-border pb-2"
+                        key={group.key}
+                        className="border-b border-border pb-3"
+                        data-testid={
+                          group.isBatch ? "partner-batch-movement" : "partner-single-movement"
+                        }
                       >
-                        <span>
-                          {m.date} · {m.movementType} · {getProductTitle(m.productId)} ×
-                          {m.quantity}
-                        </span>
-                        <span className="text-charcoal/50 break-all text-right max-w-[45%]">
-                          {m.reference}
-                        </span>
+                        <div className="flex justify-between gap-3">
+                          <span className="font-medium text-deep-navy">
+                            {group.date} · {group.movementType}
+                            {group.isBatch
+                              ? ` · ${group.lines.length} lines · ${group.totalUnits} units`
+                              : ` · ${getProductTitle(group.lines[0]!.productId)} ×${group.lines[0]!.quantity}`}
+                          </span>
+                          <span className="text-charcoal/50 break-all text-right max-w-[45%] text-xs">
+                            {group.reference}
+                          </span>
+                        </div>
+                        {group.isBatch ? (
+                          <ul className="mt-2 space-y-1 text-charcoal/70">
+                            {group.lines.map((line) => (
+                              <li key={line.id}>
+                                {getProductTitle(line.productId)}
+                                {line.variantId ? ` · ${line.variantId}` : ""} ×{line.quantity}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </li>
                     ))}
-                    {!partnerMoves.length ? (
+                    {!partnerMoveGroups.length ? (
                       <li className="text-charcoal/50">No linked movements yet</li>
                     ) : null}
                   </ul>
-                  {partnerMoves.length > 20 ? (
+                  {partnerMoveGroups.length > 20 ? (
                     <p className="text-xs text-charcoal/50 mt-2">
-                      Showing 20 of {partnerMoves.length} newest movements
+                      Showing 20 of {partnerMoveGroups.length} newest batches / movements
                     </p>
                   ) : null}
                 </section>
@@ -707,6 +770,7 @@ export default function PartnersPage() {
           if (!busy) {
             setModal(null);
             setInvoicePreview(null);
+            setLastBatch(null);
           }
         }}
         title={modalTitle}
@@ -720,6 +784,34 @@ export default function PartnersPage() {
             >
               Done
             </Button>
+          ) : modal === "batch-share" ? (
+            <div className="flex flex-wrap gap-2 justify-end">
+              <Button
+                variant="outline"
+                disabled={!lastBatch}
+                onClick={async () => {
+                  if (!lastBatch) return;
+                  try {
+                    await navigator.clipboard.writeText(lastBatch.shareText);
+                    showToast("Consolidated stock list copied — share with the partner.");
+                  } catch {
+                    showToast("Could not copy — select the text and copy manually.");
+                  }
+                }}
+                data-testid="partner-batch-copy"
+              >
+                Copy list
+              </Button>
+              <Button
+                onClick={() => {
+                  setModal(null);
+                  setLastBatch(null);
+                }}
+                data-testid="partner-batch-done"
+              >
+                Done
+              </Button>
+            </div>
           ) : (
             <Button onClick={() => void confirmModal()} disabled={busy}>
               {busy ? "Saving…" : modalConfirmLabel}
@@ -930,7 +1022,10 @@ export default function PartnersPage() {
               </>
             )}
           </div>
-        ) : (
+        ) : modal === "transfer" ||
+          modal === "recall" ||
+          modal === "legacy" ||
+          modal === "sale" ? (
           <div className="space-y-4">
             <PartnerStockPicker
               options={stockOptions}
@@ -977,15 +1072,33 @@ export default function PartnersPage() {
             </Field>
             <p className="text-xs text-charcoal/55">
               {modal === "transfer"
-                ? "Multi-select Studio SKUs, edit quantities on the draft, confirm once — one save for all lines."
+                ? "Multi-select Studio SKUs, edit quantities, confirm once — one batch transfer with a shared reference you can copy for the partner."
                 : modal === "recall"
-                  ? "Multi-select partner SKUs to recall, edit quantities, confirm once."
+                  ? "Multi-select partner SKUs to recall, edit quantities, confirm once as one batch."
                   : modal === "legacy"
                     ? "Multi-select catalog lines for opening stock; skipped if that variant already has qty."
-                    : "Multi-select sale lines from partner stock, edit quantities, confirm once."}
+                    : "Multi-select sale lines from partner stock, edit quantities, confirm once as one batch."}
             </p>
           </div>
-        )}
+        ) : modal === "batch-share" && lastBatch ? (
+          <div className="space-y-3" data-testid="partner-batch-share">
+            <p className="text-sm text-charcoal/70">
+              Posted as one batch ·{" "}
+              <span className="font-mono text-deep-navy">{lastBatch.reference}</span>
+              {" · "}
+              {lastBatch.lines.length} lines · {lastBatch.totalUnits} units
+            </p>
+            <p className="text-xs text-charcoal/55">
+              Copy this consolidated stock list and share it with {lastBatch.partnerName}.
+            </p>
+            <textarea
+              className={`${textareaClass} font-mono text-xs min-h-[14rem]`}
+              readOnly
+              value={lastBatch.shareText}
+              data-testid="partner-batch-share-text"
+            />
+          </div>
+        ) : null}
       </Modal>
     </>
   );

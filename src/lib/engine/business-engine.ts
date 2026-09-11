@@ -8,6 +8,11 @@ import {
   partnerStockFor,
   type AppendMovementInput,
 } from "@/lib/domain/ledger";
+import {
+  buildPartnerStockBatchReference,
+  summarizePartnerStockBatch,
+  type PartnerStockBatchSummary,
+} from "@/lib/domain/partner-transfer-batch";
 import type {
   AdjustmentReason,
   InventorySnapshot,
@@ -409,8 +414,9 @@ export class BusinessEngine {
   }
 
   /**
-   * Shopify-style multi-line partner stock post — one transaction for all lines.
-   * Validates availability sequentially so later lines see earlier deductions.
+   * Multi-line partner stock post — one DB transaction, one shared batch reference.
+   * All lines share the same reference so Studio→Partner transfers read as one batch
+   * and can be shared as a consolidated stock list.
    */
   async postPartnerStockBatch(input: {
     kind: "transfer" | "recall" | "sale";
@@ -422,7 +428,7 @@ export class BusinessEngine {
       quantity: number;
       reference?: string;
     }>;
-  }): Promise<StockMovement[]> {
+  }): Promise<{ movements: StockMovement[]; batch: PartnerStockBatchSummary }> {
     if (!input.lines.length) throw new Error("Add at least one line");
 
     return withTransaction(async (client) => {
@@ -431,7 +437,12 @@ export class BusinessEngine {
       const loc = locations.find((l) => l.partnerId === input.partnerId);
       if (!loc) throw new Error("Partner location not found");
 
-      const [movements, batches] = await Promise.all([tx.movements.list(), tx.batches.list()]);
+      const [movements, batches, products] = await Promise.all([
+        tx.movements.list(),
+        tx.batches.list(),
+        tx.products.list(),
+      ]);
+      const productById = new Map(products.map((p) => [p.id, p]));
       const balances = deriveBalances(movements);
       const availableMap = new Map<string, number>();
       for (const b of balances) {
@@ -452,8 +463,12 @@ export class BusinessEngine {
       const partner = await tx.partners.getByCode(input.partnerId);
       const partnerName = partner?.name ?? loc.name;
       const sharedNotes = input.notes?.trim();
+      const batchReference =
+        input.lines.find((l) => l.reference?.trim())?.reference?.trim() ||
+        buildPartnerStockBatchReference(input.kind, input.partnerId);
       const planned: AppendMovementInput[] = [];
       const seen = new Set<string>();
+      const summaryLines: PartnerStockBatchSummary["lines"] = [];
 
       for (const [index, line] of input.lines.entries()) {
         const qty = Math.floor(line.quantity);
@@ -476,8 +491,6 @@ export class BusinessEngine {
               : LOC_CODES.sold;
         const movementType =
           input.kind === "sale" ? ("Partner Sale" as const) : ("Transfer" as const);
-        const refKind =
-          input.kind === "transfer" ? "TR" : input.kind === "recall" ? "RECALL" : "PSALE";
 
         const onHand = avail(line.productId, variantId, fromLocationId);
         if (onHand < qty) {
@@ -487,34 +500,36 @@ export class BusinessEngine {
           );
         }
 
-        const batch = batches.find((b) => b.productId === line.productId);
-        const reference =
-          line.reference ??
-          uniqueMovementRef(
-            refKind,
-            input.partnerId,
-            line.productId,
-            variantId || undefined,
-            qty,
-          );
+        const product = productById.get(line.productId);
+        const variant = product?.variants.find((v) => v.id === variantId);
+        const productTitle = product?.title ?? line.productId;
+        const variantLabel = variant?.label || (variantId ? variantId : "No variant");
 
+        const mfgBatch = batches.find((b) => b.productId === line.productId);
         const defaultNotes =
           input.kind === "transfer"
-            ? `Transfer to ${partnerName}`
+            ? `Transfer batch to ${partnerName} · ${batchReference}`
             : input.kind === "recall"
-              ? `Recall to Studio from ${partnerName}`
-              : "Partner sale";
+              ? `Recall batch from ${partnerName} · ${batchReference}`
+              : `Partner sale batch · ${batchReference}`;
 
         planned.push({
           productId: line.productId,
           variantId: variantId || undefined,
-          batchId: batch?.id,
+          batchId: mfgBatch?.id,
           quantity: qty,
           fromLocationId,
           toLocationId,
           movementType,
-          reference,
+          reference: batchReference,
           notes: sharedNotes || defaultNotes,
+        });
+        summaryLines.push({
+          productId: line.productId,
+          variantId,
+          productTitle,
+          variantLabel,
+          quantity: qty,
         });
         bump(line.productId, variantId, fromLocationId, -qty);
         bump(line.productId, variantId, toLocationId, qty);
@@ -526,7 +541,18 @@ export class BusinessEngine {
           `Only ${created.length} of ${planned.length} lines were written — check for duplicates or stock rules.`,
         );
       }
-      return created;
+
+      return {
+        movements: created,
+        batch: summarizePartnerStockBatch({
+          kind: input.kind,
+          partnerId: input.partnerId,
+          partnerName,
+          reference: batchReference,
+          notes: sharedNotes,
+          lines: summaryLines,
+        }),
+      };
     });
   }
 
