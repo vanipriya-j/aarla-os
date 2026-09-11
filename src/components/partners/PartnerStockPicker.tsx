@@ -63,9 +63,13 @@ export function PartnerStockPicker({
     });
   }, [resultKeys]);
 
-  const selectedOptions = results.filter((o) => checked.has(optionKey(o)));
+  const selectedOptions = results.filter(
+    (o) => o.available > 0 && checked.has(optionKey(o)),
+  );
+  const selectableResults = results.filter((o) => o.available > 0);
   const allVisibleChecked =
-    results.length > 0 && results.every((o) => checked.has(optionKey(o)));
+    selectableResults.length > 0 &&
+    selectableResults.every((o) => checked.has(optionKey(o)));
 
   const toggle = (key: string) => {
     setChecked((prev) => {
@@ -80,11 +84,11 @@ export function PartnerStockPicker({
     setChecked((prev) => {
       if (allVisibleChecked) {
         const next = new Set(prev);
-        for (const o of results) next.delete(optionKey(o));
+        for (const o of selectableResults) next.delete(optionKey(o));
         return next;
       }
       const next = new Set(prev);
-      for (const o of results) next.add(optionKey(o));
+      for (const o of selectableResults) next.add(optionKey(o));
       return next;
     });
   };
@@ -122,7 +126,7 @@ export function PartnerStockPicker({
                 onChange={toggleAllVisible}
                 data-testid={`${testIdPrefix}-select-all`}
               />
-              Select all visible ({results.length})
+              Select all available ({selectableResults.length})
             </label>
             <span className="text-xs text-charcoal/55">{checked.size} selected</span>
           </div>

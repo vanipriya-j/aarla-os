@@ -492,7 +492,15 @@ export class BusinessEngine {
         const movementType =
           input.kind === "sale" ? ("Partner Sale" as const) : ("Transfer" as const);
 
-        const onHand = avail(line.productId, variantId, fromLocationId);
+        const product = productById.get(line.productId);
+        const specificOnHand = avail(line.productId, variantId, fromLocationId);
+        const pooledOnHand =
+          specificOnHand <= 0 && product && product.variants.length <= 1
+            ? avail(line.productId, "", fromLocationId)
+            : 0;
+        const onHand = specificOnHand > 0 ? specificOnHand : specificOnHand + pooledOnHand;
+        const movementVariantId =
+          specificOnHand > 0 || pooledOnHand <= 0 ? variantId : "";
         if (onHand < qty) {
           const where = input.kind === "transfer" ? "Studio" : "Partner";
           throw new Error(
@@ -500,7 +508,6 @@ export class BusinessEngine {
           );
         }
 
-        const product = productById.get(line.productId);
         const variant = product?.variants.find((v) => v.id === variantId);
         const productTitle = product?.title ?? line.productId;
         const variantLabel = variant?.label || (variantId ? variantId : "No variant");
@@ -515,7 +522,7 @@ export class BusinessEngine {
 
         planned.push({
           productId: line.productId,
-          variantId: variantId || undefined,
+          variantId: movementVariantId || undefined,
           batchId: mfgBatch?.id,
           quantity: qty,
           fromLocationId,
@@ -531,8 +538,8 @@ export class BusinessEngine {
           variantLabel,
           quantity: qty,
         });
-        bump(line.productId, variantId, fromLocationId, -qty);
-        bump(line.productId, variantId, toLocationId, qty);
+        bump(line.productId, movementVariantId, fromLocationId, -qty);
+        bump(line.productId, movementVariantId, toLocationId, qty);
       }
 
       const created = await this.appendMovementsTx(tx, planned);

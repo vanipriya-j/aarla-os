@@ -2,7 +2,6 @@
 
 import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
 import { deriveBalances, partnerStockFor } from "@/lib/domain/ledger";
-import { LOC } from "@/lib/domain/catalog";
 import type { PartnerType } from "@/lib/domain/types";
 import type {
   PartnerInvoice,
@@ -11,6 +10,7 @@ import type {
 import {
   buildAvailableStockOptions,
   optionKey,
+  resolveStudioLocationIds,
   searchCatalogStockOptions,
   searchStockOptionsAtLocation,
   type PartnerStockOption,
@@ -208,18 +208,19 @@ export default function PartnersPage() {
     ? locations.find((l) => l.partnerId === selected.id)?.id
     : undefined;
 
-  const stockSourceLocationId =
-    modal === "transfer"
-      ? LOC.studio
-      : modal === "recall" || modal === "sale"
-        ? partnerLocId
-        : null;
+  const studioLocationIds = useMemo(() => resolveStudioLocationIds(locations), [locations]);
+
+  const stockSourceLocationIds = useMemo(() => {
+    if (modal === "transfer") return studioLocationIds;
+    if ((modal === "recall" || modal === "sale") && partnerLocId) return [partnerLocId];
+    return [] as string[];
+  }, [modal, studioLocationIds, partnerLocId]);
 
   const stockOptions = useMemo(() => {
     if (modal === "legacy") return [];
-    if (!stockSourceLocationId) return [];
-    return buildAvailableStockOptions(products, balances, stockSourceLocationId);
-  }, [modal, products, balances, stockSourceLocationId]);
+    if (!stockSourceLocationIds.length) return [];
+    return buildAvailableStockOptions(products, balances, stockSourceLocationIds);
+  }, [modal, products, balances, stockSourceLocationIds]);
 
   const catalogSearch = useMemo(() => {
     if (modal === "legacy") {
@@ -227,14 +228,14 @@ export default function PartnersPage() {
     }
     if (
       (modal === "transfer" || modal === "recall" || modal === "sale") &&
-      stockSourceLocationId
+      stockSourceLocationIds.length
     ) {
-      const locationId = stockSourceLocationId;
+      const locationIds = stockSourceLocationIds;
       return (query: string) =>
-        searchStockOptionsAtLocation(products, balances, locationId, query, 25);
+        searchStockOptionsAtLocation(products, balances, locationIds, query, 40);
     }
     return undefined;
-  }, [modal, products, balances, stockSourceLocationId]);
+  }, [modal, products, balances, stockSourceLocationIds]);
 
   const computedInvoiceTotal = useMemo(
     () =>

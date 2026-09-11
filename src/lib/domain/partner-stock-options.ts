@@ -1,4 +1,6 @@
-import type { InventoryBalance, Product } from "@/lib/domain/types";
+import type { InventoryBalance, Location, Product } from "@/lib/domain/types";
+import { LOC } from "@/lib/domain/catalog";
+import { studioLedgerAvailable } from "@/lib/domain/channel-reservation";
 
 export type PartnerStockOption = {
   productId: string;
@@ -17,6 +19,17 @@ export type CatalogProductLike = {
   variants: Array<{ id: string; label: string; sku?: string }>;
 };
 
+/** Prefer loc-studio, then any location marked Studio (same pool Inventory uses). */
+export function resolveStudioLocationIds(locations: Location[]): string[] {
+  const ids = new Set<string>();
+  if (locations.some((l) => l.id === LOC.studio)) ids.add(LOC.studio);
+  for (const loc of locations) {
+    if (loc.kind === "Studio") ids.add(loc.id);
+  }
+  if (!ids.size) ids.add(LOC.studio);
+  return [...ids];
+}
+
 function variantLabelFor(
   product: CatalogProductLike | undefined,
   variantId: string,
@@ -27,26 +40,74 @@ function variantLabelFor(
   return { label: variant.label || variantId, sku: variant.sku || "" };
 }
 
-/** Positive balances at a location → selectable product×variant rows. */
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchesQuery(haystack: string, query: string): boolean {
+  const tokens = normalizeSearchText(query).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return false;
+  const hay = normalizeSearchText(haystack);
+  return tokens.every((t) => hay.includes(t));
+}
+
+/** Positive balances at one or more locations → selectable product×variant rows. */
 export function buildAvailableStockOptions(
   products: Product[],
   balances: InventoryBalance[],
-  locationId: string,
+  locationId: string | string[],
 ): PartnerStockOption[] {
+  const locationIds = Array.isArray(locationId) ? locationId : [locationId];
+  const locationSet = new Set(locationIds);
   const byId = new Map(products.map((p) => [p.id, p]));
   const rows: PartnerStockOption[] = [];
+  const seen = new Set<string>();
 
   for (const b of balances) {
-    if (b.locationId !== locationId || b.quantity <= 0) continue;
+    if (!locationSet.has(b.locationId) || b.quantity <= 0) continue;
     const product = byId.get(b.productId);
-    const { label, sku } = variantLabelFor(product, b.variantId);
+    let variantId = b.variantId;
+    // Product-level ledger qty on a single-variant product → attach to that variant.
+    if (!variantId && product?.variants.length === 1) {
+      variantId = product.variants[0]!.id;
+    }
+    const key = `${b.productId}::${variantId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const available = locationIds.reduce((sum, loc) => {
+      if (product) {
+        return (
+          sum + studioLedgerAvailable(balances, products, b.productId, variantId || null, loc)
+        );
+      }
+      return (
+        sum +
+        balances
+          .filter(
+            (x) =>
+              x.productId === b.productId &&
+              x.locationId === loc &&
+              (x.variantId === b.variantId || x.variantId === variantId),
+          )
+          .reduce((s, x) => s + Math.max(0, x.quantity), 0)
+      );
+    }, 0);
+    if (available <= 0) continue;
+
+    const { label, sku } = variantLabelFor(product, variantId);
     rows.push({
       productId: b.productId,
       productTitle: product?.title ?? b.productId,
-      variantId: b.variantId,
+      variantId,
       variantLabel: label,
-      sku,
-      available: b.quantity,
+      sku: sku || product?.sku || "",
+      available,
     });
   }
 
@@ -131,25 +192,28 @@ export function searchCatalogStockOptions(
   return rows;
 }
 
-/** Search catalog at a location — prefer in-stock rows, still surface zero-stock matches. */
+/** Search in-stock rows first (Inventory Studio truth), then catalog zero-qty matches. */
 export function searchStockOptionsAtLocation(
-  products: CatalogProductLike[],
+  products: Product[],
   balances: InventoryBalance[],
-  locationId: string,
+  locationId: string | string[],
   query: string,
   limit = 25,
 ): PartnerStockOption[] {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   if (!q) return [];
-  const tokens = q.split(/\s+/).filter(Boolean);
 
-  const availableMap = new Map<string, number>();
-  for (const b of balances) {
-    if (b.locationId !== locationId || b.quantity <= 0) continue;
-    availableMap.set(`${b.productId}::${b.variantId}`, b.quantity);
-  }
+  const inStock = buildAvailableStockOptions(products, balances, locationId).filter((row) =>
+    matchesQuery(
+      `${row.productTitle} ${row.variantLabel} ${row.sku} ${row.productId}`,
+      q,
+    ),
+  );
 
-  const inStock: PartnerStockOption[] = [];
+  if (inStock.length >= limit) return inStock.slice(0, limit);
+
+  const locationIds = Array.isArray(locationId) ? locationId : [locationId];
+  const seen = new Set(inStock.map((r) => `${r.productId}::${r.variantId}`));
   const outOfStock: PartnerStockOption[] = [];
 
   for (const product of products) {
@@ -157,41 +221,41 @@ export function searchStockOptionsAtLocation(
       product.variants.length > 0
         ? product.variants
         : [{ id: "", label: "No variant", sku: product.sku || "" }];
-
     for (const variant of variants) {
       const variantId = variant.id || "";
+      const key = `${product.id}::${variantId}`;
+      if (seen.has(key)) continue;
       const label = variant.label || (variantId ? variantId : "No variant");
-      const haystack =
-        `${product.title} ${label} ${variant.sku || ""} ${product.sku || ""} ${product.id}`.toLowerCase();
-      if (!tokens.every((t) => haystack.includes(t))) continue;
-
-      const available = availableMap.get(`${product.id}::${variantId}`) ?? 0;
-      // Also accept product-level (empty variant) stock when searching a specific variant.
-      const pooled =
-        variantId && available === 0
-          ? (availableMap.get(`${product.id}::`) ?? 0)
-          : available;
-      const qty = available > 0 ? available : pooled;
-
-      const row: PartnerStockOption = {
+      if (
+        !matchesQuery(
+          `${product.title} ${label} ${variant.sku || ""} ${product.sku || ""} ${product.id}`,
+          q,
+        )
+      ) {
+        continue;
+      }
+      const available = locationIds.reduce(
+        (sum, loc) =>
+          sum + studioLedgerAvailable(balances, products, product.id, variantId || null, loc),
+        0,
+      );
+      if (available > 0) continue;
+      outOfStock.push({
         productId: product.id,
         productTitle: product.title,
         variantId,
         variantLabel: label,
         sku: variant.sku || product.sku || "",
-        available: qty,
-      };
-      if (qty > 0) inStock.push(row);
-      else outOfStock.push(row);
-
-      if (inStock.length >= limit) {
-        return inStock.slice(0, limit);
+        available: 0,
+      });
+      seen.add(key);
+      if (inStock.length + outOfStock.length >= limit) {
+        return [...inStock, ...outOfStock];
       }
     }
   }
 
-  const remaining = Math.max(0, limit - inStock.length);
-  return [...inStock, ...outOfStock.slice(0, remaining)];
+  return [...inStock, ...outOfStock];
 }
 
 export function filterStockOptions(

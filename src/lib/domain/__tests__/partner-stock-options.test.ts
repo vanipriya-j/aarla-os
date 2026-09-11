@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildAvailableStockOptions,
   filterStockOptions,
+  resolveStudioLocationIds,
   searchCatalogStockOptions,
   searchStockOptionsAtLocation,
 } from "@/lib/domain/partner-stock-options";
-import type { InventoryBalance, Product } from "@/lib/domain/types";
+import type { InventoryBalance, Location, Product } from "@/lib/domain/types";
 
 const products: Product[] = [
   {
@@ -116,5 +117,54 @@ describe("partner-stock-options", () => {
     );
     expect(filterStockOptions(options, "kolam blue", 25)).toHaveLength(1);
     expect(filterStockOptions(options, "", 1)).toHaveLength(1);
+  });
+
+  it("location search finds in-stock rows by title even among many SKUs", () => {
+    const balances: InventoryBalance[] = [
+      {
+        productId: "prod-kolam-bottle",
+        variantId: "var-kol-blue",
+        locationId: "loc-studio",
+        quantity: 4,
+      },
+      {
+        productId: "prod-book",
+        variantId: "var-book-std",
+        locationId: "loc-studio",
+        quantity: 12,
+      },
+    ];
+    const hits = searchStockOptionsAtLocation(products, balances, "loc-studio", "book", 25);
+    expect(hits[0]?.productId).toBe("prod-book");
+    expect(hits[0]?.available).toBe(12);
+  });
+
+  it("maps product-level Studio qty onto a single-variant SKU", () => {
+    const balances: InventoryBalance[] = [
+      {
+        productId: "prod-book",
+        variantId: "",
+        locationId: "loc-studio",
+        quantity: 9,
+      },
+    ];
+    const rows = buildAvailableStockOptions(products, balances, "loc-studio");
+    expect(rows).toEqual([
+      expect.objectContaining({
+        productId: "prod-book",
+        variantId: "var-book-std",
+        available: 9,
+      }),
+    ]);
+    const hits = searchStockOptionsAtLocation(products, balances, ["loc-studio"], "journey", 10);
+    expect(hits[0]?.available).toBe(9);
+  });
+
+  it("resolves Studio location ids from the locations list", () => {
+    const locations: Location[] = [
+      { id: "loc-studio", name: "Aarla Studio", kind: "Studio" },
+      { id: "loc-partner-x", name: "Partner X", kind: "Partner", partnerId: "partner-x" },
+    ];
+    expect(resolveStudioLocationIds(locations)).toEqual(["loc-studio"]);
   });
 });

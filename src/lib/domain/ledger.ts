@@ -556,8 +556,10 @@ export const movementsSeed: StockMovement[] = [
 /** Pure: derive variant-aware location balances from an ordered movement list. */
 export function deriveBalances(movements: StockMovement[]): InventoryBalance[] {
   const map = new Map<string, number>();
+  // Use a delimiter that cannot appear in codes (avoid "::" ambiguity with empty variant).
+  const SEP = "\u001f";
   const key = (productId: string, variantId: string, locationId: string) =>
-    `${productId}::${variantId}::${locationId}`;
+    `${productId}${SEP}${variantId}${SEP}${locationId}`;
 
   for (const m of movements) {
     if (m.quantity <= 0) continue;
@@ -571,8 +573,14 @@ export function deriveBalances(movements: StockMovement[]): InventoryBalance[] {
   const balances: InventoryBalance[] = [];
   for (const [k, quantity] of map.entries()) {
     if (quantity === 0) continue;
-    const [productId, variantId, locationId] = k.split("::");
-    balances.push({ productId, variantId, locationId, quantity });
+    const [productId, variantId, locationId] = k.split(SEP);
+    if (!productId || locationId == null || locationId === "") continue;
+    balances.push({
+      productId,
+      variantId: variantId ?? "",
+      locationId,
+      quantity,
+    });
   }
   return balances;
 }
