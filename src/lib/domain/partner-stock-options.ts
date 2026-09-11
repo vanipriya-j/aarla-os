@@ -131,6 +131,69 @@ export function searchCatalogStockOptions(
   return rows;
 }
 
+/** Search catalog at a location — prefer in-stock rows, still surface zero-stock matches. */
+export function searchStockOptionsAtLocation(
+  products: CatalogProductLike[],
+  balances: InventoryBalance[],
+  locationId: string,
+  query: string,
+  limit = 25,
+): PartnerStockOption[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+
+  const availableMap = new Map<string, number>();
+  for (const b of balances) {
+    if (b.locationId !== locationId || b.quantity <= 0) continue;
+    availableMap.set(`${b.productId}::${b.variantId}`, b.quantity);
+  }
+
+  const inStock: PartnerStockOption[] = [];
+  const outOfStock: PartnerStockOption[] = [];
+
+  for (const product of products) {
+    const variants =
+      product.variants.length > 0
+        ? product.variants
+        : [{ id: "", label: "No variant", sku: product.sku || "" }];
+
+    for (const variant of variants) {
+      const variantId = variant.id || "";
+      const label = variant.label || (variantId ? variantId : "No variant");
+      const haystack =
+        `${product.title} ${label} ${variant.sku || ""} ${product.sku || ""} ${product.id}`.toLowerCase();
+      if (!tokens.every((t) => haystack.includes(t))) continue;
+
+      const available = availableMap.get(`${product.id}::${variantId}`) ?? 0;
+      // Also accept product-level (empty variant) stock when searching a specific variant.
+      const pooled =
+        variantId && available === 0
+          ? (availableMap.get(`${product.id}::`) ?? 0)
+          : available;
+      const qty = available > 0 ? available : pooled;
+
+      const row: PartnerStockOption = {
+        productId: product.id,
+        productTitle: product.title,
+        variantId,
+        variantLabel: label,
+        sku: variant.sku || product.sku || "",
+        available: qty,
+      };
+      if (qty > 0) inStock.push(row);
+      else outOfStock.push(row);
+
+      if (inStock.length >= limit) {
+        return inStock.slice(0, limit);
+      }
+    }
+  }
+
+  const remaining = Math.max(0, limit - inStock.length);
+  return [...inStock, ...outOfStock.slice(0, remaining)];
+}
+
 export function filterStockOptions(
   options: PartnerStockOption[],
   query: string,

@@ -3,6 +3,7 @@ import {
   buildAvailableStockOptions,
   filterStockOptions,
   searchCatalogStockOptions,
+  searchStockOptionsAtLocation,
 } from "@/lib/domain/partner-stock-options";
 import type { InventoryBalance, Product } from "@/lib/domain/types";
 
@@ -76,6 +77,22 @@ describe("partner-stock-options", () => {
     expect(blue).toHaveLength(1);
     expect(blue[0]?.variantId).toBe("var-kol-blue");
     expect(searchCatalogStockOptions(products, "", 25)).toEqual([]);
+  });
+
+  it("location search surfaces catalog matches even when Studio qty is zero", () => {
+    const balances: InventoryBalance[] = [
+      {
+        productId: "prod-kolam-bottle",
+        variantId: "var-kol-blue",
+        locationId: "loc-studio",
+        quantity: 4,
+      },
+    ];
+    const hits = searchStockOptionsAtLocation(products, balances, "loc-studio", "book", 25);
+    expect(hits.some((h) => h.productId === "prod-book" && h.available === 0)).toBe(true);
+    const kolam = searchStockOptionsAtLocation(products, balances, "loc-studio", "kolam", 25);
+    expect(kolam[0]?.available).toBe(4);
+    expect(kolam.some((h) => h.available === 0)).toBe(true);
   });
 
   it("filters available options by token query and caps results", () => {

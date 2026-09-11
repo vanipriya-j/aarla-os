@@ -144,11 +144,16 @@ export function PartnerStockPicker({
             results.map((o) => {
               const key = optionKey(o);
               const isChecked = checked.has(key);
+              const unavailable = o.available <= 0;
               return (
                 <label
                   key={key}
-                  className={`flex items-start gap-3 px-3 py-2.5 text-sm cursor-pointer transition ${
-                    isChecked ? "bg-aarla-red/5" : "hover:bg-pale-cream"
+                  className={`flex items-start gap-3 px-3 py-2.5 text-sm transition ${
+                    unavailable
+                      ? "opacity-55 cursor-not-allowed"
+                      : isChecked
+                        ? "bg-aarla-red/5 cursor-pointer"
+                        : "hover:bg-pale-cream cursor-pointer"
                   }`}
                   data-testid={`${testIdPrefix}-option`}
                 >
@@ -156,7 +161,10 @@ export function PartnerStockPicker({
                     type="checkbox"
                     className="mt-1"
                     checked={isChecked}
-                    onChange={() => toggle(key)}
+                    disabled={unavailable}
+                    onChange={() => {
+                      if (!unavailable) toggle(key);
+                    }}
                     data-testid={`${testIdPrefix}-option-check`}
                   />
                   <span className="min-w-0 flex-1">
@@ -168,9 +176,10 @@ export function PartnerStockPicker({
                       </span>
                     </span>
                     <span className="block text-xs text-charcoal/55 mt-0.5">
-                      {o.available > 0 ? `Available ${o.available}` : null}
-                      {o.available > 0 && o.sku ? " · " : null}
-                      {o.sku ? `SKU ${o.sku}` : null}
+                      {unavailable
+                        ? "No qty here — can't add until stock is available"
+                        : `Available ${o.available}`}
+                      {o.sku ? ` · SKU ${o.sku}` : null}
                     </span>
                   </span>
                 </label>

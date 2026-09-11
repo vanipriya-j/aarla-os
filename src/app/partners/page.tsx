@@ -12,6 +12,7 @@ import {
   buildAvailableStockOptions,
   optionKey,
   searchCatalogStockOptions,
+  searchStockOptionsAtLocation,
   type PartnerStockOption,
 } from "@/lib/domain/partner-stock-options";
 import {
@@ -221,9 +222,19 @@ export default function PartnersPage() {
   }, [modal, products, balances, stockSourceLocationId]);
 
   const catalogSearch = useMemo(() => {
-    if (modal !== "legacy") return undefined;
-    return (query: string) => searchCatalogStockOptions(products, query, 25);
-  }, [modal, products]);
+    if (modal === "legacy") {
+      return (query: string) => searchCatalogStockOptions(products, query, 25);
+    }
+    if (
+      (modal === "transfer" || modal === "recall" || modal === "sale") &&
+      stockSourceLocationId
+    ) {
+      const locationId = stockSourceLocationId;
+      return (query: string) =>
+        searchStockOptionsAtLocation(products, balances, locationId, query, 25);
+    }
+    return undefined;
+  }, [modal, products, balances, stockSourceLocationId]);
 
   const computedInvoiceTotal = useMemo(
     () =>
@@ -738,12 +749,18 @@ export default function PartnersPage() {
                         </div>
                         {group.isBatch ? (
                           <ul className="mt-2 space-y-1 text-charcoal/70">
-                            {group.lines.map((line) => (
-                              <li key={line.id}>
-                                {getProductTitle(line.productId)}
-                                {line.variantId ? ` · ${line.variantId}` : ""} ×{line.quantity}
-                              </li>
-                            ))}
+                            {group.lines.map((line) => {
+                              const product = products.find((p) => p.id === line.productId);
+                              const variant = product?.variants.find(
+                                (v) => v.id === line.variantId,
+                              );
+                              return (
+                                <li key={line.id}>
+                                  {product?.title ?? line.productId}
+                                  {variant?.label ? ` · ${variant.label}` : ""} ×{line.quantity}
+                                </li>
+                              );
+                            })}
                           </ul>
                         ) : null}
                       </li>
@@ -1037,10 +1054,10 @@ export default function PartnersPage() {
               requireQuery
               emptyHint={
                 modal === "legacy"
-                  ? "Type to search the catalog, multi-select, then Add selected…"
+                  ? "Type a product name to search the catalog…"
                   : modal === "transfer"
-                    ? "Type to find Studio stock, multi-select, then Add selected…"
-                    : "Type to find partner stock, multi-select, then Add selected…"
+                    ? "Type a product name (e.g. coin, kolam) — shows Studio stock matches"
+                    : "Type a product name — shows stock at this partner"
               }
             />
             <PartnerStockDraftLines
