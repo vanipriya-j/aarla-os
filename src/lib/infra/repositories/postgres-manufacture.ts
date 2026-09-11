@@ -19,6 +19,10 @@ import type {
   WorkflowTemplateStep,
   VendorWorkflowAiDraft,
 } from "@/lib/domain/manufacture-types";
+import {
+  canCancelVendorOrder,
+  canReopenVendorOrderForEdit,
+} from "@/lib/domain/vendor-order-lifecycle";
 import { listProductImageUrlsByCodes } from "@/lib/infra/repositories/postgres-shopify-catalog";
 
 function dateStr(v: string | Date | null | undefined): string | null {
@@ -1302,6 +1306,136 @@ export async function updateVendorOrderStatus(
      where organization_id = $1 and order_number = $2`,
     [ORG_ID, orderNumber, status],
   );
+}
+
+/** Cancel a PO that has not yet been received. */
+export async function cancelVendorOrder(
+  orderNumber: string,
+  reason?: string,
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!canCancelVendorOrder(existing.status)) {
+    throw new Error(
+      `Cannot cancel a PO in status “${existing.status.replaceAll("_", " ")}”.`,
+    );
+  }
+
+  const orderId = await resolveVendorOrderUuid(orderNumber);
+
+  await query(
+    `update vendor_orders set status = 'cancelled', updated_at = now()
+     where id = $1 and organization_id = $2`,
+    [orderId, ORG_ID],
+  );
+
+  await query(
+    `update workflow_instances set status = 'cancelled', updated_at = now()
+     where vendor_order_id = $1 and status = 'active'`,
+    [orderId],
+  ).catch(() => undefined);
+
+  await query(
+    `update vendor_payments set status = 'cancelled', updated_at = now()
+     where vendor_order_id = $1 and status = 'due'`,
+    [orderId],
+  ).catch(() => undefined);
+
+  const note = reason?.trim()
+    ? `PO cancelled: ${reason.trim()}`
+    : "PO cancelled by founder";
+  await logCommunication({
+    orderNumber,
+    channel: "OTHER",
+    direction: "OUTBOUND",
+    status: "SENT",
+    recipient: "",
+    message: note,
+  });
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after cancel");
+  return updated;
+}
+
+/**
+ * Retract a sent/confirmed PO back to ready_to_send so lines can be edited
+ * and Preview / Send can run again.
+ */
+export async function reopenVendorOrderForEdit(
+  orderNumber: string,
+  reason?: string,
+): Promise<VendorOrder> {
+  await ensureManufactureSchema();
+  const existing = await getVendorOrder(orderNumber);
+  if (!existing) throw new Error("Order not found");
+  if (!canReopenVendorOrderForEdit(existing.status)) {
+    throw new Error(
+      existing.status === "draft" || existing.status === "ready_to_send"
+        ? "This PO is already editable — change lines, then Preview / Send."
+        : `Cannot reopen a PO in status “${existing.status.replaceAll("_", " ")}” for editing.`,
+    );
+  }
+
+  const orderId = await resolveVendorOrderUuid(orderNumber);
+
+  await query(
+    `update vendor_orders set
+       status = 'ready_to_send',
+       vendor_committed_date = null,
+       updated_at = now()
+     where id = $1 and organization_id = $2`,
+    [orderId, ORG_ID],
+  );
+
+  // Reset workflow to the first step so SEND / confirmation can run again after resend.
+  const inst = await query<{ id: string }>(
+    `select id from workflow_instances
+     where vendor_order_id = $1
+     order by created_at desc
+     limit 1`,
+    [orderId],
+  ).catch(() => [] as { id: string }[]);
+  const instId = inst[0]?.id;
+  if (instId) {
+    await query(
+      `update workflow_instance_steps set
+         status = case when sequence = 1 then 'ACTIVE' else 'PENDING' end,
+         started_at = case when sequence = 1 then now() else null end,
+         completed_at = null,
+         notes = case
+           when sequence = 1 then coalesce(notes, '')
+           else notes
+         end
+       where workflow_instance_id = $1`,
+      [instId],
+    ).catch(() => undefined);
+    await query(
+      `update workflow_instances set
+         status = 'active',
+         current_step_sequence = 1,
+         updated_at = now()
+       where id = $1`,
+      [instId],
+    ).catch(() => undefined);
+  }
+
+  const note = reason?.trim()
+    ? `PO reopened for edit / resend: ${reason.trim()}`
+    : `PO reopened for edit / resend (was ${existing.status})`;
+  await logCommunication({
+    orderNumber,
+    channel: "OTHER",
+    direction: "OUTBOUND",
+    status: "SENT",
+    recipient: "",
+    message: note,
+  });
+
+  const updated = await getVendorOrder(orderNumber);
+  if (!updated) throw new Error("Order not found after reopen");
+  return updated;
 }
 
 export async function completeActiveWorkflowStep(

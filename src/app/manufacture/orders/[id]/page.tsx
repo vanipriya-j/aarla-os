@@ -9,6 +9,7 @@ import {
   addCustomVendorOrderItemAction,
   addVendorOrderItemsAction,
   advanceWorkflowAction,
+  cancelVendorOrderAction,
   generateOrderPdfAction,
   getVendorOrderAction,
   listProductsForManufactureAction,
@@ -18,6 +19,7 @@ import {
   prepareSendOrderAction,
   recordConfirmationAction,
   removeVendorOrderItemAction,
+  reopenVendorOrderForEditAction,
   sendViaWhatsAppAction,
   updateVendorOrderItemAction,
 } from "@/app/actions/manufacture-actions";
@@ -28,6 +30,10 @@ import type {
   VendorPayment,
   WorkflowInstance,
 } from "@/lib/domain/manufacture-types";
+import {
+  canCancelVendorOrder,
+  canReopenVendorOrderForEdit,
+} from "@/lib/domain/vendor-order-lifecycle";
 
 function daysOverdue(date: string | null): number | null {
   if (!date) return null;
@@ -149,6 +155,9 @@ function VendorOrderDetailInner() {
     .reduce((s, p) => s + p.amount, 0);
   const totalItems = order?.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
   const canEditLines = order?.status === "draft" || order?.status === "ready_to_send";
+  const showCancel = order ? canCancelVendorOrder(order.status) : false;
+  const showEditResend = order ? canReopenVendorOrderForEdit(order.status) : false;
+  const isCancelled = order?.status === "cancelled";
   const addProduct = products.find((p) => p.id === addProductId);
 
   function addLine() {
@@ -344,6 +353,50 @@ function VendorOrderDetailInner() {
     });
   }
 
+  function cancelOrder() {
+    const ok = window.confirm(
+      `Cancel ${orderNumber}?\n\nThis marks the PO cancelled. Unpaid schedule lines are cancelled. You won’t be able to send it again unless you create a new order.`,
+    );
+    if (!ok) return;
+    const reason = window.prompt("Optional note for the activity log (why cancelled):", "") ?? "";
+    startTransition(async () => {
+      const r = await cancelVendorOrderAction(orderNumber, reason.trim() || undefined);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOrder(r.data);
+      setError(null);
+      load();
+    });
+  }
+
+  function editAndResend() {
+    const ok = window.confirm(
+      `Edit & resend ${orderNumber}?\n\nThis retracts the PO back to “ready to send” so you can change lines, regenerate the PDF, and Preview / Send again. The vendor’s previous confirmation is cleared.`,
+    );
+    if (!ok) return;
+    const reason =
+      window.prompt("Optional note for the activity log (what changed):", "") ?? "";
+    startTransition(async () => {
+      const r = await reopenVendorOrderForEditAction(
+        orderNumber,
+        reason.trim() || undefined,
+      );
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOrder(r.data);
+      setQtyDrafts(
+        Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])),
+      );
+      setError(null);
+      setPreview(null);
+      load();
+    });
+  }
+
   function followUp() {
     if (!vendor) return;
     const phone = (vendor.whatsappNumber || vendor.phone || "").replace(/\D/g, "");
@@ -385,12 +438,38 @@ function VendorOrderDetailInner() {
                 All orders
               </Button>
             </Link>
-            <Button size="sm" variant="outline" onClick={generatePdf} disabled={pending}>
-              Generate PDF
-            </Button>
-            <Button size="sm" onClick={openPreview} disabled={pending}>
-              Preview / Send
-            </Button>
+            {showEditResend ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={editAndResend}
+                disabled={pending}
+                data-testid="vendor-order-edit-resend"
+              >
+                Edit & resend
+              </Button>
+            ) : null}
+            {showCancel ? (
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={cancelOrder}
+                disabled={pending}
+                data-testid="vendor-order-cancel"
+              >
+                Cancel PO
+              </Button>
+            ) : null}
+            {!isCancelled ? (
+              <>
+                <Button size="sm" variant="outline" onClick={generatePdf} disabled={pending}>
+                  Generate PDF
+                </Button>
+                <Button size="sm" onClick={openPreview} disabled={pending}>
+                  Preview / Send
+                </Button>
+              </>
+            ) : null}
           </div>
         }
       />
@@ -435,6 +514,25 @@ function VendorOrderDetailInner() {
                 </div>
               ))}
             </section>
+
+            {isCancelled ? (
+              <div
+                className="rounded-xl border border-charcoal/20 bg-charcoal/5 px-4 py-3"
+                data-testid="vendor-order-cancelled-banner"
+              >
+                <p className="text-sm font-medium text-deep-navy">This PO is cancelled</p>
+                <p className="text-xs text-charcoal/60 mt-1">
+                  Lines are locked. Create a new vendor order if you need to reorder.
+                </p>
+              </div>
+            ) : null}
+
+            {canEditLines && order.status !== "draft" ? (
+              <div className="rounded-xl border border-deep-navy/15 bg-white px-4 py-3 text-sm text-charcoal/70">
+                PO is ready to edit — update lines below, then Generate PDF and Preview / Send
+                again.
+              </div>
+            ) : null}
 
             {overdue != null && !["received", "closed", "cancelled"].includes(order.status) ? (
               <div className="rounded-xl border border-aarla-red/30 bg-aarla-red/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3">

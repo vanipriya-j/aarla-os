@@ -40,6 +40,8 @@ import {
   updateVendorHowTheyWork,
   updateVendorProfile,
   updateVendorOrderStatus,
+  cancelVendorOrder,
+  reopenVendorOrderForEdit,
 } from "@/lib/infra/repositories/postgres-manufacture";
 import type { VendorWorkflowAiDraft } from "@/lib/domain/manufacture-types";
 import { listProducts } from "@/lib/application/services";
@@ -401,6 +403,29 @@ export async function setOrderStatusAction(
   try {
     await updateVendorOrderStatus(orderNumber, status);
     return { ok: true as const, data: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Cancel a vendor PO that has not been received yet. */
+export async function cancelVendorOrderAction(orderNumber: string, reason?: string) {
+  try {
+    const order = await cancelVendorOrder(orderNumber, reason);
+    return { ok: true as const, data: order };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Retract a sent/confirmed PO so lines can be edited and resent. */
+export async function reopenVendorOrderForEditAction(
+  orderNumber: string,
+  reason?: string,
+) {
+  try {
+    const order = await reopenVendorOrderForEdit(orderNumber, reason);
+    return { ok: true as const, data: order };
   } catch (e) {
     return fail(e);
   }
