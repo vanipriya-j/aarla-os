@@ -14,6 +14,7 @@ import {
   transferStockAction,
   transferToPartnerAction,
 } from "@/app/actions/app-actions";
+import { transferFromPartnerAction, postPartnerStockBatchAction } from "@/app/actions/partner-commerce-actions";
 import type { RegisterProductInput } from "@/lib/engine/business-engine";
 import type {
   AdjustmentReason,
@@ -109,14 +110,44 @@ export function useAppLedger() {
       quantity: number;
       notes?: string;
       reference?: string;
-    }) => {
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
       const result = await transferToPartnerAction(input);
       if (!result.ok) {
         setError(result.error);
-        return null;
+        return result;
+      }
+      if (!result.data) {
+        const error = "Transfer failed — check Studio stock for this variant.";
+        setError(error);
+        return { ok: false, error };
       }
       await refresh();
-      return result.data;
+      return { ok: true, data: result.data };
+    },
+    [refresh],
+  );
+
+  const transferFromPartner = useCallback(
+    async (input: {
+      productId: string;
+      variantId?: string;
+      partnerId: string;
+      quantity: number;
+      notes?: string;
+      reference?: string;
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
+      const result = await transferFromPartnerAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return result;
+      }
+      if (!result.data) {
+        const error = "Recall failed — partner has insufficient stock for this variant.";
+        setError(error);
+        return { ok: false, error };
+      }
+      await refresh();
+      return { ok: true, data: result.data };
     },
     [refresh],
   );
@@ -129,14 +160,41 @@ export function useAppLedger() {
       quantity: number;
       notes?: string;
       reference?: string;
-    }) => {
+    }): Promise<{ ok: true; data: StockMovement } | { ok: false; error: string }> => {
       const result = await partnerSaleAction(input);
       if (!result.ok) {
         setError(result.error);
-        return null;
+        return result;
+      }
+      if (!result.data) {
+        const error = "Sale failed — partner has insufficient stock for this variant.";
+        setError(error);
+        return { ok: false, error };
       }
       await refresh();
-      return result.data;
+      return { ok: true, data: result.data };
+    },
+    [refresh],
+  );
+
+  const postPartnerStockBatch = useCallback(
+    async (input: {
+      kind: "transfer" | "recall" | "sale";
+      partnerId: string;
+      notes?: string;
+      lines: Array<{
+        productId: string;
+        variantId: string;
+        quantity: number;
+      }>;
+    }): Promise<{ ok: true; data: StockMovement[] } | { ok: false; error: string }> => {
+      const result = await postPartnerStockBatchAction(input);
+      if (!result.ok) {
+        setError(result.error);
+        return result;
+      }
+      await refresh();
+      return { ok: true, data: result.data };
     },
     [refresh],
   );
@@ -260,7 +318,9 @@ export function useAppLedger() {
     error,
     receive,
     transfer,
+    transferFromPartner,
     partnerSale,
+    postPartnerStockBatch,
     transferStock,
     adjustStock,
     createManufacturingPO,

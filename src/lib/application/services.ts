@@ -143,6 +143,31 @@ export async function transferToPartner(input: {
   return engine().transferToPartner(input);
 }
 
+export async function transferFromPartner(input: {
+  productId: string;
+  variantId?: string;
+  partnerId: string;
+  quantity: number;
+  notes?: string;
+  reference?: string;
+}) {
+  return engine().transferFromPartner(input);
+}
+
+export async function postPartnerStockBatch(input: {
+  kind: "transfer" | "recall" | "sale";
+  partnerId: string;
+  notes?: string;
+  lines: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    reference?: string;
+  }>;
+}) {
+  return engine().postPartnerStockBatch(input);
+}
+
 export async function recordPartnerSale(input: {
   productId: string;
   variantId?: string;

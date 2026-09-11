@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState, useTransition } from "react";
+import { Suspense, useEffect, useMemo, useState, useTransition } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
+import { CatalogProductAddPanel } from "@/components/catalog/CatalogProductAddPanel";
 import {
   addCustomVendorOrderItemAction,
   addVendorOrderItemsAction,
@@ -28,6 +29,7 @@ import type {
   VendorPayment,
   WorkflowInstance,
 } from "@/lib/domain/manufacture-types";
+import { optionKey } from "@/lib/domain/partner-stock-options";
 
 function daysOverdue(date: string | null): number | null {
   if (!date) return null;
@@ -97,9 +99,6 @@ function VendorOrderDetailInner() {
       variants: Array<{ id: string; label: string; sku: string }>;
     }>
   >([]);
-  const [addProductId, setAddProductId] = useState(prefillProduct ?? "");
-  const [addVariantId, setAddVariantId] = useState(prefillVariant ?? "");
-  const [addQty, setAddQty] = useState(Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
   const [pdfReadyUrl, setPdfReadyUrl] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
@@ -132,8 +131,6 @@ function VendorOrderDetailInner() {
       }
       if (p.ok) {
         setProducts(p.data);
-        setAddProductId((prev) => prev || prefillProduct || p.data[0]?.id || "");
-        if (prefillVariant) setAddVariantId(prefillVariant);
       }
     });
   };
@@ -149,34 +146,46 @@ function VendorOrderDetailInner() {
     .reduce((s, p) => s + p.amount, 0);
   const totalItems = order?.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
   const canEditLines = order?.status === "draft" || order?.status === "ready_to_send";
-  const addProduct = products.find((p) => p.id === addProductId);
 
-  function addLine() {
-    if (!addProduct) {
-      setError("Pick a product to add.");
-      return;
+  const existingLineKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of order?.items ?? []) {
+      if (!item.productId || item.isCustom) continue;
+      keys.add(optionKey({ productId: item.productId, variantId: item.variantId ?? "" }));
     }
-    const variant = addProduct.variants.find((v) => v.id === addVariantId);
-    startTransition(async () => {
-      const r = await addVendorOrderItemsAction(orderNumber, [
-        {
-          productCode: addProduct.id,
-          variantCode: variant?.id ?? null,
-          title: addProduct.title,
-          variantLabel: variant?.label ?? "",
-          sku: variant?.sku || addProduct.sku,
-          quantity: addQty,
-        },
-      ]);
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      setOrder(r.data);
-      setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
-      setAddQty(20);
-      setAddVariantId("");
-      setError(null);
+    return keys;
+  }, [order?.items]);
+
+  const prefillDefaultQty =
+    Number.isFinite(prefillQty) && prefillQty > 0 ? prefillQty : 20;
+
+  function addCatalogLines(
+    lines: Array<{
+      productCode: string;
+      variantCode: string | null;
+      title: string;
+      variantLabel: string;
+      sku: string;
+      quantity: number;
+    }>,
+  ): Promise<void> {
+    if (!lines.length) {
+      setError("Add at least one product line.");
+      return Promise.reject(new Error("empty"));
+    }
+    return new Promise((resolve, reject) => {
+      startTransition(async () => {
+        const r = await addVendorOrderItemsAction(orderNumber, lines);
+        if (!r.ok) {
+          setError(r.error);
+          reject(new Error(r.error));
+          return;
+        }
+        setOrder(r.data);
+        setQtyDrafts(Object.fromEntries(r.data.items.map((i) => [i.id, String(i.quantity)])));
+        setError(null);
+        resolve();
+      });
     });
   }
 
@@ -578,57 +587,27 @@ function VendorOrderDetailInner() {
               {canEditLines ? (
                 <>
                   <div className="card-surface p-4 space-y-3 border-dashed border-aarla-red/25">
-                    <p className="text-sm font-medium text-deep-navy">Add another product</p>
+                    <p className="text-sm font-medium text-deep-navy">Add products</p>
                     <p className="text-xs text-charcoal/55">
-                      Same vendor PO — keep adding lines, then Preview / Send once.
+                      Multi-select from the catalog, edit quantities, then add all lines at once —
+                      same vendor PO.
                     </p>
-                    <div className="flex flex-wrap items-end gap-3">
-                      <label className="text-xs text-charcoal/60">
-                        Product
-                        <select
-                          value={addProductId}
-                          onChange={(e) => {
-                            setAddProductId(e.target.value);
-                            setAddVariantId("");
-                          }}
-                          className="mt-1 block min-w-[14rem] max-w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                        >
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="text-xs text-charcoal/60">
-                        Variant
-                        <select
-                          value={addVariantId}
-                          onChange={(e) => setAddVariantId(e.target.value)}
-                          className="mt-1 block min-w-[10rem] rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                        >
-                          <option value="">—</option>
-                          {(addProduct?.variants ?? []).map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="text-xs text-charcoal/60">
-                        Qty
-                        <input
-                          type="number"
-                          min={1}
-                          value={addQty}
-                          onChange={(e) => setAddQty(Number(e.target.value))}
-                          className="mt-1 block w-20 rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
-                        />
-                      </label>
-                      <Button size="sm" onClick={addLine} disabled={pending || !addProductId}>
-                        {pending ? "Adding…" : "Add to PO"}
-                      </Button>
-                    </div>
+                    {prefillProduct ? (
+                      <p className="text-xs text-deep-navy/80">
+                        Prefill: search for the linked product, select it, adjust qty (default{" "}
+                        {prefillDefaultQty}
+                        {prefillVariant ? `, variant ${prefillVariant}` : ""}).
+                      </p>
+                    ) : null}
+                    <CatalogProductAddPanel
+                      products={products}
+                      defaultQty={prefillDefaultQty}
+                      excludeKeys={existingLineKeys}
+                      submitLabel="Add to PO"
+                      pending={pending}
+                      onSubmit={addCatalogLines}
+                      testIdPrefix="mfg-order-add"
+                    />
                   </div>
 
                   <div

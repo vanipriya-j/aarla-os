@@ -955,7 +955,7 @@ export function transferToPartner(input: {
     input.reference ??
     `TR-${input.partnerId.toUpperCase().replace("PARTNER-", "")}-${input.productId}${
       input.variantId ? `-${input.variantId}` : ""
-    }-${input.quantity}`;
+    }-${input.quantity}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const [created] = appendMovements([
     {
       productId: input.productId,
@@ -990,7 +990,7 @@ export function recordPartnerSale(input: {
     input.reference ??
     `PSALE-${input.partnerId}-${input.productId}${
       input.variantId ? `-${input.variantId}` : ""
-    }-${input.quantity}`;
+    }-${input.quantity}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const [created] = appendMovements([
     {
       productId: input.productId,

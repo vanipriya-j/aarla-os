@@ -12,6 +12,10 @@ import {
   upsertCampaignLineItemAction,
   upsertPartnerRecallAction,
 } from "@/app/actions/campaign-actions";
+import {
+  CatalogProductAddPanel,
+  type CatalogAddLine,
+} from "@/components/catalog/CatalogProductAddPanel";
 import { CampaignPlannerMatrix } from "@/components/campaigns/CampaignPlannerMatrix";
 import { CampaignStatusChip } from "@/components/campaigns/CampaignStatusChip";
 import { PartnerRecallPanel } from "@/components/campaigns/PartnerRecallPanel";
@@ -24,6 +28,7 @@ import type {
   CampaignStatus,
 } from "@/lib/domain/campaign-types";
 import { formatINR } from "@/lib/domain";
+import { optionKey } from "@/lib/domain/partner-stock-options";
 import type { Product } from "@/lib/domain/types";
 
 interface CampaignPlannerClientProps {
@@ -60,18 +65,23 @@ export function CampaignPlannerClient({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [mode, setMode] = useState<CampaignPlanningMode>("inventory_investment");
-  const [productCode, setProductCode] = useState(products[0]?.id ?? "");
-  const [variantCode, setVariantCode] = useState("");
-  const [plannedQty, setPlannedQty] = useState("10");
   const [plannedAdSpend, setPlannedAdSpend] = useState(
     String(initialBoard.campaign.plannedAdSpend || ""),
   );
 
   const modeHelp = planningModeHelper(mode);
-  const selectedProduct = useMemo(
-    () => products.find((p) => p.id === productCode),
-    [products, productCode],
-  );
+  const existingLineKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const line of board.lines) {
+      keys.add(
+        optionKey({
+          productId: line.lineItem.productCode,
+          variantId: line.lineItem.variantCode ?? "",
+        }),
+      );
+    }
+    return keys;
+  }, [board.lines]);
 
   const matrixGroups = useMemo(() => {
     const byProduct = new Map<string, CampaignBoard["lines"]>();
@@ -127,22 +137,32 @@ export function CampaignPlannerClient({
     });
   }
 
-  function addLine(e: React.FormEvent) {
-    e.preventDefault();
-    if (!productCode) return;
-    startTransition(async () => {
-      setError(null);
-      const res = await upsertCampaignLineItemAction({
-        campaignId: board.campaign.id,
-        productCode,
-        variantCode: variantCode || null,
-        plannedQuantity: Number(plannedQty) || 0,
+  function addCatalogLines(lines: CatalogAddLine[]): Promise<void> {
+    if (!lines.length) {
+      setError("Add at least one product line.");
+      return Promise.reject(new Error("empty"));
+    }
+    return new Promise((resolve, reject) => {
+      startTransition(async () => {
+        setError(null);
+        let lastBoard: CampaignBoard | null = null;
+        for (const line of lines) {
+          const res = await upsertCampaignLineItemAction({
+            campaignId: board.campaign.id,
+            productCode: line.productCode,
+            variantCode: line.variantCode,
+            plannedQuantity: line.quantity,
+          });
+          if (!res.ok) {
+            setError(res.error);
+            reject(new Error(res.error));
+            return;
+          }
+          lastBoard = res.data;
+        }
+        if (lastBoard) reload(lastBoard);
+        resolve();
       });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      reload(res.data);
     });
   }
 
@@ -431,58 +451,20 @@ export function CampaignPlannerClient({
 
       {/* Add line */}
       <section className="rounded-xl border border-border bg-white p-4 space-y-3">
-        <h2 className="font-display text-lg text-deep-navy">Add product line</h2>
-        <form onSubmit={addLine} className="flex flex-wrap items-end gap-3">
-          <label className="text-sm space-y-1">
-            <span className="block text-charcoal/55">Product</span>
-            <select
-              value={productCode}
-              onChange={(e) => {
-                setProductCode(e.target.value);
-                setVariantCode("");
-              }}
-              className="rounded-lg border border-border bg-white px-3 py-2 text-sm min-w-[12rem]"
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm space-y-1">
-            <span className="block text-charcoal/55">Variant</span>
-            <select
-              value={variantCode}
-              onChange={(e) => setVariantCode(e.target.value)}
-              className="rounded-lg border border-border bg-white px-3 py-2 text-sm min-w-[10rem]"
-            >
-              <option value="">Product-level</option>
-              {(selectedProduct?.variants ?? []).map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm space-y-1">
-            <span className="block text-charcoal/55">Planned qty</span>
-            <input
-              type="number"
-              min={0}
-              value={plannedQty}
-              onChange={(e) => setPlannedQty(e.target.value)}
-              className="w-24 rounded-lg border border-border bg-white px-3 py-2 text-sm"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={pending || !productCode}
-            className="rounded-full bg-aarla-red text-white px-4 py-2 text-sm disabled:opacity-50"
-          >
-            Add line
-          </button>
-        </form>
+        <h2 className="font-display text-lg text-deep-navy">Add product lines</h2>
+        <p className="text-xs text-charcoal/55">
+          Search the catalog, multi-select product×variant rows, set planned quantities, then add
+          once.
+        </p>
+        <CatalogProductAddPanel
+          products={products}
+          defaultQty={10}
+          excludeKeys={existingLineKeys}
+          submitLabel="Add to campaign"
+          pending={pending}
+          onSubmit={addCatalogLines}
+          testIdPrefix="campaign-add"
+        />
       </section>
 
       {/* Matrix products */}

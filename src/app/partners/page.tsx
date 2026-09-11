@@ -1,9 +1,26 @@
 "use client";
 
 import { useAppLedger, useAppNetwork } from "@/lib/client/use-app-data";
-import { partnerStockFor } from "@/lib/domain/ledger";
-import type { PartnerType, Product } from "@/lib/domain/types";
-import { useMemo, useState } from "react";
+import { deriveBalances, partnerStockFor } from "@/lib/domain/ledger";
+import { LOC } from "@/lib/domain/catalog";
+import type { PartnerType } from "@/lib/domain/types";
+import type {
+  PartnerInvoice,
+  UnbilledPartnerSale,
+} from "@/lib/domain/partner-commerce-types";
+import {
+  buildAvailableStockOptions,
+  optionKey,
+  searchCatalogStockOptions,
+  type PartnerStockOption,
+} from "@/lib/domain/partner-stock-options";
+import {
+  listPartnerInvoicesAction,
+  listUnbilledPartnerSalesAction,
+  raisePartnerInvoiceAction,
+  receivePartnerPaymentAction,
+} from "@/app/actions/partner-commerce-actions";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { SummaryCard } from "@/components/ui/SummaryCard";
@@ -11,6 +28,13 @@ import { StatusChip, statusToneFromLabel } from "@/components/ui/StatusChip";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Field, inputClass, selectClass, textareaClass } from "@/components/ui/FormSection";
+import { PartnerStockPicker } from "@/components/partners/PartnerStockPicker";
+import {
+  PartnerStockDraftLines,
+  draftLineKey,
+  toDraftLine,
+  type PartnerDraftLine,
+} from "@/components/partners/PartnerStockDraftLines";
 import { Package, Plus, ScanLine, Store, ShoppingBag } from "lucide-react";
 
 const PARTNER_TYPES: PartnerType[] = [
@@ -22,17 +46,33 @@ const PARTNER_TYPES: PartnerType[] = [
   "Distributor",
 ];
 
-type ModalKind = "create" | "transfer" | "legacy" | "sale" | "payment" | null;
+type ModalKind =
+  | "create"
+  | "transfer"
+  | "recall"
+  | "legacy"
+  | "sale"
+  | "invoice"
+  | "payment"
+  | null;
 
-function firstVariantId(product: Product | undefined): string {
-  return product?.variants[0]?.id ?? "";
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const base64 = result.includes(",") ? result.split(",")[1]! : result;
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function PartnersPage() {
   const {
     movements,
-    transfer,
-    partnerSale,
+    postPartnerStockBatch,
     createPartner,
     establishPartnerOpeningBalances,
     partners,
@@ -40,6 +80,7 @@ export default function PartnersPage() {
     locations,
     hydrated,
     error,
+    refresh,
   } = useAppLedger();
   const { registrations } = useAppNetwork();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -47,10 +88,9 @@ export default function PartnersPage() {
   const [modal, setModal] = useState<ModalKind>(null);
   const [busy, setBusy] = useState(false);
 
-  const [xferProduct, setXferProduct] = useState(products[0]?.id ?? "prod-kolam-bottle");
-  const [xferVariant, setXferVariant] = useState("");
-  const [xferQty, setXferQty] = useState(5);
+  const [draftLines, setDraftLines] = useState<PartnerDraftLine[]>([]);
   const [xferNotes, setXferNotes] = useState("");
+  const [productQuery, setProductQuery] = useState("");
 
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<PartnerType>("Retail Partner");
@@ -59,13 +99,20 @@ export default function PartnersPage() {
   const [newMargin, setNewMargin] = useState(0);
   const [newNotes, setNewNotes] = useState("");
 
+  const [unbilled, setUnbilled] = useState<UnbilledPartnerSale[]>([]);
+  const [selectedSaleUuids, setSelectedSaleUuids] = useState<string[]>([]);
+  const [adjustedTotal, setAdjustedTotal] = useState(0);
+  const [invoiceNotes, setInvoiceNotes] = useState("");
+  const [invoicePreview, setInvoicePreview] = useState<PartnerInvoice | null>(null);
+
+  const [openInvoices, setOpenInvoices] = useState<PartnerInvoice[]>([]);
+  const [payInvoiceId, setPayInvoiceId] = useState("");
+  const [payAmount, setPayAmount] = useState(0);
+  const [payNotes, setPayNotes] = useState("");
+  const [payFile, setPayFile] = useState<File | null>(null);
+
   const selected =
     partners.find((p) => p.id === (selectedId ?? partners[0]?.id)) ?? partners[0];
-
-  const selectedProduct =
-    products.find((p) => p.id === xferProduct) ?? products[0];
-  const variants = selectedProduct?.variants ?? [];
-  const activeVariantId = xferVariant || firstVariantId(selectedProduct);
 
   const getProductTitle = (id: string) => products.find((p) => p.id === id)?.title ?? id;
 
@@ -94,28 +141,99 @@ export default function PartnersPage() {
       ? Math.round((partnerRegs.length / selected.productsSold) * 100)
       : 0;
 
-  const partnerMoves = selected
-    ? movements.filter((m) => {
-        const loc = locations.find((l) => l.partnerId === selected.id);
-        if (loc) {
-          return m.toLocationId === loc.id || m.fromLocationId === loc.id;
-        }
-        const locHint = selected.id.replace("partner-", "");
-        return (
-          m.toLocationId.includes(locHint) ||
-          m.fromLocationId.includes(locHint) ||
-          m.notes.toLowerCase().includes(selected.name.toLowerCase())
-        );
-      })
-    : [];
+  const partnerMoves = useMemo(() => {
+    if (!selected) return [];
+    const loc = locations.find((l) => l.partnerId === selected.id);
+    const locHint = selected.id.replace("partner-", "");
+    const filtered = movements.filter((m) => {
+      if (loc) {
+        return m.toLocationId === loc.id || m.fromLocationId === loc.id;
+      }
+      return (
+        m.toLocationId.includes(locHint) ||
+        m.fromLocationId.includes(locHint) ||
+        m.notes.toLowerCase().includes(selected.name.toLowerCase())
+      );
+    });
+    // Newest first — previously slice(0,12) kept the oldest and hid new transfers.
+    return [...filtered].sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return b.id.localeCompare(a.id);
+    });
+  }, [movements, selected, locations]);
 
-  const openStockModal = (kind: "transfer" | "legacy" | "sale") => {
-    const product = products[0];
-    setXferProduct(product?.id ?? "");
-    setXferVariant(firstVariantId(product));
-    setXferQty(kind === "sale" ? 1 : 5);
+  const balances = useMemo(() => deriveBalances(movements), [movements]);
+
+  const partnerLocId = selected
+    ? locations.find((l) => l.partnerId === selected.id)?.id
+    : undefined;
+
+  const stockSourceLocationId =
+    modal === "transfer"
+      ? LOC.studio
+      : modal === "recall" || modal === "sale"
+        ? partnerLocId
+        : null;
+
+  const stockOptions = useMemo(() => {
+    if (modal === "legacy") return [];
+    if (!stockSourceLocationId) return [];
+    return buildAvailableStockOptions(products, balances, stockSourceLocationId);
+  }, [modal, products, balances, stockSourceLocationId]);
+
+  const catalogSearch = useMemo(() => {
+    if (modal !== "legacy") return undefined;
+    return (query: string) => searchCatalogStockOptions(products, query, 25);
+  }, [modal, products]);
+
+  const computedInvoiceTotal = useMemo(
+    () =>
+      Math.round(
+        unbilled
+          .filter((s) => selectedSaleUuids.includes(s.movementUuid))
+          .reduce((sum, s) => sum + s.lineTotal, 0) * 100,
+      ) / 100,
+    [unbilled, selectedSaleUuids],
+  );
+
+  useEffect(() => {
+    if (modal === "invoice") {
+      setAdjustedTotal(computedInvoiceTotal);
+    }
+  }, [computedInvoiceTotal, modal]);
+
+  const draftExcludeKeys = useMemo(
+    () => new Set(draftLines.map((l) => draftLineKey(l))),
+    [draftLines],
+  );
+
+  const openStockModal = (kind: "transfer" | "recall" | "legacy" | "sale") => {
+    setDraftLines([]);
     setXferNotes("");
+    setProductQuery("");
     setModal(kind);
+  };
+
+  const addDraftLines = (added: PartnerStockOption[]) => {
+    if (!added.length) return;
+    setDraftLines((prev) => {
+      const next = [...prev];
+      for (const option of added) {
+        const key = optionKey(option);
+        const idx = next.findIndex((l) => draftLineKey(l) === key);
+        if (idx >= 0) {
+          const existing = next[idx]!;
+          const bumped = existing.quantity + 1;
+          const capped =
+            option.available > 0 ? Math.min(bumped, option.available) : bumped;
+          next[idx] = { ...existing, quantity: capped, available: option.available };
+        } else {
+          next.push(toDraftLine(option, 1));
+        }
+      }
+      return next;
+    });
+    setProductQuery("");
   };
 
   const openCreateModal = () => {
@@ -128,9 +246,52 @@ export default function PartnersPage() {
     setModal("create");
   };
 
+  const openInvoiceModal = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setInvoicePreview(null);
+    setInvoiceNotes("");
+    try {
+      const res = await listUnbilledPartnerSalesAction(selected.id);
+      if (!res.ok) {
+        showToast(res.error);
+        return;
+      }
+      setUnbilled(res.data);
+      setSelectedSaleUuids(res.data.map((s) => s.movementUuid));
+      setModal("invoice");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openPaymentModal = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setPayFile(null);
+    setPayNotes("");
+    try {
+      const res = await listPartnerInvoicesAction(selected.id);
+      if (!res.ok) {
+        showToast(res.error);
+        return;
+      }
+      const open = res.data.filter((i) =>
+        ["issued", "partially_paid"].includes(i.status),
+      );
+      setOpenInvoices(open);
+      const first = open[0];
+      setPayInvoiceId(first?.id ?? "");
+      setPayAmount(first?.balanceDue ?? 0);
+      setModal("payment");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const showToast = (message: string) => {
     setToast(message);
-    setTimeout(() => setToast(null), 3200);
+    setTimeout(() => setToast(null), 4200);
   };
 
   const confirmModal = async () => {
@@ -163,25 +324,52 @@ export default function PartnersPage() {
     }
 
     if (!selected) return;
-    const variantId = activeVariantId || undefined;
-    const productTitle = getProductTitle(xferProduct);
+    if (
+      modal === "transfer" ||
+      modal === "recall" ||
+      modal === "legacy" ||
+      modal === "sale"
+    ) {
+      if (!draftLines.length) {
+        showToast("Add at least one product line.");
+        return;
+      }
+      for (const [i, line] of draftLines.entries()) {
+        if (line.quantity <= 0) {
+          showToast(`Line ${i + 1}: quantity must be positive.`);
+          return;
+        }
+        if (modal !== "legacy" && line.available > 0 && line.quantity > line.available) {
+          showToast(
+            `Line ${i + 1}: only ${line.available} available for ${line.productTitle} · ${line.variantLabel}.`,
+          );
+          return;
+        }
+      }
+    }
 
-    if (modal === "transfer") {
+    if (modal === "transfer" || modal === "recall" || modal === "sale") {
       setBusy(true);
       try {
-        const mv = await transfer({
-          productId: xferProduct,
-          variantId,
+        const res = await postPartnerStockBatch({
+          kind: modal,
           partnerId: selected.id,
-          quantity: xferQty,
           notes: xferNotes.trim() || undefined,
+          lines: draftLines.map((l) => ({
+            productId: l.productId,
+            variantId: l.variantId,
+            quantity: l.quantity,
+          })),
         });
-        showToast(
-          mv
-            ? `Moved ${productTitle} ×${xferQty} from Studio → ${selected.name}`
-            : "Transfer failed — check Studio available stock for this variant.",
-        );
-        if (mv) setModal(null);
+        if (!res.ok) {
+          showToast(res.error);
+          return;
+        }
+        const units = draftLines.reduce((s, l) => s + l.quantity, 0);
+        const verb =
+          modal === "transfer" ? "Transferred" : modal === "recall" ? "Recalled" : "Recorded sale of";
+        showToast(`${verb} ${draftLines.length} lines · ${units} units · ${selected.name}`);
+        setModal(null);
       } finally {
         setBusy(false);
       }
@@ -189,30 +377,34 @@ export default function PartnersPage() {
     }
 
     if (modal === "legacy") {
-      if (!activeVariantId) {
-        showToast("Select a product variant for legacy stock.");
+      const missingVariant = draftLines.find((l) => !l.variantId);
+      if (missingVariant) {
+        showToast(`Select a variant for ${missingVariant.productTitle}.`);
         return;
       }
       setBusy(true);
       try {
-        const result = await establishPartnerOpeningBalances(selected.id, [
-          {
-            productId: xferProduct,
-            variantId: activeVariantId,
-            quantity: xferQty,
+        const result = await establishPartnerOpeningBalances(
+          selected.id,
+          draftLines.map((l) => ({
+            productId: l.productId,
+            variantId: l.variantId,
+            quantity: l.quantity,
             notes: xferNotes.trim() || undefined,
-          },
-        ]);
+          })),
+        );
         if (!result) {
           showToast("Could not record legacy stock.");
         } else if (result.written.length) {
           showToast(
-            `Legacy stock recorded: ${productTitle} ×${xferQty} at ${selected.name}`,
+            `Legacy stock: ${result.written.length} lines written` +
+              (result.skipped ? ` · ${result.skipped} skipped` : "") +
+              ` at ${selected.name}`,
           );
           setModal(null);
         } else {
           showToast(
-            "Skipped — this variant already has stock at the partner (use Transfer for more).",
+            "Skipped — those variants already have partner stock (use Transfer for more).",
           );
         }
       } finally {
@@ -221,22 +413,28 @@ export default function PartnersPage() {
       return;
     }
 
-    if (modal === "sale") {
+    if (modal === "invoice") {
+      if (!selectedSaleUuids.length) {
+        showToast("Select at least one unbilled sale.");
+        return;
+      }
       setBusy(true);
       try {
-        const mv = await partnerSale({
-          productId: xferProduct,
-          variantId,
+        const res = await raisePartnerInvoiceAction({
           partnerId: selected.id,
-          quantity: xferQty,
-          notes: xferNotes.trim() || undefined,
+          movementUuids: selectedSaleUuids,
+          adjustedTotal,
+          notes: invoiceNotes,
+          issue: true,
         });
+        if (!res.ok) {
+          showToast(res.error);
+          return;
+        }
+        setInvoicePreview(res.data);
         showToast(
-          mv
-            ? `Sale recorded: ${productTitle} ×${xferQty} deducted from ${selected.name}`
-            : "Sale failed — partner has insufficient stock for this variant.",
+          `Invoice ${res.data.code} issued · ₹${res.data.adjustedTotal.toLocaleString("en-IN")}`,
         );
-        if (mv) setModal(null);
       } finally {
         setBusy(false);
       }
@@ -244,8 +442,44 @@ export default function PartnersPage() {
     }
 
     if (modal === "payment") {
-      showToast("Payment recorded (metadata only — not a stock movement).");
-      setModal(null);
+      if (!payInvoiceId) {
+        showToast("Select an invoice to pay against.");
+        return;
+      }
+      if (payAmount <= 0) {
+        showToast("Enter a payment amount.");
+        return;
+      }
+      setBusy(true);
+      try {
+        let screenshotBase64: string | null = null;
+        let screenshotFilename: string | undefined;
+        let screenshotMimeType: string | undefined;
+        if (payFile) {
+          screenshotBase64 = await fileToBase64(payFile);
+          screenshotFilename = payFile.name;
+          screenshotMimeType = payFile.type || "image/jpeg";
+        }
+        const res = await receivePartnerPaymentAction({
+          invoiceId: payInvoiceId,
+          amount: payAmount,
+          notes: payNotes,
+          screenshotBase64,
+          screenshotFilename,
+          screenshotMimeType,
+        });
+        if (!res.ok) {
+          showToast(res.error);
+          return;
+        }
+        showToast(
+          `Payment ${res.data.payment.code} received · invoice now ${res.data.invoice.status}`,
+        );
+        setModal(null);
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
     }
   };
 
@@ -254,13 +488,35 @@ export default function PartnersPage() {
       ? "Add partner"
       : modal === "transfer"
         ? "Transfer from Studio"
-        : modal === "legacy"
-          ? "Add legacy stock"
-          : modal === "sale"
-            ? "Record sale"
-            : modal === "payment"
-              ? "Record payment"
-              : "";
+        : modal === "recall"
+          ? "Recall to Studio"
+          : modal === "legacy"
+            ? "Add legacy stock"
+            : modal === "sale"
+              ? "Record sale"
+              : modal === "invoice"
+                ? invoicePreview
+                  ? `Preview · ${invoicePreview.code}`
+                  : "Raise invoice"
+                : modal === "payment"
+                  ? "Receive payment"
+                  : "";
+
+  const modalConfirmLabel =
+    modal === "invoice"
+      ? invoicePreview
+        ? "Done"
+        : "Generate & issue"
+      : modal === "payment"
+        ? "Receive payment"
+        : modal === "transfer" ||
+            modal === "recall" ||
+            modal === "sale" ||
+            modal === "legacy"
+          ? draftLines.length
+            ? `Confirm ${draftLines.length} line${draftLines.length === 1 ? "" : "s"}`
+            : "Confirm"
+          : "Confirm";
 
   if (!hydrated) {
     return (
@@ -277,7 +533,7 @@ export default function PartnersPage() {
     <>
       <Header
         title="Partners"
-        subtitle="Add partners, move Studio stock to them, record legacy stock already on hand, and deduct sales."
+        subtitle="Stock in and out of partners, collate sales into invoices, and receive payments."
       />
       <main className="px-4 md:px-8 py-6 md:py-8 pb-16 space-y-6 max-w-6xl">
         {toast ? (
@@ -304,7 +560,7 @@ export default function PartnersPage() {
             <p className="font-display text-xl text-deep-navy">No partners yet</p>
             <p className="text-sm text-charcoal/60 max-w-md mx-auto">
               Add a retail partner, then record legacy stock they already hold or transfer units
-              from Studio. Sales deduct from their location.
+              from Studio. Sales deduct from their location; raise an invoice later.
             </p>
             <Button onClick={openCreateModal}>
               <Plus className="size-4" />
@@ -358,14 +614,20 @@ export default function PartnersPage() {
                     <Button size="sm" variant="outline" onClick={() => openStockModal("transfer")}>
                       Transfer from Studio
                     </Button>
+                    <Button size="sm" variant="outline" onClick={() => openStockModal("recall")}>
+                      Recall to Studio
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => openStockModal("legacy")}>
                       Add legacy stock
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => openStockModal("sale")}>
                       Record sale
                     </Button>
-                    <Button size="sm" onClick={() => setModal("payment")}>
-                      Record payment
+                    <Button size="sm" variant="outline" onClick={() => void openInvoiceModal()}>
+                      Raise invoice
+                    </Button>
+                    <Button size="sm" onClick={() => void openPaymentModal()}>
+                      Receive payment
                     </Button>
                   </div>
                 </div>
@@ -409,7 +671,7 @@ export default function PartnersPage() {
                 <section className="card-surface p-5">
                   <h3 className="font-display text-lg text-deep-navy mb-3">Stock movement</h3>
                   <ul className="space-y-2 text-sm">
-                    {partnerMoves.slice(0, 12).map((m) => (
+                    {partnerMoves.slice(0, 20).map((m) => (
                       <li
                         key={m.id}
                         className="flex justify-between gap-3 border-b border-border pb-2"
@@ -418,13 +680,20 @@ export default function PartnersPage() {
                           {m.date} · {m.movementType} · {getProductTitle(m.productId)} ×
                           {m.quantity}
                         </span>
-                        <span className="text-charcoal/50">{m.reference}</span>
+                        <span className="text-charcoal/50 break-all text-right max-w-[45%]">
+                          {m.reference}
+                        </span>
                       </li>
                     ))}
                     {!partnerMoves.length ? (
                       <li className="text-charcoal/50">No linked movements yet</li>
                     ) : null}
                   </ul>
+                  {partnerMoves.length > 20 ? (
+                    <p className="text-xs text-charcoal/50 mt-2">
+                      Showing 20 of {partnerMoves.length} newest movements
+                    </p>
+                  ) : null}
                 </section>
               </div>
             ) : null}
@@ -435,13 +704,27 @@ export default function PartnersPage() {
       <Modal
         open={modal !== null}
         onClose={() => {
-          if (!busy) setModal(null);
+          if (!busy) {
+            setModal(null);
+            setInvoicePreview(null);
+          }
         }}
         title={modalTitle}
         footer={
-          <Button onClick={() => void confirmModal()} disabled={busy}>
-            {busy ? "Saving…" : "Confirm"}
-          </Button>
+          modal === "invoice" && invoicePreview ? (
+            <Button
+              onClick={() => {
+                setModal(null);
+                setInvoicePreview(null);
+              }}
+            >
+              Done
+            </Button>
+          ) : (
+            <Button onClick={() => void confirmModal()} disabled={busy}>
+              {busy ? "Saving…" : modalConfirmLabel}
+            </Button>
+          )
         }
       >
         {modal === "create" ? (
@@ -502,57 +785,190 @@ export default function PartnersPage() {
               />
             </Field>
           </div>
-        ) : modal === "payment" ? (
-          <p className="text-sm text-charcoal/70">
-            Payment status is partner metadata (not a stock movement).
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <Field label="Product">
-              <select
-                className={selectClass}
-                value={xferProduct}
-                onChange={(e) => {
-                  const next = products.find((p) => p.id === e.target.value);
-                  setXferProduct(e.target.value);
-                  setXferVariant(firstVariantId(next));
-                }}
-                data-testid="partner-stock-product"
-              >
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title}
-                  </option>
+        ) : modal === "invoice" ? (
+          invoicePreview ? (
+            <div className="space-y-3 text-sm" data-testid="partner-invoice-preview">
+              <p className="font-display text-xl text-deep-navy">{invoicePreview.code}</p>
+              <p className="text-charcoal/60">
+                {invoicePreview.partnerName} · {invoicePreview.status}
+              </p>
+              <ul className="space-y-1 border-y border-border py-2">
+                {invoicePreview.lines.map((l) => (
+                  <li key={l.id} className="flex justify-between gap-3">
+                    <span>{l.description}</span>
+                    <span>₹{l.lineTotal.toLocaleString("en-IN")}</span>
+                  </li>
                 ))}
-              </select>
-            </Field>
-            {variants.length ? (
-              <Field label="Variant">
-                <select
-                  className={selectClass}
-                  value={activeVariantId}
-                  onChange={(e) => setXferVariant(e.target.value)}
-                  data-testid="partner-stock-variant"
-                >
-                  {variants.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label}
-                    </option>
-                  ))}
-                </select>
+              </ul>
+              <p className="flex justify-between">
+                <span className="text-charcoal/55">Computed</span>
+                <span>₹{invoicePreview.computedTotal.toLocaleString("en-IN")}</span>
+              </p>
+              <p className="flex justify-between font-medium text-deep-navy">
+                <span>Invoice value</span>
+                <span>₹{invoicePreview.adjustedTotal.toLocaleString("en-IN")}</span>
+              </p>
+              {invoicePreview.notes ? (
+                <p className="text-charcoal/60">{invoicePreview.notes}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-3" data-testid="partner-raise-invoice">
+              {!unbilled.length ? (
+                <p className="text-sm text-charcoal/60">
+                  No unbilled partner sales since the last invoice. Record sales first.
+                </p>
+              ) : (
+                <ul className="space-y-2 max-h-56 overflow-y-auto">
+                  {unbilled.map((s) => {
+                    const checked = selectedSaleUuids.includes(s.movementUuid);
+                    return (
+                      <li key={s.movementUuid}>
+                        <label className="flex items-start gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedSaleUuids((prev) =>
+                                checked
+                                  ? prev.filter((id) => id !== s.movementUuid)
+                                  : [...prev, s.movementUuid],
+                              );
+                            }}
+                          />
+                          <span className="flex-1">
+                            {s.date} · {s.productTitle}
+                            {s.variantLabel ? ` · ${s.variantLabel}` : ""} ×{s.quantity}
+                            <span className="block text-xs text-charcoal/50">
+                              ₹{s.lineTotal.toLocaleString("en-IN")} · {s.reference}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="text-sm text-charcoal/60">
+                Computed from catalog prices: ₹{computedInvoiceTotal.toLocaleString("en-IN")}
+              </p>
+              <Field label="Invoice value (adjust if needed)">
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={adjustedTotal}
+                  onChange={(e) => setAdjustedTotal(Number(e.target.value))}
+                  data-testid="partner-invoice-adjusted"
+                />
               </Field>
-            ) : null}
-            <Field label="Quantity">
-              <input
-                className={inputClass}
-                type="number"
-                min={1}
-                value={xferQty}
-                onChange={(e) => setXferQty(Number(e.target.value))}
-                data-testid="partner-stock-qty"
-              />
-            </Field>
-            <Field label="Notes (optional)">
+              <Field label="Notes">
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  value={invoiceNotes}
+                  onChange={(e) => setInvoiceNotes(e.target.value)}
+                />
+              </Field>
+            </div>
+          )
+        ) : modal === "payment" ? (
+          <div className="space-y-3" data-testid="partner-receive-payment">
+            {!openInvoices.length ? (
+              <p className="text-sm text-charcoal/60">
+                No issued invoices with a balance due. Raise an invoice first.
+              </p>
+            ) : (
+              <>
+                <Field label="Invoice">
+                  <select
+                    className={selectClass}
+                    value={payInvoiceId}
+                    onChange={(e) => {
+                      const inv = openInvoices.find((i) => i.id === e.target.value);
+                      setPayInvoiceId(e.target.value);
+                      setPayAmount(inv?.balanceDue ?? 0);
+                    }}
+                  >
+                    {openInvoices.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.code} · due ₹{i.balanceDue.toLocaleString("en-IN")} ({i.status})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Amount received">
+                  <input
+                    className={inputClass}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(Number(e.target.value))}
+                    data-testid="partner-payment-amount"
+                  />
+                </Field>
+                <Field label="Transaction screenshot">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="block w-full text-sm text-charcoal/70"
+                    onChange={(e) => setPayFile(e.target.files?.[0] ?? null)}
+                    data-testid="partner-payment-screenshot"
+                  />
+                </Field>
+                <Field label="Notes">
+                  <input
+                    className={inputClass}
+                    value={payNotes}
+                    onChange={(e) => setPayNotes(e.target.value)}
+                    placeholder="UPI ref / bank transfer id"
+                  />
+                </Field>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <PartnerStockPicker
+              options={stockOptions}
+              searchOptions={catalogSearch}
+              excludeKeys={draftExcludeKeys}
+              query={productQuery}
+              onQueryChange={setProductQuery}
+              onAddMany={addDraftLines}
+              requireQuery
+              emptyHint={
+                modal === "legacy"
+                  ? "Type to search the catalog, multi-select, then Add selected…"
+                  : modal === "transfer"
+                    ? "Type to find Studio stock, multi-select, then Add selected…"
+                    : "Type to find partner stock, multi-select, then Add selected…"
+              }
+            />
+            <PartnerStockDraftLines
+              lines={draftLines}
+              enforceAvailable={modal !== "legacy"}
+              onQuantityChange={(key, quantity) => {
+                setDraftLines((prev) =>
+                  prev.map((l) => {
+                    if (draftLineKey(l) !== key) return l;
+                    const qty = Math.max(1, Math.floor(quantity) || 1);
+                    const capped =
+                      modal !== "legacy" && l.available > 0
+                        ? Math.min(qty, l.available)
+                        : qty;
+                    return { ...l, quantity: capped };
+                  }),
+                );
+              }}
+              onRemove={(key) => {
+                setDraftLines((prev) => prev.filter((l) => draftLineKey(l) !== key));
+              }}
+            />
+            <Field label="Notes (optional — applied to all lines)">
               <input
                 className={inputClass}
                 value={xferNotes}
@@ -561,10 +977,12 @@ export default function PartnersPage() {
             </Field>
             <p className="text-xs text-charcoal/55">
               {modal === "transfer"
-                ? "Writes a Transfer: Studio → Partner. Deducts from Studio available stock."
-                : modal === "legacy"
-                  ? "One-time opening: External → Partner. Use when stock is already at the partner (does not leave Studio). Skipped if this variant already has partner qty."
-                  : "Writes a Partner Sale: Partner → Sold. Deducts from partner stock."}
+                ? "Multi-select Studio SKUs, edit quantities on the draft, confirm once — one save for all lines."
+                : modal === "recall"
+                  ? "Multi-select partner SKUs to recall, edit quantities, confirm once."
+                  : modal === "legacy"
+                    ? "Multi-select catalog lines for opening stock; skipped if that variant already has qty."
+                    : "Multi-select sale lines from partner stock, edit quantities, confirm once."}
             </p>
           </div>
         )}
