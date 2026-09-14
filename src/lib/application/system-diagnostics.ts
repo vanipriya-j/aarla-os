@@ -45,6 +45,8 @@ export type DiagnosticsReport = {
   delhivery: {
     configured: boolean;
     tokenSet: boolean;
+    pickupNameSet: boolean;
+    shippingConfigured: boolean;
     baseUrl: string;
     fixtureMode: boolean;
   };
@@ -326,6 +328,13 @@ export async function getDiagnosticsReport(
     delhivery: {
       configured: Boolean(delhiveryCfg) || fixtureMode,
       tokenSet: Boolean(process.env.DELHIVERY_API_TOKEN?.trim()),
+      pickupNameSet: Boolean(process.env.DELHIVERY_PICKUP_NAME?.trim()),
+      shippingConfigured:
+        fixtureMode ||
+        Boolean(
+          process.env.DELHIVERY_API_TOKEN?.trim() &&
+            process.env.DELHIVERY_PICKUP_NAME?.trim(),
+        ),
       baseUrl:
         process.env.DELHIVERY_API_BASE_URL?.trim() || "https://track.delhivery.com",
       fixtureMode,

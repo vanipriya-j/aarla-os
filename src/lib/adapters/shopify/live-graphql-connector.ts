@@ -102,8 +102,13 @@ query SyncOrders($cursor: String, $query: String, $pageSize: Int!) {
           }
         }
         shippingAddress {
-          phone
+          name
+          address1
+          address2
+          city
           province
+          zip
+          phone
           countryCodeV2
         }
         billingAddress { phone }
@@ -229,8 +234,13 @@ type RawOrderNode = {
     taxLines?: RawTaxLine[] | null;
   } | null;
   shippingAddress?: {
-    phone?: string | null;
+    name?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
     province?: string | null;
+    zip?: string | null;
+    phone?: string | null;
     countryCodeV2?: string | null;
   } | null;
   billingAddress?: { phone?: string | null } | null;
@@ -867,7 +877,12 @@ function mapOrder(node: RawOrderNode): {
       igst: allTaxLines.length ? buckets.igst : null,
       taxableAmount,
       totalRefunded: moneyAmount(node.totalRefundedSet),
+      shippingName: node.shippingAddress?.name?.trim() || null,
+      shippingAddress1: node.shippingAddress?.address1?.trim() || null,
+      shippingAddress2: node.shippingAddress?.address2?.trim() || null,
+      shippingCity: node.shippingAddress?.city?.trim() || null,
       shippingProvince: node.shippingAddress?.province?.trim() || null,
+      shippingZip: node.shippingAddress?.zip?.trim() || null,
       shippingCountry: node.shippingAddress?.countryCodeV2?.trim() || null,
       customerGstin: null,
       taxLines: allTaxLines,

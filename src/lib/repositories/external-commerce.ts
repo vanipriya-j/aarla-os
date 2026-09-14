@@ -43,7 +43,12 @@ export type UpsertOrderInput = {
   igst?: number | null;
   taxableAmount?: number | null;
   totalRefunded?: number | null;
+  shippingName?: string | null;
+  shippingAddress1?: string | null;
+  shippingAddress2?: string | null;
+  shippingCity?: string | null;
   shippingProvince?: string | null;
+  shippingZip?: string | null;
   shippingCountry?: string | null;
   customerGstin?: string | null;
   taxLines?: Array<{ title: string | null; price: number; rate: number | null }>;
@@ -113,6 +118,8 @@ export interface ExternalCommerceRepository {
   ensureOrderContactPhoneSchema(): Promise<void>;
   /** Ensure GST / tax columns exist (safe if migration not recorded). */
   ensureOrderTaxSchema(): Promise<void>;
+  /** Ensure shipping address columns exist (safe if migration not recorded). */
+  ensureShippingAddressSchema(): Promise<void>;
   /** Delivered orders still missing both customer + order phone. */
   listDeliveredOrdersMissingPhone(limit?: number): Promise<
     Array<{ orderNumber: string; customerExternalId: string }>

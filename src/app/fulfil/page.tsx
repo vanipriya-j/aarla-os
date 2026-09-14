@@ -7,8 +7,10 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import {
   confirmHandoverAction,
   confirmPickingAction,
+  createDelhiveryAwbAction,
   decidePackingAction,
   decideShippingAction,
+  getDelhiveryRatesAction,
   escalateFounderAvailabilityAction,
   getFulfilmentDetailAction,
   getPackingSuggestionsAction,
@@ -70,6 +72,15 @@ export default function FulfilOrdersPage() {
   const [awbDraft, setAwbDraft] = useState("");
   const [courierDraft, setCourierDraft] = useState("");
   const [shipMethod, setShipMethod] = useState<FulfilmentShippingMethod>("delhivery-surface");
+  const [delhiveryRates, setDelhiveryRates] = useState<{
+    destinationPin: string;
+    originPin: string;
+    weightG: number;
+    surface: { totalAmount: number | null };
+    express: { totalAmount: number | null };
+    cheaper: "delhivery-surface" | "delhivery-express" | null;
+  } | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
   const [showPackChange, setShowPackChange] = useState(false);
   const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
@@ -100,6 +111,8 @@ export default function FulfilOrdersPage() {
     setPackHint(null);
     setShowPackChange(false);
     setPackReason("");
+    setDelhiveryRates(null);
+    setRateError(null);
     setDetailLoading(true);
     setError(null);
     startTransition(async () => {
@@ -429,8 +442,27 @@ export default function FulfilOrdersPage() {
                   description={`${detail.customerName ?? "Customer"} · ${fulfilmentStatusLabel(detail.status)} · Shopify ${detail.financialStatus ?? "—"} / ${detail.shopifyFulfilmentStatus ?? "—"}`}
                 >
                   <p className="text-sm text-charcoal/70">
-                    {detail.contactPhone ?? "No phone"} · {detail.shippingCity ?? "—"}{" "}
-                    {detail.shippingZip ?? ""}
+                    {detail.contactPhone ?? "No phone"}
+                    {detail.shippingName || detail.shippingAddress1 ? (
+                      <>
+                        {" · "}
+                        {[
+                          detail.shippingName,
+                          detail.shippingAddress1,
+                          detail.shippingAddress2,
+                          [detail.shippingCity, detail.shippingProvince, detail.shippingZip]
+                            .filter(Boolean)
+                            .join(" "),
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </>
+                    ) : (
+                      <>
+                        {" · "}
+                        {detail.shippingCity ?? "—"} {detail.shippingZip ?? ""}
+                      </>
+                    )}
                   </p>
                 </FormSection>
 
@@ -902,9 +934,9 @@ export default function FulfilOrdersPage() {
 
                 <FormSection
                   title="Shipping"
-                  description="Delhivery create/label APIs are not in this codebase yet — record method and AWB manually. Tracking stays on Shipments."
+                  description="Compare Delhivery Surface vs Express rates for the destination PIN, pick the cheaper/better option, then generate AWB and print the label. Manual AWB entry still works as a fallback."
                 >
-                  <div className="flex flex-wrap gap-2 mb-3">
+                  <div className="flex flex-wrap gap-2 mb-3 items-center">
                     <select
                       className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                       value={shipMethod}
@@ -933,7 +965,139 @@ export default function FulfilOrdersPage() {
                     >
                       Save shipping method
                     </button>
+                    {(shipMethod === "delhivery-surface" ||
+                      shipMethod === "delhivery-express" ||
+                      detail.shippingMethod === "delhivery-surface" ||
+                      detail.shippingMethod === "delhivery-express") && (
+                      <button
+                        type="button"
+                        data-testid="fulfil-check-delhivery-rates"
+                        disabled={pending || !detail.shippingZip}
+                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                        onClick={() => {
+                          runAction("Checking Delhivery rates…", async () => {
+                            setRateError(null);
+                            const res = await getDelhiveryRatesAction({
+                              fulfilmentOrderId: detail.id,
+                            });
+                            if (!res.ok) {
+                              setRateError(res.error);
+                              setDelhiveryRates(null);
+                              setError(res.error);
+                              return;
+                            }
+                            setDelhiveryRates(res.data);
+                            setRateError(null);
+                            setStatus(
+                              `Rates for PIN ${res.data.destinationPin} · ${res.data.weightG}g (approx)`,
+                            );
+                          });
+                        }}
+                      >
+                        Check Surface / Express rates
+                      </button>
+                    )}
                   </div>
+
+                  {!detail.shippingZip ? (
+                    <p className="text-xs text-amber-800 mb-3">
+                      No destination PIN on this order — re-sync Shopify (or wait for
+                      address) before rates / AWB.
+                    </p>
+                  ) : null}
+
+                  {rateError ? (
+                    <p className="text-sm text-aarla-red mb-3" data-testid="fulfil-rate-error">
+                      Rates could not load: {rateError}
+                    </p>
+                  ) : null}
+
+                  {delhiveryRates ? (
+                    <div
+                      className="mb-3 flex flex-wrap gap-2 items-stretch"
+                      data-testid="fulfil-delhivery-rates"
+                    >
+                      {(
+                        [
+                          {
+                            key: "delhivery-surface" as const,
+                            label: "Surface",
+                            amount: delhiveryRates.surface.totalAmount,
+                          },
+                          {
+                            key: "delhivery-express" as const,
+                            label: "Express",
+                            amount: delhiveryRates.express.totalAmount,
+                          },
+                        ] as const
+                      ).map((opt) => {
+                        const selected = shipMethod === opt.key;
+                        const cheaper = delhiveryRates.cheaper === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            disabled={pending}
+                            data-testid={`fulfil-rate-${opt.key}`}
+                            className={`text-left rounded-lg border px-4 py-3 min-w-[9.5rem] disabled:opacity-50 ${
+                              selected
+                                ? "border-deep-navy bg-deep-navy/[0.06]"
+                                : "border-border hover:border-deep-navy/40"
+                            }`}
+                            onClick={() => {
+                              setShipMethod(opt.key);
+                              runAction(`Saving ${opt.label}…`, async () => {
+                                const res = await decideShippingAction({
+                                  fulfilmentOrderId: detail.id,
+                                  method: opt.key,
+                                });
+                                if (!res.ok) {
+                                  setError(res.error);
+                                  return;
+                                }
+                                if (opt.amount != null) {
+                                  const withCost = await saveManualCourierAction({
+                                    fulfilmentOrderId: detail.id,
+                                    courierProvider: "Delhivery",
+                                    courierCost: opt.amount,
+                                  });
+                                  await applyDetailResult(
+                                    withCost.ok ? withCost : res,
+                                    `${opt.label} · ~₹${Math.round(opt.amount)}${cheaper ? " (cheaper)" : ""}`,
+                                  );
+                                  return;
+                                }
+                                await applyDetailResult(
+                                  res,
+                                  `${opt.label} selected`,
+                                );
+                              });
+                            }}
+                          >
+                            <div className="text-xs uppercase tracking-wide text-charcoal/55">
+                              {opt.label}
+                              {cheaper ? " · cheaper" : ""}
+                            </div>
+                            <div className="text-lg font-medium text-deep-navy mt-0.5">
+                              {opt.amount != null
+                                ? `~₹${Math.round(opt.amount)}`
+                                : "—"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <p className="text-xs text-charcoal/55 self-center max-w-xs">
+                        Approx Delhivery invoice charge · PIN{" "}
+                        {delhiveryRates.destinationPin} · {delhiveryRates.weightG}g.
+                        Actual billed amount can differ. Tap a card to choose.
+                      </p>
+                    </div>
+                  ) : !rateError && detail.shippingZip ? (
+                    <p className="text-xs text-charcoal/55 mb-3">
+                      After check, Surface and Express ₹ amounts appear here as two
+                      cards you can tap.
+                    </p>
+                  ) : null}
 
                   {detail.shippingMethod === "store-pickup" ? (
                     <div className="flex gap-2">
@@ -971,7 +1135,60 @@ export default function FulfilOrdersPage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap gap-2 items-center">
+                    <div className="space-y-3">
+                      {(detail.shippingMethod === "delhivery-surface" ||
+                        detail.shippingMethod === "delhivery-express" ||
+                        shipMethod === "delhivery-surface" ||
+                        shipMethod === "delhivery-express") && (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <button
+                            type="button"
+                            data-testid="fulfil-generate-delhivery-awb"
+                            disabled={pending}
+                            className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
+                            onClick={() => {
+                              runAction("Generating Delhivery AWB…", async () => {
+                                const res = await createDelhiveryAwbAction({
+                                  fulfilmentOrderId: detail.id,
+                                });
+                                if (!res.ok) {
+                                  setError(res.error);
+                                  return;
+                                }
+                                setAwbDraft(res.data.awb);
+                                setCourierDraft("Delhivery");
+                                await applyDetailResult(
+                                  { ok: true, data: res.data.detail },
+                                  `Delhivery AWB ${res.data.awb}${res.data.sortCode ? ` · ${res.data.sortCode}` : ""}`,
+                                );
+                              });
+                            }}
+                          >
+                            Generate AWB
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="fulfil-print-delhivery-label"
+                            disabled={pending || !(detail.awb || awbDraft)}
+                            className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                            onClick={() => {
+                              window.open(
+                                `/api/fulfil/${detail.id}/delhivery-label`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                            }}
+                          >
+                            Print label
+                          </button>
+                          {!detail.shippingAddress1 || !detail.shippingZip ? (
+                            <span className="text-xs text-amber-800">
+                              Shipping address incomplete — re-sync Shopify or enter AWB manually.
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 items-center">
                       <input
                         className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                         placeholder="AWB / reference"
@@ -1027,6 +1244,7 @@ export default function FulfilOrdersPage() {
                         )}
                         Confirm handover
                       </button>
+                      </div>
                     </div>
                   )}
                 </FormSection>

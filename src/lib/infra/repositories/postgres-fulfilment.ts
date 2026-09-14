@@ -172,8 +172,13 @@ export function createFulfilmentRepository(): FulfilmentRepository {
               o.total_amount,
               o.currency,
               o.contact_phone,
+              o.shipping_name,
+              o.shipping_address1,
+              o.shipping_address2,
               o.shipping_city,
+              o.shipping_province,
               o.shipping_zip,
+              o.shipping_country,
               c.name as customer_name,
               (select count(*)::int from fulfilment_tasks t
                 where t.fulfilment_order_id = fo.id
@@ -190,8 +195,13 @@ export function createFulfilmentRepository(): FulfilmentRepository {
     return {
       ...base,
       contactPhone: r.contact_phone == null ? null : String(r.contact_phone),
+      shippingName: r.shipping_name == null ? null : String(r.shipping_name),
+      shippingAddress1: r.shipping_address1 == null ? null : String(r.shipping_address1),
+      shippingAddress2: r.shipping_address2 == null ? null : String(r.shipping_address2),
       shippingCity: r.shipping_city == null ? null : String(r.shipping_city),
+      shippingProvince: r.shipping_province == null ? null : String(r.shipping_province),
       shippingZip: r.shipping_zip == null ? null : String(r.shipping_zip),
+      shippingCountry: r.shipping_country == null ? null : String(r.shipping_country),
       packingSuggestion: r.packing_suggestion ?? null,
       packingActual: r.packing_actual ?? null,
       packingOverrideNote:

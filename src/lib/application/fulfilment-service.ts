@@ -770,6 +770,7 @@ export async function saveManualCourier(input: {
   fulfilmentOrderId: string;
   awb?: string | null;
   courierProvider?: string | null;
+  courierReference?: string | null;
   courierCost?: number | null;
   labelStatus?: string | null;
   alternateAwaitingAwbCost?: boolean;

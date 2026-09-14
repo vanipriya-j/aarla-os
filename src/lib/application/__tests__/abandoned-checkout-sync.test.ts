@@ -27,6 +27,7 @@ function stubRepo(overrides: Partial<ExternalCommerceRepository> = {}): {
     upsertFulfilment: async () => ({ id: "f1", created: true }),
     ensureOrderContactPhoneSchema: async () => undefined,
     ensureOrderTaxSchema: async () => undefined,
+    ensureShippingAddressSchema: async () => undefined,
     listDeliveredOrdersMissingPhone: async () => [],
     applyContactPhone: async () => ({ orderUpdated: false, customerUpdated: false }),
     listCustomers: async () => [],

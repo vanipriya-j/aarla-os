@@ -194,6 +194,41 @@ export async function saveManualCourierAction(input: {
   return wrap(() => fulfilment.saveManualCourier(input));
 }
 
+export async function createDelhiveryAwbAction(input: {
+  fulfilmentOrderId: string;
+  replaceExisting?: boolean;
+  addressOverride?: {
+    name?: string | null;
+    phone?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
+  } | null;
+  actor?: string | null;
+}) {
+  return wrap(async () => {
+    const { createDelhiveryAwbForFulfilment } = await import(
+      "@/lib/application/delhivery-shipping-service"
+    );
+    return createDelhiveryAwbForFulfilment(input);
+  });
+}
+
+export async function getDelhiveryRatesAction(input: {
+  fulfilmentOrderId: string;
+  destinationPin?: string | null;
+  weightG?: number | null;
+}) {
+  return wrap(async () => {
+    const { getDelhiveryRatesForFulfilment } = await import(
+      "@/lib/application/delhivery-shipping-service"
+    );
+    return getDelhiveryRatesForFulfilment(input);
+  });
+}
+
 export async function confirmHandoverAction(input: {
   fulfilmentOrderId: string;
   actor?: string | null;

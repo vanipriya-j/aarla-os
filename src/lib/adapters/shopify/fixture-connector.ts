@@ -48,7 +48,14 @@ const FIXTURE_ORDERS: ShopifyOrderRecord[] = [
     isTest: false,
     totalAmount: 1890,
     currency: "INR",
-    contactPhone: null,
+    contactPhone: "+91 98765 01001",
+    shippingName: "Ananya Sharma",
+    shippingAddress1: "12 Fixture Street",
+    shippingAddress2: null,
+    shippingCity: "Bengaluru",
+    shippingProvince: "Karnataka",
+    shippingZip: "560001",
+    shippingCountry: "IN",
     lineItems: [
       {
         externalLineItemId: "li-5001-1",
