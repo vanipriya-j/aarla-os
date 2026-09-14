@@ -71,6 +71,11 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
   async createShipment(
     input: DelhiveryCreateShipmentInput,
   ): Promise<DelhiveryCreateShipmentResult> {
+    if (!this.config.pickupName?.trim()) {
+      throw new Error(
+        "Delhivery pickup name missing. Set DELHIVERY_PICKUP_NAME (registered warehouse name).",
+      );
+    }
     const pickup: Record<string, string> = { name: this.config.pickupName };
     if (this.config.pickupPin) pickup.pin = this.config.pickupPin;
     if (this.config.pickupAddress) pickup.add = this.config.pickupAddress;

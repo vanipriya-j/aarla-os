@@ -80,6 +80,7 @@ export default function FulfilOrdersPage() {
     express: { totalAmount: number | null };
     cheaper: "delhivery-surface" | "delhivery-express" | null;
   } | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
   const [showPackChange, setShowPackChange] = useState(false);
   const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
@@ -111,6 +112,7 @@ export default function FulfilOrdersPage() {
     setShowPackChange(false);
     setPackReason("");
     setDelhiveryRates(null);
+    setRateError(null);
     setDetailLoading(true);
     setError(null);
     startTransition(async () => {
@@ -974,15 +976,18 @@ export default function FulfilOrdersPage() {
                         className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
                         onClick={() => {
                           runAction("Checking Delhivery rates…", async () => {
+                            setRateError(null);
                             const res = await getDelhiveryRatesAction({
                               fulfilmentOrderId: detail.id,
                             });
                             if (!res.ok) {
-                              setError(res.error);
+                              setRateError(res.error);
                               setDelhiveryRates(null);
+                              setError(res.error);
                               return;
                             }
                             setDelhiveryRates(res.data);
+                            setRateError(null);
                             setStatus(
                               `Rates for PIN ${res.data.destinationPin} · ${res.data.weightG}g (approx)`,
                             );
@@ -994,8 +999,24 @@ export default function FulfilOrdersPage() {
                     )}
                   </div>
 
+                  {!detail.shippingZip ? (
+                    <p className="text-xs text-amber-800 mb-3">
+                      No destination PIN on this order — re-sync Shopify (or wait for
+                      address) before rates / AWB.
+                    </p>
+                  ) : null}
+
+                  {rateError ? (
+                    <p className="text-sm text-aarla-red mb-3" data-testid="fulfil-rate-error">
+                      Rates could not load: {rateError}
+                    </p>
+                  ) : null}
+
                   {delhiveryRates ? (
-                    <div className="mb-3 flex flex-wrap gap-2 items-stretch">
+                    <div
+                      className="mb-3 flex flex-wrap gap-2 items-stretch"
+                      data-testid="fulfil-delhivery-rates"
+                    >
                       {(
                         [
                           {
@@ -1068,9 +1089,14 @@ export default function FulfilOrdersPage() {
                       <p className="text-xs text-charcoal/55 self-center max-w-xs">
                         Approx Delhivery invoice charge · PIN{" "}
                         {delhiveryRates.destinationPin} · {delhiveryRates.weightG}g.
-                        Actual billed amount can differ.
+                        Actual billed amount can differ. Tap a card to choose.
                       </p>
                     </div>
+                  ) : !rateError && detail.shippingZip ? (
+                    <p className="text-xs text-charcoal/55 mb-3">
+                      After check, Surface and Express ₹ amounts appear here as two
+                      cards you can tap.
+                    </p>
                   ) : null}
 
                   {detail.shippingMethod === "store-pickup" ? (

@@ -23,11 +23,14 @@ describe("Delhivery shipping helpers", () => {
     expect(resolveDelhiveryShippingMode(null)).toBe("Surface");
   });
 
-  it("reads shipping config only when token + pickup name are set", () => {
+  it("reads shipping config when token is set (pickup name optional)", () => {
     expect(
       readDelhiveryShippingConfigFromEnv({
         DELHIVERY_API_TOKEN: "tok",
       } as unknown as NodeJS.ProcessEnv),
+    ).toMatchObject({ apiToken: "tok", pickupName: null });
+    expect(
+      readDelhiveryShippingConfigFromEnv({} as unknown as NodeJS.ProcessEnv),
     ).toBeNull();
     const cfg = readDelhiveryShippingConfigFromEnv({
       DELHIVERY_API_TOKEN: "tok",

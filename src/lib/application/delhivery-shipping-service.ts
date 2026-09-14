@@ -39,7 +39,7 @@ function resolveShippingConnector(
   const live = createLiveDelhiveryShippingConnectorFromEnv();
   if (!live) {
     throw new ConfigurationError(
-      "Delhivery shipping not configured. Set DELHIVERY_API_TOKEN and DELHIVERY_PICKUP_NAME.",
+      "Delhivery not configured. Set DELHIVERY_API_TOKEN (and DELHIVERY_PICKUP_PIN for rates, DELHIVERY_PICKUP_NAME for AWB create).",
     );
   }
   return live;

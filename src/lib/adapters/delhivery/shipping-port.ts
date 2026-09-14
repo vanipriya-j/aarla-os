@@ -80,7 +80,8 @@ export interface DelhiveryShippingConnector {
 export type DelhiveryShippingConfig = {
   apiToken: string;
   baseUrl: string;
-  pickupName: string;
+  /** Required for AWB create — registered warehouse name in Delhivery. */
+  pickupName: string | null;
   pickupPin?: string;
   pickupAddress?: string;
   pickupCity?: string;
@@ -89,12 +90,15 @@ export type DelhiveryShippingConfig = {
   defaultWeightG: number;
 };
 
+/**
+ * Token alone is enough to construct a connector (rates / packing slip).
+ * AWB create still requires pickupName at call time.
+ */
 export function readDelhiveryShippingConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): DelhiveryShippingConfig | null {
   const apiToken = env.DELHIVERY_API_TOKEN?.trim();
-  const pickupName = env.DELHIVERY_PICKUP_NAME?.trim();
-  if (!apiToken || !pickupName) return null;
+  if (!apiToken) return null;
   const baseUrl = (
     env.DELHIVERY_API_BASE_URL?.trim() || "https://track.delhivery.com"
   ).replace(/\/$/, "");
@@ -102,7 +106,7 @@ export function readDelhiveryShippingConfigFromEnv(
   return {
     apiToken,
     baseUrl,
-    pickupName,
+    pickupName: env.DELHIVERY_PICKUP_NAME?.trim() || null,
     pickupPin: env.DELHIVERY_PICKUP_PIN?.trim() || undefined,
     pickupAddress: env.DELHIVERY_PICKUP_ADDRESS?.trim() || undefined,
     pickupCity: env.DELHIVERY_PICKUP_CITY?.trim() || undefined,
