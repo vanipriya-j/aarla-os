@@ -174,10 +174,12 @@ export default function DiagnosticsPage() {
               </div>
             </FormSection>
 
-            <FormSection title="Delhivery" description="Tracking connector readiness.">
+            <FormSection title="Delhivery" description="Tracking + AWB create readiness.">
               <div className="grid sm:grid-cols-2 gap-2">
                 <Flag ok={report.delhivery.configured} label="Configured / fixture" />
                 <Flag ok={report.delhivery.tokenSet} label="API token set" />
+                <Flag ok={report.delhivery.pickupNameSet} label="Pickup name set" />
+                <Flag ok={report.delhivery.shippingConfigured} label="AWB create ready" />
               </div>
               <p className="text-sm text-charcoal/65 mt-3">
                 Base URL: {report.delhivery.baseUrl}

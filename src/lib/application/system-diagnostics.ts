@@ -45,6 +45,8 @@ export type DiagnosticsReport = {
   delhivery: {
     configured: boolean;
     tokenSet: boolean;
+    pickupNameSet: boolean;
+    shippingConfigured: boolean;
     baseUrl: string;
     fixtureMode: boolean;
   };
