@@ -6,6 +6,8 @@ import type {
   DelhiveryCreateShipmentInput,
   DelhiveryCreateShipmentResult,
   DelhiveryPackingSlipPackage,
+  DelhiveryRateQuote,
+  DelhiveryRateQuoteInput,
   DelhiveryShippingConfig,
   DelhiveryShippingConnector,
 } from "./shipping-port";
@@ -201,6 +203,67 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
           ? (first.sort_code as { code: string }).code
           : null),
       oid: typeof first.oid === "string" ? first.oid : null,
+      raw: json,
+    };
+  }
+
+  async fetchRate(input: DelhiveryRateQuoteInput): Promise<DelhiveryRateQuote> {
+    const originPin = (
+      input.originPin?.trim() ||
+      this.config.pickupPin ||
+      ""
+    ).replace(/\D/g, "").slice(0, 6);
+    const destinationPin = input.destinationPin.replace(/\D/g, "").slice(0, 6);
+    if (originPin.length !== 6) {
+      throw new Error(
+        "Origin pincode missing — set DELHIVERY_PICKUP_PIN for rate lookup.",
+      );
+    }
+    if (destinationPin.length !== 6) {
+      throw new Error("Destination pincode must be a 6-digit Indian PIN.");
+    }
+    const weightG = Math.max(50, Math.round(input.weightG));
+    const url = new URL(`${this.config.baseUrl}/api/kinko/v1/invoice/charges/.json`);
+    url.searchParams.set("md", input.shippingMode === "Express" ? "E" : "S");
+    url.searchParams.set("cgm", String(weightG));
+    url.searchParams.set("o_pin", originPin);
+    url.searchParams.set("d_pin", destinationPin);
+    url.searchParams.set("ss", "Delivered");
+
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: authHeaders(this.config.apiToken),
+    });
+    const text = await res.text();
+    let json: unknown = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(
+        `Delhivery rate failed (${res.status}): ${text.slice(0, 240) || res.statusText}`,
+      );
+    }
+    if (!res.ok) {
+      throw new Error(
+        `Delhivery rate failed (${res.status}): ${JSON.stringify(json).slice(0, 280)}`,
+      );
+    }
+    const root = (Array.isArray(json) ? json[0] : json) as Record<string, unknown>;
+    const num = (v: unknown): number | null => {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim() !== "") {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+    return {
+      shippingMode: input.shippingMode,
+      totalAmount: num(root?.total_amount) ?? num(root?.total_amt),
+      grossAmount: num(root?.gross_amount) ?? num(root?.gross_amt),
+      originPin,
+      destinationPin,
+      weightG,
       raw: json,
     };
   }

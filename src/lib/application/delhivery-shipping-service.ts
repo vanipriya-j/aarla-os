@@ -202,3 +202,82 @@ export async function getDelhiveryLabelHtmlForFulfilment(input: {
     }),
   };
 }
+
+export type DelhiveryRatePair = {
+  destinationPin: string;
+  originPin: string;
+  weightG: number;
+  surface: {
+    method: "delhivery-surface";
+    totalAmount: number | null;
+    grossAmount: number | null;
+  };
+  express: {
+    method: "delhivery-express";
+    totalAmount: number | null;
+    grossAmount: number | null;
+  };
+  /** Cheaper method when both totals are known; null if tied / incomplete. */
+  cheaper: "delhivery-surface" | "delhivery-express" | null;
+  approximate: true;
+};
+
+export async function getDelhiveryRatesForFulfilment(input: {
+  fulfilmentOrderId: string;
+  destinationPin?: string | null;
+  weightG?: number | null;
+  connector?: DelhiveryShippingConnector;
+}): Promise<DelhiveryRatePair> {
+  const detail = await getFulfilmentDetail(input.fulfilmentOrderId);
+  if (!detail) throw new Error("Fulfilment order not found");
+
+  const destinationPin = requireField(
+    "pin",
+    input.destinationPin ?? detail.shippingZip,
+  );
+  const config = readDelhiveryShippingConfigFromEnv();
+  const weightG =
+    input.weightG && input.weightG > 0
+      ? Math.round(input.weightG)
+      : (config?.defaultWeightG ?? 500);
+
+  const connector = resolveShippingConnector(input.connector);
+  const [surface, express] = await Promise.all([
+    connector.fetchRate({
+      destinationPin,
+      originPin: config?.pickupPin,
+      weightG,
+      shippingMode: "Surface",
+    }),
+    connector.fetchRate({
+      destinationPin,
+      originPin: config?.pickupPin,
+      weightG,
+      shippingMode: "Express",
+    }),
+  ]);
+
+  let cheaper: DelhiveryRatePair["cheaper"] = null;
+  if (surface.totalAmount != null && express.totalAmount != null) {
+    if (surface.totalAmount < express.totalAmount) cheaper = "delhivery-surface";
+    else if (express.totalAmount < surface.totalAmount) cheaper = "delhivery-express";
+  }
+
+  return {
+    destinationPin: surface.destinationPin,
+    originPin: surface.originPin,
+    weightG,
+    surface: {
+      method: "delhivery-surface",
+      totalAmount: surface.totalAmount,
+      grossAmount: surface.grossAmount,
+    },
+    express: {
+      method: "delhivery-express",
+      totalAmount: express.totalAmount,
+      grossAmount: express.grossAmount,
+    },
+    cheaper,
+    approximate: true,
+  };
+}

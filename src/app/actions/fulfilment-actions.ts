@@ -216,6 +216,19 @@ export async function createDelhiveryAwbAction(input: {
   });
 }
 
+export async function getDelhiveryRatesAction(input: {
+  fulfilmentOrderId: string;
+  destinationPin?: string | null;
+  weightG?: number | null;
+}) {
+  return wrap(async () => {
+    const { getDelhiveryRatesForFulfilment } = await import(
+      "@/lib/application/delhivery-shipping-service"
+    );
+    return getDelhiveryRatesForFulfilment(input);
+  });
+}
+
 export async function confirmHandoverAction(input: {
   fulfilmentOrderId: string;
   actor?: string | null;

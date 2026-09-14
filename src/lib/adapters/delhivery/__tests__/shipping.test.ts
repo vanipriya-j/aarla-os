@@ -40,7 +40,7 @@ describe("Delhivery shipping helpers", () => {
 });
 
 describe("FixtureDelhiveryShippingConnector", () => {
-  it("creates a deterministic AWB and packing slip", async () => {
+  it("creates a deterministic AWB, packing slip, and Surface/Express rates", async () => {
     const c = new FixtureDelhiveryShippingConnector();
     const created = await c.createShipment({
       orderNumber: "#1531",
@@ -63,5 +63,20 @@ describe("FixtureDelhiveryShippingConnector", () => {
     });
     expect(html).toContain(created.awb);
     expect(html).toContain("#1531");
+
+    const surface = await c.fetchRate({
+      destinationPin: "560001",
+      originPin: "560034",
+      weightG: 500,
+      shippingMode: "Surface",
+    });
+    const express = await c.fetchRate({
+      destinationPin: "560001",
+      originPin: "560034",
+      weightG: 500,
+      shippingMode: "Express",
+    });
+    expect(surface.totalAmount).toBeGreaterThan(0);
+    expect(express.totalAmount).toBeGreaterThan(surface.totalAmount!);
   });
 });

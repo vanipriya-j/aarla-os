@@ -48,11 +48,33 @@ export type DelhiveryPackingSlipPackage = {
   raw: unknown;
 };
 
+export type DelhiveryRateQuoteInput = {
+  /** Destination pincode */
+  destinationPin: string;
+  /** Origin pincode — defaults to configured pickup pin */
+  originPin?: string | null;
+  /** Grams */
+  weightG: number;
+  shippingMode: "Surface" | "Express";
+};
+
+export type DelhiveryRateQuote = {
+  shippingMode: "Surface" | "Express";
+  /** Approximate total incl. tax (Delhivery total_amount) */
+  totalAmount: number | null;
+  grossAmount: number | null;
+  originPin: string;
+  destinationPin: string;
+  weightG: number;
+  raw: unknown;
+};
+
 export interface DelhiveryShippingConnector {
   createShipment(
     input: DelhiveryCreateShipmentInput,
   ): Promise<DelhiveryCreateShipmentResult>;
   fetchPackingSlip(awb: string): Promise<DelhiveryPackingSlipPackage>;
+  fetchRate(input: DelhiveryRateQuoteInput): Promise<DelhiveryRateQuote>;
 }
 
 export type DelhiveryShippingConfig = {

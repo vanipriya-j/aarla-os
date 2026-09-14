@@ -23,7 +23,10 @@ Commerce sync on `/customer-calls` is **manual and serial**:
 ## AWB create + print label (Fulfil)
 
 ```
-Fulfil order (delhivery-surface | delhivery-express)
+Fulfil order
+  → Check Surface / Express rates
+      → GET /api/kinko/v1/invoice/charges/.json  (md=S|E, o_pin, d_pin, cgm)
+  → Pick cheaper / preferred mode → save shipping method (+ approx courier cost)
   → Generate AWB
       → POST /api/cmu/create.json  (pickup_location + shipment)
       → save AWB on fulfilment_orders
@@ -35,6 +38,8 @@ Fulfil order (delhivery-surface | delhivery-express)
 
 Requires a synced Shopify shipping address on `external_orders` (`shipping_name`, `shipping_address1`, city, province, zip, phone). Re-sync Shopify orders after deploy so open Fulfil rows get addresses.
 
+Rate lookup needs `DELHIVERY_PICKUP_PIN` (origin). Charges are approximate (`total_amount`); actual billed amount can differ.
+
 Payment mode: Shopify `PAID` → Prepaid; otherwise COD with order total.
 
 ## Environment (server-only)
@@ -44,7 +49,7 @@ DELHIVERY_API_TOKEN=
 DELHIVERY_API_BASE_URL=https://track.delhivery.com   # optional
 DELHIVERY_SYNC_MAX_AWBS=25                           # optional chunk size (max 40)
 DELHIVERY_PICKUP_NAME=                               # required for AWB create (registered warehouse name)
-DELHIVERY_PICKUP_PIN=                                # optional
+DELHIVERY_PICKUP_PIN=                                # required for Surface/Express rate lookup (origin)
 DELHIVERY_PICKUP_ADDRESS=
 DELHIVERY_PICKUP_CITY=
 DELHIVERY_PICKUP_STATE=
@@ -56,6 +61,7 @@ DELHIVERY_USE_FIXTURE=1                              # local/e2e only
 Auth: `Authorization: Token <DELHIVERY_API_TOKEN>`  
 Tracking: `GET /api/v1/packages/json/?waybill=awb1,awb2&verbose=2` (max 30 AWBs)  
 Create: `POST /api/cmu/create.json` with `format=json&data=<json>`  
+Rates: `GET /api/kinko/v1/invoice/charges/.json?md=S|E&cgm=&o_pin=&d_pin=&ss=Delivered`  
 Packing slip: `GET /api/p/packing_slip?wbns=<awb>` (JSON only — Aarla renders HTML for print)
 
 ## Status mapping

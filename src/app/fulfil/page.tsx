@@ -10,6 +10,7 @@ import {
   createDelhiveryAwbAction,
   decidePackingAction,
   decideShippingAction,
+  getDelhiveryRatesAction,
   escalateFounderAvailabilityAction,
   getFulfilmentDetailAction,
   getPackingSuggestionsAction,
@@ -71,6 +72,14 @@ export default function FulfilOrdersPage() {
   const [awbDraft, setAwbDraft] = useState("");
   const [courierDraft, setCourierDraft] = useState("");
   const [shipMethod, setShipMethod] = useState<FulfilmentShippingMethod>("delhivery-surface");
+  const [delhiveryRates, setDelhiveryRates] = useState<{
+    destinationPin: string;
+    originPin: string;
+    weightG: number;
+    surface: { totalAmount: number | null };
+    express: { totalAmount: number | null };
+    cheaper: "delhivery-surface" | "delhivery-express" | null;
+  } | null>(null);
   const [showPackChange, setShowPackChange] = useState(false);
   const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
@@ -101,6 +110,7 @@ export default function FulfilOrdersPage() {
     setPackHint(null);
     setShowPackChange(false);
     setPackReason("");
+    setDelhiveryRates(null);
     setDetailLoading(true);
     setError(null);
     startTransition(async () => {
@@ -922,9 +932,9 @@ export default function FulfilOrdersPage() {
 
                 <FormSection
                   title="Shipping"
-                  description="Generate a Delhivery AWB from the synced shipping address, then print the packing slip. Manual AWB entry still works as a fallback. Tracking stays on Shipments."
+                  description="Compare Delhivery Surface vs Express rates for the destination PIN, pick the cheaper/better option, then generate AWB and print the label. Manual AWB entry still works as a fallback."
                 >
-                  <div className="flex flex-wrap gap-2 mb-3">
+                  <div className="flex flex-wrap gap-2 mb-3 items-center">
                     <select
                       className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                       value={shipMethod}
@@ -953,7 +963,115 @@ export default function FulfilOrdersPage() {
                     >
                       Save shipping method
                     </button>
+                    {(shipMethod === "delhivery-surface" ||
+                      shipMethod === "delhivery-express" ||
+                      detail.shippingMethod === "delhivery-surface" ||
+                      detail.shippingMethod === "delhivery-express") && (
+                      <button
+                        type="button"
+                        data-testid="fulfil-check-delhivery-rates"
+                        disabled={pending || !detail.shippingZip}
+                        className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                        onClick={() => {
+                          runAction("Checking Delhivery rates…", async () => {
+                            const res = await getDelhiveryRatesAction({
+                              fulfilmentOrderId: detail.id,
+                            });
+                            if (!res.ok) {
+                              setError(res.error);
+                              setDelhiveryRates(null);
+                              return;
+                            }
+                            setDelhiveryRates(res.data);
+                            setStatus(
+                              `Rates for PIN ${res.data.destinationPin} · ${res.data.weightG}g (approx)`,
+                            );
+                          });
+                        }}
+                      >
+                        Check Surface / Express rates
+                      </button>
+                    )}
                   </div>
+
+                  {delhiveryRates ? (
+                    <div className="mb-3 flex flex-wrap gap-2 items-stretch">
+                      {(
+                        [
+                          {
+                            key: "delhivery-surface" as const,
+                            label: "Surface",
+                            amount: delhiveryRates.surface.totalAmount,
+                          },
+                          {
+                            key: "delhivery-express" as const,
+                            label: "Express",
+                            amount: delhiveryRates.express.totalAmount,
+                          },
+                        ] as const
+                      ).map((opt) => {
+                        const selected = shipMethod === opt.key;
+                        const cheaper = delhiveryRates.cheaper === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            disabled={pending}
+                            data-testid={`fulfil-rate-${opt.key}`}
+                            className={`text-left rounded-lg border px-4 py-3 min-w-[9.5rem] disabled:opacity-50 ${
+                              selected
+                                ? "border-deep-navy bg-deep-navy/[0.06]"
+                                : "border-border hover:border-deep-navy/40"
+                            }`}
+                            onClick={() => {
+                              setShipMethod(opt.key);
+                              runAction(`Saving ${opt.label}…`, async () => {
+                                const res = await decideShippingAction({
+                                  fulfilmentOrderId: detail.id,
+                                  method: opt.key,
+                                });
+                                if (!res.ok) {
+                                  setError(res.error);
+                                  return;
+                                }
+                                if (opt.amount != null) {
+                                  const withCost = await saveManualCourierAction({
+                                    fulfilmentOrderId: detail.id,
+                                    courierProvider: "Delhivery",
+                                    courierCost: opt.amount,
+                                  });
+                                  await applyDetailResult(
+                                    withCost.ok ? withCost : res,
+                                    `${opt.label} · ~₹${Math.round(opt.amount)}${cheaper ? " (cheaper)" : ""}`,
+                                  );
+                                  return;
+                                }
+                                await applyDetailResult(
+                                  res,
+                                  `${opt.label} selected`,
+                                );
+                              });
+                            }}
+                          >
+                            <div className="text-xs uppercase tracking-wide text-charcoal/55">
+                              {opt.label}
+                              {cheaper ? " · cheaper" : ""}
+                            </div>
+                            <div className="text-lg font-medium text-deep-navy mt-0.5">
+                              {opt.amount != null
+                                ? `~₹${Math.round(opt.amount)}`
+                                : "—"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <p className="text-xs text-charcoal/55 self-center max-w-xs">
+                        Approx Delhivery invoice charge · PIN{" "}
+                        {delhiveryRates.destinationPin} · {delhiveryRates.weightG}g.
+                        Actual billed amount can differ.
+                      </p>
+                    </div>
+                  ) : null}
 
                   {detail.shippingMethod === "store-pickup" ? (
                     <div className="flex gap-2">
