@@ -28,6 +28,7 @@ type Q = <T extends QueryResultRow = QueryResultRow>(
 /** Process-local: schema ensures run once per serverless isolate, not every chunk. */
 let taxSchemaReady: Promise<void> | null = null;
 let contactPhoneSchemaReady: Promise<void> | null = null;
+let shippingAddressSchemaReady: Promise<void> | null = null;
 
 function iso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -237,6 +238,11 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
              shipping_country = $27,
              customer_gstin = $28,
              tax_lines_json = $29::jsonb,
+             shipping_name = coalesce(nullif(btrim($30), ''), shipping_name),
+             shipping_address1 = coalesce(nullif(btrim($31), ''), shipping_address1),
+             shipping_address2 = coalesce(nullif(btrim($32), ''), shipping_address2),
+             shipping_city = coalesce(nullif(btrim($33), ''), shipping_city),
+             shipping_zip = coalesce(nullif(btrim($34), ''), shipping_zip),
              last_synced_at = now()
            where id = $1 and organization_id = $2`,
           [
@@ -269,6 +275,11 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.shippingCountry ?? null,
             input.customerGstin ?? null,
             taxLinesJson,
+            input.shippingName ?? null,
+            input.shippingAddress1 ?? null,
+            input.shippingAddress2 ?? null,
+            input.shippingCity ?? null,
+            input.shippingZip ?? null,
           ],
         );
       } else {
@@ -281,10 +292,12 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
              taxes_included, subtotal_amount, total_discounts, shipping_amount, shipping_tax,
              total_tax, cgst, sgst, igst, taxable_amount, total_refunded,
              shipping_province, shipping_country, customer_gstin, tax_lines_json,
+             shipping_name, shipping_address1, shipping_address2, shipping_city, shipping_zip,
              last_synced_at
            ) values (
              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
              $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,
+             $31,$32,$33,$34,$35,
              now()
            )
            returning id`,
@@ -319,6 +332,11 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
             input.shippingCountry ?? null,
             input.customerGstin ?? null,
             taxLinesJson,
+            input.shippingName ?? null,
+            input.shippingAddress1 ?? null,
+            input.shippingAddress2 ?? null,
+            input.shippingCity ?? null,
+            input.shippingZip ?? null,
           ],
         );
         orderId = rows[0]!.id;
@@ -416,6 +434,38 @@ export function createExternalCommerceRepository(): ExternalCommerceRepository {
         throw err;
       });
       await taxSchemaReady;
+    },
+
+    async ensureShippingAddressSchema() {
+      if (shippingAddressSchemaReady) {
+        await shippingAddressSchemaReady;
+        return;
+      }
+      shippingAddressSchemaReady = (async () => {
+        const cols = await q<{ column_name: string }>(
+          `select column_name from information_schema.columns
+           where table_schema = 'public'
+             and table_name = 'external_orders'
+             and column_name = 'shipping_address1'`,
+        );
+        if (cols[0]) return;
+        const alters = [
+          `alter table external_orders add column if not exists shipping_name text`,
+          `alter table external_orders add column if not exists shipping_address1 text`,
+          `alter table external_orders add column if not exists shipping_address2 text`,
+          `alter table external_orders add column if not exists shipping_city text`,
+          `alter table external_orders add column if not exists shipping_zip text`,
+          `alter table external_orders add column if not exists shipping_province text`,
+          `alter table external_orders add column if not exists shipping_country text`,
+        ];
+        for (const sql of alters) {
+          await q(sql);
+        }
+      })().catch((err) => {
+        shippingAddressSchemaReady = null;
+        throw err;
+      });
+      await shippingAddressSchemaReady;
     },
 
     async listDeliveredOrdersMissingPhone(limit = 40) {

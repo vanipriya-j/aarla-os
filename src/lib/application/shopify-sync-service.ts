@@ -96,6 +96,7 @@ export async function syncShopifyCustomerCallData(
   summary.mode = mode;
 
   await repo.ensureOrderTaxSchema();
+  await repo.ensureShippingAddressSchema();
 
   let query: string | null = null;
   // Open/targeted walks are independent of the incremental resume cursor —
@@ -296,6 +297,11 @@ export async function syncShopifyCustomerCallData(
         totalRefunded: order.totalRefunded ?? null,
         shippingProvince: order.shippingProvince ?? null,
         shippingCountry: order.shippingCountry ?? null,
+        shippingName: order.shippingName ?? null,
+        shippingAddress1: order.shippingAddress1 ?? null,
+        shippingAddress2: order.shippingAddress2 ?? null,
+        shippingCity: order.shippingCity ?? null,
+        shippingZip: order.shippingZip ?? null,
         customerGstin: order.customerGstin ?? null,
         taxLines: order.taxLines ?? [],
         lineItems: order.lineItems,

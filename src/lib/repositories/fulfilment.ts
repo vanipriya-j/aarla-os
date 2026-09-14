@@ -84,8 +84,13 @@ export type FulfilmentOrderListItem = {
 
 export type FulfilmentOrderDetail = FulfilmentOrderListItem & {
   contactPhone: string | null;
+  shippingName: string | null;
+  shippingAddress1: string | null;
+  shippingAddress2: string | null;
   shippingCity: string | null;
+  shippingProvince: string | null;
   shippingZip: string | null;
+  shippingCountry: string | null;
   packingSuggestion: unknown;
   packingActual: unknown;
   packingOverrideNote: string | null;

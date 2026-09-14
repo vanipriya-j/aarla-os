@@ -1,8 +1,8 @@
 # Delhivery shipment connector
 
-Server-side Pull tracking API that normalizes Delhivery scan status into Aarla OS `shipments`.
+Server-side Delhivery integration for **tracking** (Shipments / Customer Calls) and **AWB create + packing slip** (Fulfil).
 
-## Flow
+## Tracking flow
 
 ```
 Shopify external_fulfilments (AWB)
@@ -20,17 +20,43 @@ Commerce sync on `/customer-calls` is **manual and serial**:
 - Prefer **Sync All (Shopify → Delhivery)** for a full serial run.
 - Delhivery tracks **every** fulfilment AWB already in Postgres (blank Shopify `tracking.company` still counts) — not only the last Shopify GraphQL page of 25 orders.
 
+## AWB create + print label (Fulfil)
+
+```
+Fulfil order (delhivery-surface | delhivery-express)
+  → Generate AWB
+      → POST /api/cmu/create.json  (pickup_location + shipment)
+      → save AWB on fulfilment_orders
+  → Print label
+      → GET /api/fulfil/:id/delhivery-label
+          → GET /api/p/packing_slip?wbns=AWB  (JSON)
+          → printable HTML packing slip
+```
+
+Requires a synced Shopify shipping address on `external_orders` (`shipping_name`, `shipping_address1`, city, province, zip, phone). Re-sync Shopify orders after deploy so open Fulfil rows get addresses.
+
+Payment mode: Shopify `PAID` → Prepaid; otherwise COD with order total.
+
 ## Environment (server-only)
 
 ```
 DELHIVERY_API_TOKEN=
 DELHIVERY_API_BASE_URL=https://track.delhivery.com   # optional
 DELHIVERY_SYNC_MAX_AWBS=25                           # optional chunk size (max 40)
+DELHIVERY_PICKUP_NAME=                               # required for AWB create (registered warehouse name)
+DELHIVERY_PICKUP_PIN=                                # optional
+DELHIVERY_PICKUP_ADDRESS=
+DELHIVERY_PICKUP_CITY=
+DELHIVERY_PICKUP_STATE=
+DELHIVERY_PICKUP_PHONE=
+DELHIVERY_DEFAULT_WEIGHT_G=500
 DELHIVERY_USE_FIXTURE=1                              # local/e2e only
 ```
 
 Auth: `Authorization: Token <DELHIVERY_API_TOKEN>`  
-Endpoint: `GET /api/v1/packages/json/?waybill=awb1,awb2&verbose=2` (max 30 AWBs)
+Tracking: `GET /api/v1/packages/json/?waybill=awb1,awb2&verbose=2` (max 30 AWBs)  
+Create: `POST /api/cmu/create.json` with `format=json&data=<json>`  
+Packing slip: `GET /api/p/packing_slip?wbns=<awb>` (JSON only — Aarla renders HTML for print)
 
 ## Status mapping
 

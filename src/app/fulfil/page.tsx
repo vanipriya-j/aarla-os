@@ -7,6 +7,7 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import {
   confirmHandoverAction,
   confirmPickingAction,
+  createDelhiveryAwbAction,
   decidePackingAction,
   decideShippingAction,
   escalateFounderAvailabilityAction,
@@ -429,8 +430,27 @@ export default function FulfilOrdersPage() {
                   description={`${detail.customerName ?? "Customer"} · ${fulfilmentStatusLabel(detail.status)} · Shopify ${detail.financialStatus ?? "—"} / ${detail.shopifyFulfilmentStatus ?? "—"}`}
                 >
                   <p className="text-sm text-charcoal/70">
-                    {detail.contactPhone ?? "No phone"} · {detail.shippingCity ?? "—"}{" "}
-                    {detail.shippingZip ?? ""}
+                    {detail.contactPhone ?? "No phone"}
+                    {detail.shippingName || detail.shippingAddress1 ? (
+                      <>
+                        {" · "}
+                        {[
+                          detail.shippingName,
+                          detail.shippingAddress1,
+                          detail.shippingAddress2,
+                          [detail.shippingCity, detail.shippingProvince, detail.shippingZip]
+                            .filter(Boolean)
+                            .join(" "),
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </>
+                    ) : (
+                      <>
+                        {" · "}
+                        {detail.shippingCity ?? "—"} {detail.shippingZip ?? ""}
+                      </>
+                    )}
                   </p>
                 </FormSection>
 
@@ -902,7 +922,7 @@ export default function FulfilOrdersPage() {
 
                 <FormSection
                   title="Shipping"
-                  description="Delhivery create/label APIs are not in this codebase yet — record method and AWB manually. Tracking stays on Shipments."
+                  description="Generate a Delhivery AWB from the synced shipping address, then print the packing slip. Manual AWB entry still works as a fallback. Tracking stays on Shipments."
                 >
                   <div className="flex flex-wrap gap-2 mb-3">
                     <select
@@ -971,7 +991,60 @@ export default function FulfilOrdersPage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap gap-2 items-center">
+                    <div className="space-y-3">
+                      {(detail.shippingMethod === "delhivery-surface" ||
+                        detail.shippingMethod === "delhivery-express" ||
+                        shipMethod === "delhivery-surface" ||
+                        shipMethod === "delhivery-express") && (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <button
+                            type="button"
+                            data-testid="fulfil-generate-delhivery-awb"
+                            disabled={pending}
+                            className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
+                            onClick={() => {
+                              runAction("Generating Delhivery AWB…", async () => {
+                                const res = await createDelhiveryAwbAction({
+                                  fulfilmentOrderId: detail.id,
+                                });
+                                if (!res.ok) {
+                                  setError(res.error);
+                                  return;
+                                }
+                                setAwbDraft(res.data.awb);
+                                setCourierDraft("Delhivery");
+                                await applyDetailResult(
+                                  { ok: true, data: res.data.detail },
+                                  `Delhivery AWB ${res.data.awb}${res.data.sortCode ? ` · ${res.data.sortCode}` : ""}`,
+                                );
+                              });
+                            }}
+                          >
+                            Generate AWB
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="fulfil-print-delhivery-label"
+                            disabled={pending || !(detail.awb || awbDraft)}
+                            className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                            onClick={() => {
+                              window.open(
+                                `/api/fulfil/${detail.id}/delhivery-label`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              );
+                            }}
+                          >
+                            Print label
+                          </button>
+                          {!detail.shippingAddress1 || !detail.shippingZip ? (
+                            <span className="text-xs text-amber-800">
+                              Shipping address incomplete — re-sync Shopify or enter AWB manually.
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 items-center">
                       <input
                         className="text-sm border border-border rounded-md px-3 py-2 disabled:opacity-50"
                         placeholder="AWB / reference"
@@ -1027,6 +1100,7 @@ export default function FulfilOrdersPage() {
                         )}
                         Confirm handover
                       </button>
+                      </div>
                     </div>
                   )}
                 </FormSection>
