@@ -5,6 +5,7 @@
 import type {
   DelhiveryCreateShipmentInput,
   DelhiveryCreateShipmentResult,
+  DelhiveryPackingSlipOptions,
   DelhiveryPackingSlipPackage,
   DelhiveryRateQuote,
   DelhiveryRateQuoteInput,
@@ -174,9 +175,17 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
     return { ...extracted, raw: json };
   }
 
-  async fetchPackingSlip(awb: string): Promise<DelhiveryPackingSlipPackage> {
+  async fetchPackingSlip(
+    awb: string,
+    options?: DelhiveryPackingSlipOptions,
+  ): Promise<DelhiveryPackingSlipPackage> {
+    const wantPdf = options?.pdf !== false;
     const url = new URL(`${this.config.baseUrl}/api/p/packing_slip`);
     url.searchParams.set("wbns", awb.trim());
+    if (wantPdf) {
+      url.searchParams.set("pdf", "true");
+      url.searchParams.set("pdf_size", options?.pdfSize ?? "4R");
+    }
     const res = await fetch(url.toString(), {
       method: "GET",
       headers: authHeaders(this.config.apiToken),
@@ -206,6 +215,14 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
       (typeof first.wbn === "string" && first.wbn) ||
       (typeof first.waybill === "string" && first.waybill) ||
       awb;
+    const pdfDownloadLink =
+      (typeof first.pdf_download_link === "string" && first.pdf_download_link.trim()) ||
+      (typeof first.pdfDownloadLink === "string" && first.pdfDownloadLink.trim()) ||
+      (typeof first.pdf_url === "string" && first.pdf_url.trim()) ||
+      null;
+    if (wantPdf && !pdfDownloadLink) {
+      // Some accounts only return JSON — fall through with data fields.
+    }
     return {
       awb: resolvedAwb,
       orderId:
@@ -218,7 +235,9 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
         (typeof first.add === "string" && first.add) ||
         null,
       city: typeof first.city === "string" ? first.city : null,
-      pin: typeof first.pin === "string" ? first.pin : null,
+      pin:
+        (typeof first.pin === "string" && first.pin) ||
+        (typeof first.pin === "number" ? String(first.pin) : null),
       phone: typeof first.phone === "string" ? first.phone : null,
       paymentMode:
         (typeof first.pt === "string" && first.pt) ||
@@ -234,6 +253,7 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
           ? (first.sort_code as { code: string }).code
           : null),
       oid: typeof first.oid === "string" ? first.oid : null,
+      pdfDownloadLink,
       raw: json,
     };
   }

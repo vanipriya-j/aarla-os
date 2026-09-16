@@ -201,10 +201,19 @@ export async function createDelhiveryAwbForFulfilment(input: {
   };
 }
 
-export async function getDelhiveryLabelHtmlForFulfilment(input: {
+export async function getDelhiveryLabelForFulfilment(input: {
   fulfilmentOrderId: string;
   connector?: DelhiveryShippingConnector;
-}): Promise<{ html: string; awb: string }> {
+  /** Prefer official PDF (default true). */
+  preferPdf?: boolean;
+  pdfSize?: "A4" | "4R";
+}): Promise<{
+  awb: string;
+  /** Official Delhivery shipping-label PDF bytes when available. */
+  pdfBytes: Uint8Array | null;
+  /** HTML fallback with Code 128 barcode. */
+  html: string | null;
+}> {
   const detail = await getFulfilmentDetail(input.fulfilmentOrderId);
   if (!detail) throw new Error("Fulfilment order not found");
   const awb = detail.awb?.trim();
@@ -212,17 +221,23 @@ export async function getDelhiveryLabelHtmlForFulfilment(input: {
     throw new Error("No AWB on this order — generate or enter an AWB first.");
   }
 
+  const preferPdf = input.preferPdf !== false;
   const connector = resolveShippingConnector(input.connector);
   let slip;
   try {
-    slip = await connector.fetchPackingSlip(awb);
+    slip = await connector.fetchPackingSlip(awb, {
+      pdf: preferPdf,
+      pdfSize: input.pdfSize ?? "4R",
+    });
   } catch (err) {
     // Fall back to local address so ops can still print when packing-slip API fails.
     slip = {
       awb,
       orderId: detail.orderNumber,
       name: detail.shippingName ?? detail.customerName,
-      address: [detail.shippingAddress1, detail.shippingAddress2].filter(Boolean).join(", ") || null,
+      address:
+        [detail.shippingAddress1, detail.shippingAddress2].filter(Boolean).join(", ") ||
+        null,
       city: detail.shippingCity,
       pin: detail.shippingZip,
       phone: detail.contactPhone,
@@ -230,16 +245,69 @@ export async function getDelhiveryLabelHtmlForFulfilment(input: {
       shippingMode: resolveDelhiveryShippingMode(detail.shippingMethod),
       sortCode: detail.courierReference,
       oid: detail.orderNumber,
+      pdfDownloadLink: null,
       raw: { fallback: true, error: err instanceof Error ? err.message : String(err) },
     };
   }
 
+  if (preferPdf && slip.pdfDownloadLink) {
+    try {
+      const pdfRes = await fetch(slip.pdfDownloadLink, {
+        method: "GET",
+        headers: { Accept: "application/pdf,*/*" },
+      });
+      if (pdfRes.ok) {
+        const buf = new Uint8Array(await pdfRes.arrayBuffer());
+        if (buf.byteLength > 100) {
+          return { awb, pdfBytes: buf, html: null };
+        }
+      }
+    } catch {
+      /* fall through to HTML */
+    }
+  }
+
   return {
     awb,
+    pdfBytes: null,
     html: renderDelhiveryPackingSlipHtml({
       slip,
       orderNumber: detail.orderNumber,
     }),
+  };
+}
+
+/** @deprecated Use getDelhiveryLabelForFulfilment — kept for older call sites. */
+export async function getDelhiveryLabelHtmlForFulfilment(input: {
+  fulfilmentOrderId: string;
+  connector?: DelhiveryShippingConnector;
+}): Promise<{ html: string; awb: string }> {
+  const label = await getDelhiveryLabelForFulfilment({
+    ...input,
+    preferPdf: false,
+  });
+  return {
+    awb: label.awb,
+    html:
+      label.html ??
+      renderDelhiveryPackingSlipHtml({
+        slip: {
+          awb: label.awb,
+          orderId: null,
+          name: null,
+          address: null,
+          city: null,
+          pin: null,
+          phone: null,
+          paymentMode: null,
+          shippingMode: null,
+          sortCode: null,
+          oid: null,
+          pdfDownloadLink: null,
+          raw: {},
+        },
+        orderNumber: label.awb,
+      }),
   };
 }
 

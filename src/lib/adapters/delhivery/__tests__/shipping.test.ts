@@ -64,12 +64,15 @@ describe("FixtureDelhiveryShippingConnector", () => {
     expect(created.awb).toBe("FIX00001531");
     const slip = await c.fetchPackingSlip(created.awb);
     expect(slip.awb).toBe(created.awb);
+    expect(slip.pdfDownloadLink).toBeNull();
     const html = renderDelhiveryPackingSlipHtml({
       slip,
       orderNumber: "#1531",
     });
     expect(html).toContain(created.awb);
     expect(html).toContain("#1531");
+    expect(html).toContain("JsBarcode");
+    expect(html).toContain("CODE128");
 
     const surface = await c.fetchRate({
       destinationPin: "560001",

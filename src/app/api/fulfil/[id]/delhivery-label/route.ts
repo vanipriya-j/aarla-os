@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestAuth } from "@/lib/auth/request-auth";
-import { getDelhiveryLabelHtmlForFulfilment } from "@/lib/application/delhivery-shipping-service";
+import { getDelhiveryLabelForFulfilment } from "@/lib/application/delhivery-shipping-service";
 import {
   ConfigurationError,
   DatabaseUnavailableError,
@@ -11,7 +11,11 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+/**
+ * Serve Delhivery's official shipping-label PDF when available (packing_slip?pdf=true).
+ * Falls back to HTML Code 128 packing slip if the account does not return a PDF link.
+ */
+export async function GET(req: Request, ctx: Ctx) {
   try {
     const auth = await getRequestAuth();
     if (auth.authEnabled && auth.role === "crm") {
@@ -19,14 +23,40 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     const { id } = await ctx.params;
-    const { html, awb } = await getDelhiveryLabelHtmlForFulfilment({
+    const url = new URL(req.url);
+    const sizeRaw = url.searchParams.get("size");
+    const pdfSize = sizeRaw === "A4" ? "A4" : "4R";
+    const forceHtml = url.searchParams.get("html") === "1";
+
+    const label = await getDelhiveryLabelForFulfilment({
       fulfilmentOrderId: id,
+      preferPdf: !forceHtml,
+      pdfSize,
     });
-    return new NextResponse(html, {
+
+    if (label.pdfBytes) {
+      return new NextResponse(Buffer.from(label.pdfBytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="delhivery-${label.awb}.pdf"`,
+          "Cache-Control": "private, no-store",
+        },
+      });
+    }
+
+    if (!label.html) {
+      return NextResponse.json(
+        { ok: false, error: "No Delhivery label available for this AWB." },
+        { status: 404 },
+      );
+    }
+
+    return new NextResponse(label.html, {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `inline; filename="delhivery-${awb}.html"`,
+        "Content-Disposition": `inline; filename="delhivery-${label.awb}.html"`,
         "Cache-Control": "private, no-store",
       },
     });

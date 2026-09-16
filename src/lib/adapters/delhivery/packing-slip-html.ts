@@ -1,6 +1,9 @@
 import type { DelhiveryPackingSlipPackage } from "@/lib/adapters/delhivery/shipping-port";
 
-/** Simple printable packing slip HTML (browser print → PDF / label printer). */
+/**
+ * Fallback printable packing slip when Delhivery PDF is unavailable.
+ * Uses Code 128 (JsBarcode CDN) — Delhivery's documented encoding for packing slips.
+ */
 export function renderDelhiveryPackingSlipHtml(input: {
   slip: DelhiveryPackingSlipPackage;
   orderNumber: string;
@@ -14,46 +17,85 @@ export function renderDelhiveryPackingSlipHtml(input: {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
 
+  const sort = slip.sortCode || "—";
+  const destLine = [slip.city, slip.pin].filter(Boolean).join(" ") || "—";
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Delhivery label · ${esc(slip.awb)}</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <style>
-    @page { size: 100mm 150mm; margin: 6mm; }
-    body { font-family: ui-sans-serif, system-ui, sans-serif; color: #111; margin: 0; }
-    .sheet { border: 2px solid #111; padding: 12px; max-width: 360px; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .awb { font-size: 28px; font-weight: 700; letter-spacing: 0.04em; margin: 8px 0; }
-    .meta { font-size: 12px; line-height: 1.45; }
-    .row { margin: 4px 0; }
-    .label { color: #555; display: inline-block; min-width: 72px; }
-    .barcode { font-family: ui-monospace, monospace; font-size: 22px; letter-spacing: 0.18em;
-      border: 1px dashed #333; padding: 10px 8px; text-align: center; margin: 12px 0; }
-    .actions { margin-top: 16px; }
+    @page { size: 100mm 150mm; margin: 4mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; background: #fff; }
+    .sheet { border: 2px solid #000; width: 92mm; padding: 0; }
+    .hdr { display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 2px solid #000; padding: 6px 8px; }
+    .brand { font-size: 16px; font-weight: 800; letter-spacing: 0.02em; }
+    .mode { font-size: 12px; font-weight: 700; text-align: right; }
+    .sort { text-align: center; font-size: 28px; font-weight: 800; padding: 8px 6px 4px;
+      border-bottom: 1px solid #000; letter-spacing: 0.04em; }
+    .barcode-wrap { text-align: center; padding: 8px 4px 2px; border-bottom: 1px solid #000; }
+    .barcode-wrap svg { max-width: 100%; height: 48px; }
+    .awb { text-align: center; font-size: 18px; font-weight: 800; letter-spacing: 0.08em;
+      padding: 2px 0 8px; }
+    .block { padding: 8px; border-bottom: 1px solid #000; font-size: 12px; line-height: 1.35; }
+    .block:last-child { border-bottom: 0; }
+    .k { color: #444; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .v { font-weight: 700; margin-top: 2px; }
+    .addr { font-weight: 600; white-space: pre-wrap; }
+    .actions { margin-top: 12px; }
     @media print { .actions { display: none; } body { print-color-adjust: exact; } }
   </style>
 </head>
 <body>
   <div class="sheet">
-    <h1>Aarla · Delhivery</h1>
-    <div class="row meta"><span class="label">Order</span> ${esc(orderNumber)}</div>
-    <div class="awb">${esc(slip.awb)}</div>
-    <div class="barcode">*${esc(slip.awb)}*</div>
-    <div class="meta">
-      <div class="row"><span class="label">Sort</span> ${esc(slip.sortCode || "—")}</div>
-      <div class="row"><span class="label">Mode</span> ${esc(slip.shippingMode || "—")} · ${esc(slip.paymentMode || "—")}</div>
-      <div class="row"><span class="label">To</span> ${esc(slip.name || "—")}</div>
-      <div class="row"><span class="label">Phone</span> ${esc(slip.phone || "—")}</div>
-      <div class="row"><span class="label">Address</span> ${esc(slip.address || "—")}</div>
-      <div class="row"><span class="label">City</span> ${esc(slip.city || "—")} ${esc(slip.pin || "")}</div>
+    <div class="hdr">
+      <div class="brand">DELHIVERY</div>
+      <div class="mode">${esc(slip.shippingMode || "Surface")}<br/>${esc(slip.paymentMode || "—")}</div>
     </div>
-    ${input.partnerNote ? `<p class="meta">${esc(input.partnerNote)}</p>` : ""}
+    <div class="sort">${esc(sort)}</div>
+    <div class="barcode-wrap">
+      <svg id="awbBarcode"></svg>
+      <div class="awb">${esc(slip.awb)}</div>
+    </div>
+    <div class="block">
+      <div class="k">Ship to</div>
+      <div class="v">${esc(slip.name || "—")}</div>
+      <div class="addr">${esc(slip.address || "—")}</div>
+      <div class="v">${esc(destLine)}</div>
+      <div>Phone: ${esc(slip.phone || "—")}</div>
+    </div>
+    <div class="block">
+      <div class="k">Order</div>
+      <div class="v">${esc(orderNumber)}</div>
+      ${slip.oid ? `<div class="k" style="margin-top:6px">OID</div><div>${esc(slip.oid)}</div>` : ""}
+    </div>
+    ${input.partnerNote ? `<div class="block">${esc(input.partnerNote)}</div>` : ""}
   </div>
   <div class="actions">
     <button onclick="window.print()">Print label</button>
+    <p style="font-size:11px;color:#666">Fallback HTML label (Code 128). Prefer Delhivery PDF when available.</p>
   </div>
-  <script>window.addEventListener('load', () => setTimeout(() => window.print(), 250));</script>
+  <script>
+    (function () {
+      var awb = ${JSON.stringify(slip.awb)};
+      try {
+        JsBarcode("#awbBarcode", awb, {
+          format: "CODE128",
+          displayValue: false,
+          margin: 0,
+          height: 56,
+          width: 1.6
+        });
+      } catch (e) {}
+      window.addEventListener("load", function () {
+        setTimeout(function () { window.print(); }, 350);
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }

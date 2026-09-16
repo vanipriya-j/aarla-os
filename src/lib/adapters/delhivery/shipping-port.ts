@@ -50,7 +50,16 @@ export type DelhiveryPackingSlipPackage = {
   shippingMode: string | null;
   sortCode: string | null;
   oid: string | null;
+  /** Official Delhivery shipping-label PDF (when requested with pdf=true). */
+  pdfDownloadLink: string | null;
   raw: unknown;
+};
+
+export type DelhiveryPackingSlipOptions = {
+  /** Prefer official Delhivery PDF label (S3 link). Default true for print. */
+  pdf?: boolean;
+  /** A4 sheet or 4R (4×6 thermal). */
+  pdfSize?: "A4" | "4R";
 };
 
 export type DelhiveryRateQuoteInput = {
@@ -78,7 +87,10 @@ export interface DelhiveryShippingConnector {
   createShipment(
     input: DelhiveryCreateShipmentInput,
   ): Promise<DelhiveryCreateShipmentResult>;
-  fetchPackingSlip(awb: string): Promise<DelhiveryPackingSlipPackage>;
+  fetchPackingSlip(
+    awb: string,
+    options?: DelhiveryPackingSlipOptions,
+  ): Promise<DelhiveryPackingSlipPackage>;
   fetchRate(input: DelhiveryRateQuoteInput): Promise<DelhiveryRateQuote>;
 }
 
