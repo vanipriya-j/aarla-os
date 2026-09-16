@@ -24,7 +24,7 @@ Commerce sync on `/customer-calls` is **manual and serial**:
 
 ```
 Fulfil order
-  → Check Surface / Express rates
+  → Check Surface / Express rates (uses package weight grams from the form → cgm)
       → GET /api/kinko/v1/invoice/charges/.json  (md=S|E, o_pin, d_pin, cgm)
   → Pick cheaper / preferred mode → save shipping method (+ approx courier cost)
   → Generate AWB

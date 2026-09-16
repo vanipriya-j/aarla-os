@@ -88,6 +88,15 @@ describe("FixtureDelhiveryShippingConnector", () => {
     });
     expect(surface.totalAmount).toBeGreaterThan(0);
     expect(express.totalAmount).toBeGreaterThan(surface.totalAmount!);
+
+    const heavy = await c.fetchRate({
+      destinationPin: "560001",
+      originPin: "560034",
+      weightG: 5000,
+      shippingMode: "Surface",
+    });
+    expect(heavy.weightG).toBe(5000);
+    expect(heavy.totalAmount).toBeGreaterThan(surface.totalAmount!);
   });
 });
 
