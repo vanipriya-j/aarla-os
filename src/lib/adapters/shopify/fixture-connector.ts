@@ -615,6 +615,24 @@ export class FixtureShopifyConnector implements ShopifyConnector {
     void quantities;
     return { ok: true, errors: [] as string[] };
   }
+
+  async createOrderFulfilment(input: {
+    shopifyOrderId: string;
+    trackingNumber: string;
+    trackingCompany: string;
+    trackingUrl?: string | null;
+    notifyCustomer?: boolean;
+  }) {
+    const awb = input.trackingNumber.trim();
+    if (!awb) {
+      return { ok: false, fulfilmentId: null, errors: ["Missing tracking number"] };
+    }
+    return {
+      ok: true,
+      fulfilmentId: `fixture-ful-${awb}`,
+      errors: [] as string[],
+    };
+  }
 }
 
 export function createDefaultFixturePayload(): ShopifyCustomerCallPayload {

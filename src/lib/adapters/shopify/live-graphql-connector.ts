@@ -14,6 +14,8 @@ import type {
   ShopifyAbandonedCheckoutPage,
   ShopifyAbandonedCheckoutRecord,
   ShopifyConnector,
+  ShopifyCreateOrderFulfilmentInput,
+  ShopifyCreateOrderFulfilmentResult,
   ShopifyCustomerCallPage,
   ShopifyCustomerCallPayload,
   ShopifyCustomerRecord,
@@ -736,6 +738,65 @@ mutation InventorySetQuantities($input: InventorySetQuantitiesInput!) {
 }
 `;
 
+const ORDER_FULFILLMENT_ORDERS_QUERY = `
+query OrderOpenFulfillmentOrders($id: ID!) {
+  order(id: $id) {
+    id
+    displayFulfillmentStatus
+    fulfillmentOrders(first: 20, displayable: true) {
+      edges {
+        node {
+          id
+          status
+        }
+      }
+    }
+  }
+}
+`;
+
+const FULFILLMENT_CREATE = `
+mutation FulfillmentCreate($fulfillment: FulfillmentInput!) {
+  fulfillmentCreate(fulfillment: $fulfillment) {
+    fulfillment {
+      id
+      status
+      trackingInfo { company number url }
+    }
+    userErrors { field message }
+  }
+}
+`;
+
+type OrderFulfillmentOrdersData = {
+  order: {
+    id: string;
+    displayFulfillmentStatus: string | null;
+    fulfillmentOrders: {
+      edges: Array<{
+        node: {
+          id: string;
+          status: string;
+        };
+      }>;
+    };
+  } | null;
+};
+
+type FulfillmentCreateData = {
+  fulfillmentCreate: {
+    fulfillment: { id: string; status: string } | null;
+    userErrors: Array<{ field: string[] | null; message: string }>;
+  };
+};
+
+function toShopifyOrderGid(shopifyOrderId: string): string {
+  const raw = shopifyOrderId.trim();
+  if (!raw) return raw;
+  if (raw.startsWith("gid://")) return raw;
+  return `gid://shopify/Order/${raw}`;
+}
+
 type VariantInventoryQueryData = {
   productVariants: {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -1264,6 +1325,90 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       }
     }
     return out;
+  }
+
+  /**
+   * Create a Shopify fulfillment with tracking for all open fulfillment orders.
+   * Clears Delhivery Client “Pending” when that channel watches Shopify fulfilment.
+   */
+  async createOrderFulfilment(
+    input: ShopifyCreateOrderFulfilmentInput,
+  ): Promise<ShopifyCreateOrderFulfilmentResult> {
+    assertServerOnly();
+    const trackingNumber = input.trackingNumber.trim();
+    if (!trackingNumber) {
+      return { ok: false, fulfilmentId: null, errors: ["Missing tracking number"] };
+    }
+    const orderGid = toShopifyOrderGid(input.shopifyOrderId);
+    if (!orderGid) {
+      return { ok: false, fulfilmentId: null, errors: ["Missing Shopify order id"] };
+    }
+
+    const orderData = await this.graphql<OrderFulfillmentOrdersData>(
+      ORDER_FULFILLMENT_ORDERS_QUERY,
+      { id: orderGid },
+    );
+    if (!orderData.order) {
+      return {
+        ok: false,
+        fulfilmentId: null,
+        errors: [`Shopify order not found (${orderGid})`],
+      };
+    }
+
+    const openStatuses = new Set(["OPEN", "IN_PROGRESS", "SCHEDULED"]);
+    const openFoIds = (orderData.order.fulfillmentOrders?.edges ?? [])
+      .map((e) => e.node)
+      .filter((n) => openStatuses.has(String(n.status ?? "").toUpperCase()))
+      .map((n) => n.id);
+
+    if (!openFoIds.length) {
+      const status = (orderData.order.displayFulfillmentStatus ?? "").toUpperCase();
+      if (status === "FULFILLED") {
+        return {
+          ok: true,
+          fulfilmentId: null,
+          errors: [],
+          alreadyFulfilled: true,
+        };
+      }
+      return {
+        ok: false,
+        fulfilmentId: null,
+        errors: [
+          `No open Shopify fulfillment orders to fulfil (status ${status || "unknown"}).`,
+        ],
+      };
+    }
+
+    const data = await this.graphql<FulfillmentCreateData>(FULFILLMENT_CREATE, {
+      fulfillment: {
+        notifyCustomer: Boolean(input.notifyCustomer),
+        trackingInfo: {
+          company: input.trackingCompany.trim() || "Delhivery",
+          number: trackingNumber,
+          url: input.trackingUrl?.trim() || null,
+        },
+        lineItemsByFulfillmentOrder: openFoIds.map((fulfillmentOrderId) => ({
+          fulfillmentOrderId,
+        })),
+      },
+    });
+
+    const errors = (data.fulfillmentCreate?.userErrors ?? []).map((e) => e.message);
+    const fulfilmentId = data.fulfillmentCreate?.fulfillment?.id
+      ? shopifyGidToExternalId(data.fulfillmentCreate.fulfillment.id)
+      : null;
+    if (errors.length || !fulfilmentId) {
+      return {
+        ok: false,
+        fulfilmentId,
+        errors: errors.length
+          ? errors
+          : ["Shopify fulfillmentCreate returned no fulfillment"],
+      };
+    }
+    return { ok: true, fulfilmentId, errors: [] };
   }
 }
 

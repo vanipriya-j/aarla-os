@@ -223,6 +223,31 @@ export async function createDelhiveryAwbAction(input: {
   });
 }
 
+/** Push an already-saved Delhivery AWB to Shopify as fulfillment + tracking. */
+export async function pushDelhiveryAwbToShopifyAction(input: {
+  fulfilmentOrderId: string;
+}) {
+  return wrap(async () => {
+    const { getFulfilmentDetail } = await import(
+      "@/lib/application/fulfilment-service"
+    );
+    const { pushDelhiveryAwbToShopify } = await import(
+      "@/lib/application/delhivery-shipping-service"
+    );
+    const detail = await getFulfilmentDetail(input.fulfilmentOrderId);
+    if (!detail) throw new Error("Fulfilment order not found");
+    const awb = detail.awb?.trim();
+    if (!awb) throw new Error("No AWB on this order — generate AWB first.");
+    const shopify = await pushDelhiveryAwbToShopify({
+      externalOrderId: detail.externalOrderId,
+      fulfilmentOrderId: detail.id,
+      awb,
+    });
+    const refreshed = await getFulfilmentDetail(input.fulfilmentOrderId);
+    return { shopify, detail: refreshed ?? detail };
+  });
+}
+
 export async function getDelhiveryRatesAction(input: {
   fulfilmentOrderId: string;
   destinationPin?: string | null;

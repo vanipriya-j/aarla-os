@@ -10,12 +10,19 @@ import { createLiveDelhiveryShippingConnectorFromEnv } from "@/lib/adapters/delh
 import { renderDelhiveryPackingSlipHtml } from "@/lib/adapters/delhivery/packing-slip-html";
 import type { DelhiveryShippingConnector } from "@/lib/adapters/delhivery/shipping-port";
 import { readDelhiveryShippingConfigFromEnv } from "@/lib/adapters/delhivery/shipping-port";
+import { FixtureShopifyConnector } from "@/lib/adapters/shopify/fixture-connector";
+import { createLiveShopifyConnectorFromEnv } from "@/lib/adapters/shopify/live-graphql-connector";
+import type { ShopifyConnector } from "@/lib/adapters/shopify/port";
 import {
   saveManualCourier,
   getFulfilmentDetail,
   listFulfilmentWorkbench,
 } from "@/lib/application/fulfilment-service";
+import { delhiveryPublicTrackingUrl } from "@/lib/domain/shipment-types";
 import { ConfigurationError } from "@/lib/infra/db/errors";
+import { ORG_ID } from "@/lib/infra/db/ids";
+import { query } from "@/lib/infra/db/pool";
+import { createExternalCommerceRepository } from "@/lib/infra/repositories/postgres-external-commerce";
 import { createFulfilmentRepository } from "@/lib/infra/repositories/postgres-fulfilment";
 import type { FulfilmentOrderDetail, FulfilmentOrderListItem } from "@/lib/repositories/fulfilment";
 import type { FulfilmentTab } from "@/lib/domain/fulfilment-types";
@@ -30,10 +37,19 @@ export type DelhiveryAddressOverride = {
   zip?: string | null;
 };
 
+export type ShopifyAwbPushResult = {
+  attempted: boolean;
+  ok: boolean;
+  alreadyFulfilled: boolean;
+  fulfilmentId: string | null;
+  message: string;
+};
+
 export type CreateDelhiveryAwbResult = {
   awb: string;
   sortCode: string | null;
   detail: FulfilmentOrderDetail;
+  shopify: ShopifyAwbPushResult;
 };
 
 function resolveShippingConnector(
@@ -50,6 +66,151 @@ function resolveShippingConnector(
     );
   }
   return live;
+}
+
+function resolveShopifyConnector(connector?: ShopifyConnector): ShopifyConnector | null {
+  if (connector) return connector;
+  if (process.env.SHOPIFY_USE_FIXTURE === "1" || process.env.DELHIVERY_USE_FIXTURE === "1") {
+    return new FixtureShopifyConnector();
+  }
+  return createLiveShopifyConnectorFromEnv();
+}
+
+async function loadShopifyOrderExternalId(
+  externalOrderId: string,
+): Promise<string | null> {
+  const rows = await query<{ external_id: string }>(
+    `select external_id from external_orders
+     where organization_id = $1 and id = $2 and provider = 'shopify'`,
+    [ORG_ID, externalOrderId],
+  );
+  const id = rows[0]?.external_id?.trim();
+  return id || null;
+}
+
+/**
+ * Push Delhivery AWB onto the Shopify order as a fulfillment + tracking.
+ * Soft-fails: AWB create still succeeds if Shopify scopes/API fail.
+ */
+export async function pushDelhiveryAwbToShopify(input: {
+  externalOrderId: string;
+  fulfilmentOrderId: string;
+  awb: string;
+  shopifyConnector?: ShopifyConnector;
+}): Promise<ShopifyAwbPushResult> {
+  const awb = input.awb.trim();
+  const skipped = (message: string): ShopifyAwbPushResult => ({
+    attempted: false,
+    ok: false,
+    alreadyFulfilled: false,
+    fulfilmentId: null,
+    message,
+  });
+  if (!awb) return skipped("No AWB to push to Shopify.");
+
+  const shopifyOrderId = await loadShopifyOrderExternalId(input.externalOrderId);
+  if (!shopifyOrderId) {
+    return skipped("No Shopify order id linked — re-sync Shopify orders.");
+  }
+
+  const connector = resolveShopifyConnector(input.shopifyConnector);
+  if (!connector?.createOrderFulfilment) {
+    return skipped(
+      "Shopify not configured (or missing createOrderFulfilment) — AWB saved locally only.",
+    );
+  }
+
+  const trackingUrl = delhiveryPublicTrackingUrl(awb);
+  const notifyCustomer =
+    process.env.SHOPIFY_FULFIL_NOTIFY_CUSTOMER === "1" ||
+    process.env.SHOPIFY_FULFIL_NOTIFY_CUSTOMER === "true";
+
+  try {
+    const result = await connector.createOrderFulfilment({
+      shopifyOrderId,
+      trackingNumber: awb,
+      trackingCompany: "Delhivery",
+      trackingUrl,
+      notifyCustomer,
+    });
+
+    if (!result.ok && !result.alreadyFulfilled) {
+      const msg = result.errors.join("; ") || "Shopify fulfilment failed";
+      await createFulfilmentRepository().appendEvent({
+        fulfilmentOrderId: input.fulfilmentOrderId,
+        eventType: "shopify-fulfil-failed",
+        summary: `Shopify fulfil failed for AWB ${awb}: ${msg}`,
+        actor: "system",
+      });
+      return {
+        attempted: true,
+        ok: false,
+        alreadyFulfilled: false,
+        fulfilmentId: result.fulfilmentId,
+        message: msg,
+      };
+    }
+
+    // Keep local commerce mirror in sync so Fulfil auto-archive sees Fulfilled.
+    await query(
+      `update external_orders
+       set fulfilment_status = 'FULFILLED', last_synced_at = now()
+       where organization_id = $1 and id = $2`,
+      [ORG_ID, input.externalOrderId],
+    );
+
+    const commerce = createExternalCommerceRepository();
+    const fulExternalId =
+      result.fulfilmentId?.trim() || `delhivery-awb:${awb}`;
+    await commerce.upsertFulfilment({
+      provider: "shopify",
+      externalId: fulExternalId,
+      orderExternalId: shopifyOrderId,
+      orderId: input.externalOrderId,
+      trackingCompany: "Delhivery",
+      trackingNumber: awb,
+      trackingUrl,
+      fulfilmentStatus: "SUCCESS",
+    });
+
+    await createFulfilmentRepository().appendEvent({
+      fulfilmentOrderId: input.fulfilmentOrderId,
+      eventType: result.alreadyFulfilled
+        ? "shopify-already-fulfilled"
+        : "shopify-fulfilled",
+      summary: result.alreadyFulfilled
+        ? `Shopify already fulfilled — recorded Delhivery AWB ${awb} locally`
+        : `Shopify fulfilled with Delhivery AWB ${awb}`,
+      actor: "system",
+    });
+
+    return {
+      attempted: true,
+      ok: true,
+      alreadyFulfilled: Boolean(result.alreadyFulfilled),
+      fulfilmentId: result.fulfilmentId,
+      message: result.alreadyFulfilled
+        ? "Shopify already fulfilled"
+        : "Shopify fulfilled with Delhivery tracking",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await createFulfilmentRepository()
+      .appendEvent({
+        fulfilmentOrderId: input.fulfilmentOrderId,
+        eventType: "shopify-fulfil-failed",
+        summary: `Shopify fulfil error for AWB ${awb}: ${message}`,
+        actor: "system",
+      })
+      .catch(() => undefined);
+    return {
+      attempted: true,
+      ok: false,
+      alreadyFulfilled: false,
+      fulfilmentId: null,
+      message,
+    };
+  }
 }
 
 /** PAID → Prepaid; otherwise treat as COD (common for Shopify India COD). */
@@ -102,8 +263,11 @@ export async function createDelhiveryAwbForFulfilment(input: {
   packageOverride?: DelhiveryPackageOverride | null;
   actor?: string | null;
   connector?: DelhiveryShippingConnector;
+  shopifyConnector?: ShopifyConnector;
   /** When true, replace an existing AWB (creates a new Delhivery shipment). */
   replaceExisting?: boolean;
+  /** Skip Shopify fulfilment push (tests / recovery). */
+  skipShopifyFulfil?: boolean;
 }): Promise<CreateDelhiveryAwbResult> {
   const detail = await getFulfilmentDetail(input.fulfilmentOrderId);
   if (!detail) throw new Error("Fulfilment order not found");
@@ -201,10 +365,30 @@ export async function createDelhiveryAwbForFulfilment(input: {
     actor: input.actor ?? null,
   });
 
+  let shopify: ShopifyAwbPushResult = {
+    attempted: false,
+    ok: false,
+    alreadyFulfilled: false,
+    fulfilmentId: null,
+    message: "Shopify fulfil skipped",
+  };
+  if (!input.skipShopifyFulfil) {
+    shopify = await pushDelhiveryAwbToShopify({
+      externalOrderId: saved.externalOrderId,
+      fulfilmentOrderId: input.fulfilmentOrderId,
+      awb: created.awb,
+      shopifyConnector: input.shopifyConnector,
+    });
+  }
+
+  // Refresh detail so shopifyFulfilmentStatus reflects local FULFILLED update.
+  const refreshed = (await getFulfilmentDetail(input.fulfilmentOrderId)) ?? saved;
+
   return {
     awb: created.awb,
     sortCode: created.sortCode,
-    detail: saved,
+    detail: refreshed,
+    shopify,
   };
 }
 
