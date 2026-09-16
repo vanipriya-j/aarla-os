@@ -236,6 +236,22 @@ export async function getDelhiveryRatesAction(input: {
   });
 }
 
+export async function scheduleDelhiveryPickupAction(input: {
+  pickupDate?: string | null;
+  pickupTime?: string | null;
+  expectedPackageCount?: number | null;
+  fulfilmentOrderIds?: string[];
+  tab?: import("@/lib/domain/fulfilment-types").FulfilmentTab;
+  actor?: string | null;
+}) {
+  return wrap(async () => {
+    const { scheduleDelhiveryPickupForFulfilment } = await import(
+      "@/lib/application/delhivery-shipping-service"
+    );
+    return scheduleDelhiveryPickupForFulfilment(input);
+  });
+}
+
 export async function confirmHandoverAction(input: {
   fulfilmentOrderId: string;
   actor?: string | null;

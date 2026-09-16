@@ -43,7 +43,14 @@ Rate lookup needs `DELHIVERY_PICKUP_PIN` (origin). Charges are approximate (`tot
 
 Payment mode: Shopify `PAID` → Prepaid (`Pre-paid` in Delhivery API); otherwise COD with order total.
 
-AWB create sends weight (g), L×W×H (cm), and quantity. Fulfil UI collects weight/dimensions before **Generate AWB**.
+## Today's Dispatch batch
+
+On **Fulfil → Today's Dispatch**:
+- **Print labels (2 / A4)** — downloads an A4 PDF with two official Delhivery shipping labels per page (`/api/fulfil/delhivery-labels-a4`)
+- **Schedule Delhivery pickup** — `POST /fm/request/new/` with warehouse name, date, time, and expected package count
+
+Pickup requires `DELHIVERY_PICKUP_NAME` to match the registered warehouse exactly.
+
 
 ## Environment (server-only)
 

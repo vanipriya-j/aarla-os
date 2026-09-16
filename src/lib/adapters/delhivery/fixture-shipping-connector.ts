@@ -3,6 +3,8 @@ import type {
   DelhiveryCreateShipmentResult,
   DelhiveryPackingSlipOptions,
   DelhiveryPackingSlipPackage,
+  DelhiveryPickupRequestInput,
+  DelhiveryPickupRequestResult,
   DelhiveryRateQuote,
   DelhiveryRateQuoteInput,
   DelhiveryShippingConnector,
@@ -64,6 +66,20 @@ export class FixtureDelhiveryShippingConnector implements DelhiveryShippingConne
       destinationPin,
       weightG,
       raw: { fixture: true, total_amount: rounded },
+    };
+  }
+
+  async schedulePickup(
+    input: DelhiveryPickupRequestInput,
+  ): Promise<DelhiveryPickupRequestResult> {
+    return {
+      pickupId: `FIX-PU-${input.pickupDate.replace(/-/g, "")}`,
+      pickupDate: input.pickupDate,
+      pickupTime: input.pickupTime,
+      pickupLocation: input.pickupLocation?.trim() || "Fixture Warehouse",
+      expectedPackageCount: input.expectedPackageCount,
+      incomingCenterName: "Fixture_DC",
+      raw: { fixture: true, pickup_id: `FIX-PU-${input.pickupDate.replace(/-/g, "")}` },
     };
   }
 }
