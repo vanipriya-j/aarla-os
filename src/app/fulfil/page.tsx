@@ -1255,7 +1255,7 @@ export default function FulfilOrdersPage() {
                               );
                             }}
                           >
-                            Print label
+                            Print Delhivery label
                           </button>
                           {!detail.shippingAddress1 || !detail.shippingZip ? (
                             <span className="text-xs text-amber-800">
@@ -1263,6 +1263,10 @@ export default function FulfilOrdersPage() {
                             </span>
                           ) : null}
                           </div>
+                          <p className="text-xs text-charcoal/55">
+                            Opens Delhivery’s official shipping-label PDF (with barcode) when
+                            available.
+                          </p>
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2 items-center">
