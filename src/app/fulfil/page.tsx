@@ -11,6 +11,7 @@ import {
   decidePackingAction,
   decideShippingAction,
   getDelhiveryRatesAction,
+  pushDelhiveryAwbToShopifyAction,
   scheduleDelhiveryPickupAction,
   escalateFounderAvailabilityAction,
   getFulfilmentDetailAction,
@@ -1358,9 +1359,16 @@ export default function FulfilOrdersPage() {
                                 }
                                 setAwbDraft(res.data.awb);
                                 setCourierDraft("Delhivery");
+                                const shopifyBit = res.data.shopify?.ok
+                                  ? res.data.shopify.alreadyFulfilled
+                                    ? " · Shopify already fulfilled"
+                                    : " · Shopify fulfilled + tracking"
+                                  : res.data.shopify?.attempted
+                                    ? ` · Shopify fulfil warn: ${res.data.shopify.message}`
+                                    : "";
                                 await applyDetailResult(
                                   { ok: true, data: res.data.detail },
-                                  `Delhivery AWB ${res.data.awb}${res.data.sortCode ? ` · ${res.data.sortCode}` : ""}`,
+                                  `Delhivery AWB ${res.data.awb}${res.data.sortCode ? ` · ${res.data.sortCode}` : ""}${shopifyBit}`,
                                 );
                               });
                             }}
@@ -1382,6 +1390,35 @@ export default function FulfilOrdersPage() {
                           >
                             Print Delhivery label
                           </button>
+                          <button
+                            type="button"
+                            data-testid="fulfil-push-awb-shopify"
+                            disabled={pending || !(detail.awb || awbDraft)}
+                            className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                            onClick={() => {
+                              runAction("Pushing AWB to Shopify…", async () => {
+                                const res = await pushDelhiveryAwbToShopifyAction({
+                                  fulfilmentOrderId: detail.id,
+                                });
+                                if (!res.ok) {
+                                  setError(res.error);
+                                  return;
+                                }
+                                const s = res.data.shopify;
+                                await applyDetailResult(
+                                  { ok: true, data: res.data.detail },
+                                  s.ok
+                                    ? s.alreadyFulfilled
+                                      ? `Shopify already fulfilled · AWB ${detail.awb ?? awbDraft}`
+                                      : `Shopify fulfilled with Delhivery AWB ${detail.awb ?? awbDraft}`
+                                    : `Shopify fulfil failed: ${s.message}`,
+                                );
+                                if (!s.ok) setError(s.message);
+                              });
+                            }}
+                          >
+                            Push AWB → Shopify
+                          </button>
                           {!detail.shippingAddress1 || !detail.shippingZip ? (
                             <span className="text-xs text-amber-800">
                               Shipping address incomplete — re-sync Shopify or enter AWB manually.
@@ -1389,8 +1426,9 @@ export default function FulfilOrdersPage() {
                           ) : null}
                           </div>
                           <p className="text-xs text-charcoal/55">
-                            Opens Delhivery’s official shipping-label PDF (with barcode) when
-                            available.
+                            Generate AWB also marks the Shopify order fulfilled with Delhivery
+                            tracking (clears Delhivery Pending). Use Push AWB → Shopify for older
+                            AWBs. Opens Delhivery’s official shipping-label PDF when available.
                           </p>
                         </div>
                       )}

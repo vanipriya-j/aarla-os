@@ -211,6 +211,24 @@ export type ShopifySetInventoryResult = {
   errors: string[];
 };
 
+export type ShopifyCreateOrderFulfilmentInput = {
+  /** Shopify order id (numeric or gid://shopify/Order/…). */
+  shopifyOrderId: string;
+  trackingNumber: string;
+  trackingCompany: string;
+  trackingUrl?: string | null;
+  /** Email/SMS the customer (default false). */
+  notifyCustomer?: boolean;
+};
+
+export type ShopifyCreateOrderFulfilmentResult = {
+  ok: boolean;
+  fulfilmentId: string | null;
+  errors: string[];
+  /** True when every open fulfillment order was already closed (nothing to fulfil). */
+  alreadyFulfilled?: boolean;
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
   /** Full fetch (fixtures / small stores). Live connector may still page internally. */
@@ -246,6 +264,13 @@ export interface ShopifyConnector {
   setInventoryQuantities?(
     quantities: ShopifySetInventoryQuantityInput[],
   ): Promise<ShopifySetInventoryResult>;
+  /**
+   * Mark a Shopify order fulfilled with carrier tracking (closes Delhivery Pending).
+   * Requires write_merchant_managed_fulfillment_orders (or assigned/third-party) scope.
+   */
+  createOrderFulfilment?(
+    input: ShopifyCreateOrderFulfilmentInput,
+  ): Promise<ShopifyCreateOrderFulfilmentResult>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.

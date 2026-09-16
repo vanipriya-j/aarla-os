@@ -30,6 +30,7 @@ Fulfil order
   → Generate AWB
       → POST /api/cmu/create.json  (pickup_location + shipment)
       → save AWB on fulfilment_orders
+      → Shopify fulfillmentCreate with Delhivery tracking (closes Delhivery Pending + Shopify Unfulfilled)
   → Print label
       → GET /api/fulfil/:id/delhivery-label
           → GET /api/p/packing_slip?wbns=AWB&pdf=true&pdf_size=4R
@@ -38,6 +39,8 @@ Fulfil order
 ```
 
 Requires a synced Shopify shipping address on `external_orders` (`shipping_name`, `shipping_address1`, city, province, zip, phone). Re-sync Shopify orders after deploy so open Fulfil rows get addresses.
+
+Shopify fulfil-on-AWB needs Admin scopes: `write_merchant_managed_fulfillment_orders` (or assigned/third-party write). Soft-fails if missing — AWB still saves. Set `SHOPIFY_FULFIL_NOTIFY_CUSTOMER=1` to email the customer tracking.
 
 Rate lookup needs `DELHIVERY_PICKUP_PIN` (origin). Charges are approximate (`total_amount`); actual billed amount can differ.
 
