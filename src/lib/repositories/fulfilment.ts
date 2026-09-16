@@ -148,11 +148,14 @@ export interface FulfilmentRepository {
     }>
   >;
   /**
-   * Order numbers for early Fulfil queue rows (received / stock-check) so we can
-   * re-fetch Shopify status and auto-archive ones already fulfilled there.
+   * Order numbers for active Fulfil queue rows (Stock Check through Dispatch)
+   * so we can re-fetch Shopify status and auto-archive ones already fulfilled.
    */
   listEarlyQueueOrderNumbers(limit?: number): Promise<string[]>;
-  /** Move wrongly pulled stock-check rows that are already Shopify-fulfilled or Delhivery-delivered out of the active queue. */
+  /**
+   * Move active-queue rows that Shopify already fulfilled (or cancelled) out of
+   * the workbench into Completed (`dispatched`).
+   */
   archiveAlreadyShippedStockChecks(): Promise<number>;
   setStatus(fulfilmentOrderId: string, status: FulfilmentStatus): Promise<void>;
   setPhysicalStatus(

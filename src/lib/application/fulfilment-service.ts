@@ -275,7 +275,7 @@ export async function syncIncomingOrdersIntoFulfilment(limit = 200): Promise<{
   salesSkipped: number;
 }> {
   const r = repo();
-  // Clean up earlier pulls that imported already-shipped history.
+  // Clean up queue rows Shopify already fulfilled (any active status, not only Stock Check).
   const archived = await r.archiveAlreadyShippedStockChecks();
   const unlinked = await r.listUnlinkedValidExternalOrders(limit);
   const ids: string[] = [];
