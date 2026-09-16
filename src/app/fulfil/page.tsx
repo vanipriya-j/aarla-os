@@ -280,7 +280,7 @@ export default function FulfilOrdersPage() {
     <>
       <Header
         title="Fulfil Orders"
-        subtitle="Refreshes Unfulfilled + Partially fulfilled from Shopify → stock check → pick → pack → ship. Weekly ORDERS counts all valid sales (including already fulfilled) — different set."
+        subtitle="Shopify Unfulfilled / Partially fulfilled only — Fulfil state follows Shopify. Already fulfilled on Shopify leaves the active queue (→ Completed). Weekly ORDERS still counts all valid sales."
       />
 
       <div className="px-6 py-6 space-y-5" data-testid="fulfil-orders-page">
@@ -480,9 +480,9 @@ export default function FulfilOrdersPage() {
             ) : rows.length === 0 ? (
               <p className="text-sm text-charcoal/60 card-surface p-6 text-center">
                 No orders in {fulfilmentTabLabel(tab)}.{" "}
-                {tab === "stock-check"
-                  ? "No open Unfulfilled/Partial orders in the queue. Weekly board ORDERS can still show sales that Shopify already fulfilled. Use Pull open orders (or Check now) to refresh from Shopify."
-                  : "Switch tabs, or pull open orders."}
+                {tab === "completed"
+                  ? "Handed-over and auto-cleared Shopify-fulfilled orders land here."
+                  : "Only Shopify Unfulfilled / Partially fulfilled orders stay in this queue. Fulfilled on Shopify → Completed. Use Pull open orders (or Check now) to refresh."}
               </p>
             ) : (
               rows.map((row) => {

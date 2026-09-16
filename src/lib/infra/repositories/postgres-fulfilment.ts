@@ -237,6 +237,15 @@ export function createFulfilmentRepository(): FulfilmentRepository {
     async listWorkbench(tab: FulfilmentTab) {
       const statuses = statusesForTab(tab);
       if (!statuses.length) return [];
+
+      // Active tabs: Shopify is source of truth for “still open”. Archive any
+      // Aarla-active rows that Shopify already fulfilled/cancelled, then hide
+      // anything that is not Unfulfilled/Partial so Aarla state cannot drift.
+      const openOnly = tab !== "completed";
+      if (openOnly) {
+        await this.archiveAlreadyShippedStockChecks();
+      }
+      const openStatuses = [...SHOPIFY_OPEN_FULFILMENT_STATUSES];
       const rows = await q(
         `select fo.*,
                 o.order_number,
@@ -254,8 +263,15 @@ export function createFulfilmentRepository(): FulfilmentRepository {
          left join external_customers c on c.id = o.external_customer_id
          where fo.organization_id = $1
            and fo.status = any($2::text[])
+           and (
+             $3::boolean = false
+             or (
+               o.cancelled_at is null
+               and lower(coalesce(o.fulfilment_status, '')) = any($4::text[])
+             )
+           )
          order by o.order_date asc`,
-        [ORG_ID, statuses],
+        [ORG_ID, statuses, openOnly, openStatuses],
       );
       return rows.map((r) => mapListItem(r));
     },
