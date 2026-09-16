@@ -206,6 +206,13 @@ export async function createDelhiveryAwbAction(input: {
     state?: string | null;
     zip?: string | null;
   } | null;
+  packageOverride?: {
+    weightG?: number | null;
+    lengthCm?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+    quantity?: number | null;
+  } | null;
   actor?: string | null;
 }) {
   return wrap(async () => {

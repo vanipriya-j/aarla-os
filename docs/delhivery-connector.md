@@ -40,7 +40,9 @@ Requires a synced Shopify shipping address on `external_orders` (`shipping_name`
 
 Rate lookup needs `DELHIVERY_PICKUP_PIN` (origin). Charges are approximate (`total_amount`); actual billed amount can differ.
 
-Payment mode: Shopify `PAID` → Prepaid; otherwise COD with order total.
+Payment mode: Shopify `PAID` → Prepaid (`Pre-paid` in Delhivery API); otherwise COD with order total.
+
+AWB create sends weight (g), L×W×H (cm), and quantity. Fulfil UI collects weight/dimensions before **Generate AWB**.
 
 ## Environment (server-only)
 
