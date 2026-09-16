@@ -73,6 +73,15 @@ export const SHOPIFY_OPEN_FULFILMENT_STATUSES = [
   "partially fulfilled",
 ] as const;
 
+/** True when synced Shopify fulfilment_status is still Unfulfilled / Partial. */
+export function isShopifyOpenFulfilmentStatus(
+  status: string | null | undefined,
+): boolean {
+  if (status == null || String(status).trim() === "") return false;
+  const key = String(status).trim().toLowerCase();
+  return (SHOPIFY_OPEN_FULFILMENT_STATUSES as readonly string[]).includes(key);
+}
+
 /**
  * Active Fulfil queue statuses (not yet Completed). When Shopify is no longer
  * Unfulfilled/Partial, these rows should be auto-archived to `dispatched`.

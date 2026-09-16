@@ -9,6 +9,7 @@ import {
 import {
   FULFILMENT_ACTIVE_QUEUE_STATUSES,
   isPastFulfilmentCutoff,
+  isShopifyOpenFulfilmentStatus,
   istMinutesSinceMidnight,
   statusesForTab,
 } from "@/lib/domain/fulfilment-types";
@@ -126,6 +127,15 @@ describe("fulfilment tabs and cut-off", () => {
     expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).toContain("ready-for-handover");
     expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).not.toContain("dispatched");
     expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).not.toContain("cancelled");
+  });
+
+  it("recognizes only Shopify Unfulfilled/Partial as open", () => {
+    expect(isShopifyOpenFulfilmentStatus("unfulfilled")).toBe(true);
+    expect(isShopifyOpenFulfilmentStatus("PARTIALLY_FULFILLED")).toBe(true);
+    expect(isShopifyOpenFulfilmentStatus("partial")).toBe(true);
+    expect(isShopifyOpenFulfilmentStatus("fulfilled")).toBe(false);
+    expect(isShopifyOpenFulfilmentStatus("FULFILLED")).toBe(false);
+    expect(isShopifyOpenFulfilmentStatus(null)).toBe(false);
   });
 
   it("computes IST minutes", () => {
