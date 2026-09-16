@@ -81,9 +81,18 @@ function buildProductDescription(detail: FulfilmentOrderDetail): string {
   return parts.join(", ").slice(0, 180) || "Aarla goods";
 }
 
+export type DelhiveryPackageOverride = {
+  weightG?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  quantity?: number | null;
+};
+
 export async function createDelhiveryAwbForFulfilment(input: {
   fulfilmentOrderId: string;
   addressOverride?: DelhiveryAddressOverride | null;
+  packageOverride?: DelhiveryPackageOverride | null;
   actor?: string | null;
   connector?: DelhiveryShippingConnector;
   /** When true, replace an existing AWB (creates a new Delhivery shipment). */
@@ -105,6 +114,7 @@ export async function createDelhiveryAwbForFulfilment(input: {
   }
 
   const ov = input.addressOverride ?? {};
+  const pkg = input.packageOverride ?? {};
   const name = requireField(
     "name",
     ov.name ?? detail.shippingName ?? detail.customerName,
@@ -123,26 +133,56 @@ export async function createDelhiveryAwbForFulfilment(input: {
   const codAmount = paymentMode === "COD" ? detail.totalAmount : null;
   const shippingMode = resolveDelhiveryShippingMode(method);
   const config = readDelhiveryShippingConfigFromEnv();
-  const weightG = config?.defaultWeightG ?? 500;
+  const weightG =
+    pkg.weightG && pkg.weightG > 0
+      ? Math.round(pkg.weightG)
+      : (config?.defaultWeightG ?? 500);
+  const lengthCm = pkg.lengthCm && pkg.lengthCm > 0 ? Math.round(pkg.lengthCm) : 20;
+  const widthCm = pkg.widthCm && pkg.widthCm > 0 ? Math.round(pkg.widthCm) : 15;
+  const heightCm = pkg.heightCm && pkg.heightCm > 0 ? Math.round(pkg.heightCm) : 10;
+  const quantity =
+    pkg.quantity && pkg.quantity > 0
+      ? Math.round(pkg.quantity)
+      : Math.max(
+          1,
+          detail.lines.reduce((s, l) => s + (l.requiredQuantity || 0), 0) || 1,
+        );
+
+  // Delhivery requires unique order ids when it assigns the waybill.
+  const orderNumber = input.replaceExisting
+    ? `${detail.orderNumber}-R${Date.now().toString(36).slice(-5)}`
+    : detail.orderNumber;
 
   const connector = resolveShippingConnector(input.connector);
-  const created = await connector.createShipment({
-    orderNumber: detail.orderNumber,
-    name,
-    phone,
-    address: address1,
-    address2,
-    city,
-    state,
-    pin: zip,
-    country: detail.shippingCountry || "India",
-    paymentMode,
-    codAmount,
-    weightG,
-    shippingMode,
-    productDescription: buildProductDescription(detail),
-    totalAmount: detail.totalAmount,
-  });
+  let created;
+  try {
+    created = await connector.createShipment({
+      orderNumber,
+      name,
+      phone,
+      address: address1,
+      address2,
+      city,
+      state,
+      pin: zip,
+      country: detail.shippingCountry || "India",
+      paymentMode,
+      codAmount,
+      weightG,
+      lengthCm,
+      widthCm,
+      heightCm,
+      quantity,
+      shippingMode,
+      productDescription: buildProductDescription(detail),
+      totalAmount: detail.totalAmount,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `${message} (sent ${weightG}g · ${lengthCm}×${widthCm}×${heightCm}cm · qty ${quantity} · ${paymentMode} · ${shippingMode}; check DELHIVERY_PICKUP_NAME matches Delhivery warehouse exactly)`,
+    );
+  }
 
   const saved = await saveManualCourier({
     fulfilmentOrderId: input.fulfilmentOrderId,

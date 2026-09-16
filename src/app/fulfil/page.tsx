@@ -81,6 +81,10 @@ export default function FulfilOrdersPage() {
     cheaper: "delhivery-surface" | "delhivery-express" | null;
   } | null>(null);
   const [rateError, setRateError] = useState<string | null>(null);
+  const [pkgWeightG, setPkgWeightG] = useState("500");
+  const [pkgLengthCm, setPkgLengthCm] = useState("20");
+  const [pkgWidthCm, setPkgWidthCm] = useState("15");
+  const [pkgHeightCm, setPkgHeightCm] = useState("10");
   const [showPackChange, setShowPackChange] = useState(false);
   const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
@@ -1140,7 +1144,57 @@ export default function FulfilOrdersPage() {
                         detail.shippingMethod === "delhivery-express" ||
                         shipMethod === "delhivery-surface" ||
                         shipMethod === "delhivery-express") && (
-                        <div className="flex flex-wrap gap-2 items-center">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap gap-2 items-end">
+                            <label className="text-xs text-charcoal/60">
+                              Weight (g)
+                              <input
+                                type="number"
+                                min={50}
+                                className="mt-1 block w-24 text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                                value={pkgWeightG}
+                                disabled={pending}
+                                onChange={(e) => setPkgWeightG(e.target.value)}
+                              />
+                            </label>
+                            <label className="text-xs text-charcoal/60">
+                              L (cm)
+                              <input
+                                type="number"
+                                min={1}
+                                className="mt-1 block w-20 text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                                value={pkgLengthCm}
+                                disabled={pending}
+                                onChange={(e) => setPkgLengthCm(e.target.value)}
+                              />
+                            </label>
+                            <label className="text-xs text-charcoal/60">
+                              W (cm)
+                              <input
+                                type="number"
+                                min={1}
+                                className="mt-1 block w-20 text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                                value={pkgWidthCm}
+                                disabled={pending}
+                                onChange={(e) => setPkgWidthCm(e.target.value)}
+                              />
+                            </label>
+                            <label className="text-xs text-charcoal/60">
+                              H (cm)
+                              <input
+                                type="number"
+                                min={1}
+                                className="mt-1 block w-20 text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                                value={pkgHeightCm}
+                                disabled={pending}
+                                onChange={(e) => setPkgHeightCm(e.target.value)}
+                              />
+                            </label>
+                            <span className="text-xs text-charcoal/50 pb-2">
+                              Delhivery needs weight + box size for AWB.
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2 items-center">
                           <button
                             type="button"
                             data-testid="fulfil-generate-delhivery-awb"
@@ -1148,8 +1202,30 @@ export default function FulfilOrdersPage() {
                             className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
                             onClick={() => {
                               runAction("Generating Delhivery AWB…", async () => {
+                                const weightG = Number(pkgWeightG);
+                                const lengthCm = Number(pkgLengthCm);
+                                const widthCm = Number(pkgWidthCm);
+                                const heightCm = Number(pkgHeightCm);
+                                if (!Number.isFinite(weightG) || weightG < 50) {
+                                  setError("Enter package weight in grams (min 50).");
+                                  return;
+                                }
+                                if (
+                                  ![lengthCm, widthCm, heightCm].every(
+                                    (n) => Number.isFinite(n) && n >= 1,
+                                  )
+                                ) {
+                                  setError("Enter package L × W × H in cm.");
+                                  return;
+                                }
                                 const res = await createDelhiveryAwbAction({
                                   fulfilmentOrderId: detail.id,
+                                  packageOverride: {
+                                    weightG,
+                                    lengthCm,
+                                    widthCm,
+                                    heightCm,
+                                  },
                                 });
                                 if (!res.ok) {
                                   setError(res.error);
@@ -1186,6 +1262,7 @@ export default function FulfilOrdersPage() {
                               Shipping address incomplete — re-sync Shopify or enter AWB manually.
                             </span>
                           ) : null}
+                          </div>
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2 items-center">

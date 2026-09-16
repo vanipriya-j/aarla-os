@@ -21,6 +21,11 @@ export type DelhiveryCreateShipmentInput = {
   codAmount?: number | null;
   /** Grams */
   weightG: number;
+  /** Package dimensions in cm (Delhivery shipment_length/width/height). */
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  quantity?: number | null;
   shippingMode: "Surface" | "Express";
   productDescription?: string;
   totalAmount?: number | null;

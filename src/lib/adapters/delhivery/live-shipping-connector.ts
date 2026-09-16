@@ -26,6 +26,14 @@ function authHeaders(token: string): HeadersInit {
   };
 }
 
+/** Delhivery rejects &, #, %, ;, \ in free-text fields. */
+function sanitizeDelhiveryText(value: string): string {
+  return value
+    .replace(/[&#%;\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractAwb(payload: unknown): { awb: string; sortCode: string | null; remarks: string[] } {
   const root = payload as Record<string, unknown>;
   const packages = Array.isArray(root.packages) ? root.packages : [];
@@ -35,19 +43,22 @@ function extractAwb(payload: unknown): { awb: string; sortCode: string | null; r
     (typeof first?.wbn === "string" && first.wbn.trim()) ||
     (typeof root.waybill === "string" && root.waybill.trim()) ||
     "";
-  if (!awb) {
-    const remark =
-      (typeof root.rmk === "string" && root.rmk) ||
-      (typeof root.Error === "string" && root.Error) ||
-      (typeof root.error === "string" && root.error) ||
-      JSON.stringify(payload).slice(0, 280);
-    throw new Error(`Delhivery did not return a waybill. ${remark}`);
-  }
   const remarks: string[] = [];
   if (Array.isArray(first?.remarks)) {
     for (const r of first.remarks) if (typeof r === "string" && r.trim()) remarks.push(r.trim());
   }
+  if (typeof first?.status === "string" && first.status.trim()) {
+    remarks.push(`status=${first.status.trim()}`);
+  }
   if (typeof root.rmk === "string" && root.rmk.trim()) remarks.push(root.rmk.trim());
+  if (typeof root.Error === "string" && root.Error.trim()) remarks.push(root.Error.trim());
+  if (typeof root.error === "string" && root.error.trim()) remarks.push(root.error.trim());
+  if (!awb) {
+    const remark =
+      remarks.join("; ") ||
+      JSON.stringify(payload).slice(0, 400);
+    throw new Error(`Delhivery did not return a waybill. ${remark}`);
+  }
   const sortCode =
     (typeof first?.sort_code === "string" && first.sort_code) ||
     (typeof first?.sortCode === "string" && first.sortCode) ||
@@ -83,27 +94,42 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
     if (this.config.pickupState) pickup.state = this.config.pickupState;
     if (this.config.pickupPhone) pickup.phone = this.config.pickupPhone;
 
+    const paymentModeApi =
+      input.paymentMode === "COD" ? "COD" : "Pre-paid";
+    const lengthCm = Math.max(1, Math.round(input.lengthCm ?? 20));
+    const widthCm = Math.max(1, Math.round(input.widthCm ?? 15));
+    const heightCm = Math.max(1, Math.round(input.heightCm ?? 10));
+    const quantity = Math.max(1, Math.round(input.quantity ?? 1));
+
     const shipment: Record<string, unknown> = {
-      order: input.orderNumber,
+      order: sanitizeDelhiveryText(input.orderNumber).slice(0, 50),
       phone: input.phone.replace(/\D/g, "").slice(-10),
-      name: input.name,
-      add: input.address,
+      name: sanitizeDelhiveryText(input.name).slice(0, 100),
+      add: sanitizeDelhiveryText(input.address).slice(0, 200),
       address_type: "home",
       pin: input.pin.replace(/\D/g, "").slice(0, 6),
-      city: input.city,
-      state: input.state,
+      city: sanitizeDelhiveryText(input.city).slice(0, 50),
+      state: sanitizeDelhiveryText(input.state).slice(0, 50),
       country: input.country || "India",
-      payment_mode: input.paymentMode,
-      weight: String(Math.max(50, Math.round(input.weightG))),
+      payment_mode: paymentModeApi,
+      weight: Math.max(50, Math.round(input.weightG)),
+      shipment_length: lengthCm,
+      shipment_width: widthCm,
+      shipment_height: heightCm,
+      quantity,
       shipping_mode: input.shippingMode,
-      products_desc: input.productDescription || "Aarla goods",
+      products_desc: sanitizeDelhiveryText(
+        input.productDescription || "Aarla goods",
+      ).slice(0, 180),
     };
-    if (input.address2?.trim()) shipment.address2 = input.address2.trim();
+    if (input.address2?.trim()) {
+      shipment.address2 = sanitizeDelhiveryText(input.address2).slice(0, 100);
+    }
     if (input.paymentMode === "COD" && input.codAmount != null) {
-      shipment.cod_amount = String(Math.round(input.codAmount));
+      shipment.cod_amount = Math.round(input.codAmount);
     }
     if (input.totalAmount != null) {
-      shipment.total_amount = String(Math.round(input.totalAmount));
+      shipment.total_amount = Math.round(input.totalAmount);
     }
 
     const body = new URLSearchParams();
