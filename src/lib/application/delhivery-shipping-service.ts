@@ -4,14 +4,21 @@
 
 import "server-only";
 
+import { composeDelhiveryLabelsOnA4 } from "@/lib/adapters/delhivery/a4-label-compose";
 import { FixtureDelhiveryShippingConnector } from "@/lib/adapters/delhivery/fixture-shipping-connector";
 import { createLiveDelhiveryShippingConnectorFromEnv } from "@/lib/adapters/delhivery/live-shipping-connector";
 import { renderDelhiveryPackingSlipHtml } from "@/lib/adapters/delhivery/packing-slip-html";
 import type { DelhiveryShippingConnector } from "@/lib/adapters/delhivery/shipping-port";
 import { readDelhiveryShippingConfigFromEnv } from "@/lib/adapters/delhivery/shipping-port";
-import { saveManualCourier, getFulfilmentDetail } from "@/lib/application/fulfilment-service";
+import {
+  saveManualCourier,
+  getFulfilmentDetail,
+  listFulfilmentWorkbench,
+} from "@/lib/application/fulfilment-service";
 import { ConfigurationError } from "@/lib/infra/db/errors";
-import type { FulfilmentOrderDetail } from "@/lib/repositories/fulfilment";
+import { createFulfilmentRepository } from "@/lib/infra/repositories/postgres-fulfilment";
+import type { FulfilmentOrderDetail, FulfilmentOrderListItem } from "@/lib/repositories/fulfilment";
+import type { FulfilmentTab } from "@/lib/domain/fulfilment-types";
 
 export type DelhiveryAddressOverride = {
   name?: string | null;
@@ -387,5 +394,192 @@ export async function getDelhiveryRatesForFulfilment(input: {
     },
     cheaper,
     approximate: true,
+  };
+}
+
+function isDelhiveryMethod(method: string | null | undefined): boolean {
+  return method === "delhivery-surface" || method === "delhivery-express";
+}
+
+/** Orders ready for Delhivery label print / pickup (have AWB). */
+export async function listDelhiveryLabelReadyOrders(input?: {
+  tab?: FulfilmentTab;
+  fulfilmentOrderIds?: string[];
+}): Promise<FulfilmentOrderListItem[]> {
+  if (input?.fulfilmentOrderIds?.length) {
+    const out: FulfilmentOrderListItem[] = [];
+    for (const id of input.fulfilmentOrderIds) {
+      const d = await getFulfilmentDetail(id);
+      if (!d?.awb?.trim()) continue;
+      if (d.shippingMethod && !isDelhiveryMethod(d.shippingMethod)) continue;
+      out.push(d);
+    }
+    return out;
+  }
+  const tab = input?.tab ?? "todays-dispatch";
+  const { rows } = await listFulfilmentWorkbench(tab);
+  return rows.filter(
+    (r) => Boolean(r.awb?.trim()) && isDelhiveryMethod(r.shippingMethod),
+  );
+}
+
+async function fetchOfficialLabelPdfBytes(
+  awb: string,
+  connector: DelhiveryShippingConnector,
+): Promise<Uint8Array> {
+  const slip = await connector.fetchPackingSlip(awb, { pdf: true, pdfSize: "4R" });
+  if (!slip.pdfDownloadLink) {
+    throw new Error(
+      `No Delhivery PDF label for AWB ${awb} — open Print Delhivery label on the order first, or check packing_slip pdf support.`,
+    );
+  }
+  const pdfRes = await fetch(slip.pdfDownloadLink, {
+    method: "GET",
+    headers: { Accept: "application/pdf,*/*" },
+  });
+  if (!pdfRes.ok) {
+    throw new Error(`Failed to download Delhivery PDF for AWB ${awb} (${pdfRes.status}).`);
+  }
+  const buf = new Uint8Array(await pdfRes.arrayBuffer());
+  if (buf.byteLength < 100) {
+    throw new Error(`Delhivery PDF for AWB ${awb} was empty.`);
+  }
+  return buf;
+}
+
+/**
+ * Build an A4 PDF with 2 official Delhivery labels per page (stacked).
+ * Source labels are Delhivery's barcode PDFs — not rasterized stubs.
+ */
+export async function buildDelhiveryA4LabelsPdf(input: {
+  fulfilmentOrderIds?: string[];
+  tab?: FulfilmentTab;
+  connector?: DelhiveryShippingConnector;
+}): Promise<{
+  pdfBytes: Uint8Array;
+  awbs: string[];
+  orderNumbers: string[];
+  skipped: Array<{ orderNumber: string; reason: string }>;
+}> {
+  const rows = await listDelhiveryLabelReadyOrders({
+    fulfilmentOrderIds: input.fulfilmentOrderIds,
+    tab: input.tab,
+  });
+  if (!rows.length) {
+    throw new Error(
+      "No Delhivery orders with AWB found for this selection (Today’s Dispatch / selected ids).",
+    );
+  }
+
+  const connector = resolveShippingConnector(input.connector);
+  const labelPdfs: Uint8Array[] = [];
+  const awbs: string[] = [];
+  const orderNumbers: string[] = [];
+  const skipped: Array<{ orderNumber: string; reason: string }> = [];
+
+  for (const row of rows) {
+    const awb = row.awb!.trim();
+    try {
+      const bytes = await fetchOfficialLabelPdfBytes(awb, connector);
+      labelPdfs.push(bytes);
+      awbs.push(awb);
+      orderNumbers.push(row.orderNumber);
+    } catch (err) {
+      skipped.push({
+        orderNumber: row.orderNumber,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (!labelPdfs.length) {
+    throw new Error(
+      `Could not download any Delhivery PDF labels. ${skipped
+        .map((s) => `${s.orderNumber}: ${s.reason}`)
+        .join("; ")}`,
+    );
+  }
+
+  const pdfBytes = await composeDelhiveryLabelsOnA4(labelPdfs);
+  return { pdfBytes, awbs, orderNumbers, skipped };
+}
+
+function istYmd(d = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${y}-${m}-${day}`;
+}
+
+export async function scheduleDelhiveryPickupForFulfilment(input: {
+  pickupDate?: string | null;
+  pickupTime?: string | null;
+  expectedPackageCount?: number | null;
+  fulfilmentOrderIds?: string[];
+  tab?: FulfilmentTab;
+  actor?: string | null;
+  connector?: DelhiveryShippingConnector;
+}): Promise<{
+  pickupId: string;
+  pickupDate: string;
+  pickupTime: string;
+  pickupLocation: string;
+  expectedPackageCount: number;
+  incomingCenterName: string | null;
+  orderCount: number;
+  orderNumbers: string[];
+}> {
+  const rows = await listDelhiveryLabelReadyOrders({
+    fulfilmentOrderIds: input.fulfilmentOrderIds,
+    tab: input.tab ?? "todays-dispatch",
+  });
+  const count =
+    input.expectedPackageCount && input.expectedPackageCount > 0
+      ? Math.round(input.expectedPackageCount)
+      : Math.max(1, rows.length);
+
+  const pickupDate = (input.pickupDate?.trim() || istYmd()).slice(0, 10);
+  let pickupTime = (input.pickupTime?.trim() || "18:00:00").trim();
+  if (/^\d{2}:\d{2}$/.test(pickupTime)) pickupTime = `${pickupTime}:00`;
+
+  const connector = resolveShippingConnector(input.connector);
+  const result = await connector.schedulePickup({
+    pickupDate,
+    pickupTime,
+    expectedPackageCount: count,
+  });
+
+  const repo = createFulfilmentRepository();
+  for (const row of rows) {
+    await repo.appendEvent({
+      fulfilmentOrderId: row.id,
+      eventType: "delhivery-pickup-scheduled",
+      summary: `Delhivery pickup ${result.pickupId} · ${result.pickupDate} ${result.pickupTime} · ${result.expectedPackageCount} pkg`,
+      actor: input.actor ?? null,
+      detail: {
+        pickupId: result.pickupId,
+        pickupDate: result.pickupDate,
+        pickupTime: result.pickupTime,
+        pickupLocation: result.pickupLocation,
+        incomingCenterName: result.incomingCenterName,
+      },
+    });
+  }
+
+  return {
+    pickupId: result.pickupId,
+    pickupDate: result.pickupDate,
+    pickupTime: result.pickupTime,
+    pickupLocation: result.pickupLocation,
+    expectedPackageCount: result.expectedPackageCount,
+    incomingCenterName: result.incomingCenterName,
+    orderCount: rows.length,
+    orderNumbers: rows.map((r) => r.orderNumber),
   };
 }

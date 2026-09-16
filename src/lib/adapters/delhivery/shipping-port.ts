@@ -83,6 +83,26 @@ export type DelhiveryRateQuote = {
   raw: unknown;
 };
 
+export type DelhiveryPickupRequestInput = {
+  /** YYYY-MM-DD */
+  pickupDate: string;
+  /** HH:MM:SS */
+  pickupTime: string;
+  /** Registered warehouse name — defaults to DELHIVERY_PICKUP_NAME */
+  pickupLocation?: string | null;
+  expectedPackageCount: number;
+};
+
+export type DelhiveryPickupRequestResult = {
+  pickupId: string;
+  pickupDate: string;
+  pickupTime: string;
+  pickupLocation: string;
+  expectedPackageCount: number;
+  incomingCenterName: string | null;
+  raw: unknown;
+};
+
 export interface DelhiveryShippingConnector {
   createShipment(
     input: DelhiveryCreateShipmentInput,
@@ -92,6 +112,9 @@ export interface DelhiveryShippingConnector {
     options?: DelhiveryPackingSlipOptions,
   ): Promise<DelhiveryPackingSlipPackage>;
   fetchRate(input: DelhiveryRateQuoteInput): Promise<DelhiveryRateQuote>;
+  schedulePickup(
+    input: DelhiveryPickupRequestInput,
+  ): Promise<DelhiveryPickupRequestResult>;
 }
 
 export type DelhiveryShippingConfig = {

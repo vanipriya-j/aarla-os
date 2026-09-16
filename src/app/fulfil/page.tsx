@@ -11,6 +11,7 @@ import {
   decidePackingAction,
   decideShippingAction,
   getDelhiveryRatesAction,
+  scheduleDelhiveryPickupAction,
   escalateFounderAvailabilityAction,
   getFulfilmentDetailAction,
   getPackingSuggestionsAction,
@@ -85,6 +86,16 @@ export default function FulfilOrdersPage() {
   const [pkgLengthCm, setPkgLengthCm] = useState("20");
   const [pkgWidthCm, setPkgWidthCm] = useState("15");
   const [pkgHeightCm, setPkgHeightCm] = useState("10");
+  const [pickupDate, setPickupDate] = useState(() => {
+    // Asia/Kolkata YYYY-MM-DD for default pickup day
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  });
+  const [pickupTime, setPickupTime] = useState("18:00");
   const [showPackChange, setShowPackChange] = useState(false);
   const [packItems, setPackItems] = useState<string[]>([""]);
   const [packReason, setPackReason] = useState("");
@@ -360,6 +371,104 @@ export default function FulfilOrdersPage() {
             </button>
           ))}
         </div>
+
+        {tab === "todays-dispatch" ? (
+          <div
+            className="card-surface p-4 space-y-3 border border-border"
+            data-testid="fulfil-dispatch-batch"
+          >
+            <div>
+              <p className="font-medium text-deep-navy">Today’s Delhivery batch</p>
+              <p className="text-sm text-charcoal/65">
+                Print official labels 2-per-A4 for every order that already has an AWB, then
+                schedule one warehouse pickup with Delhivery.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 items-end">
+              <button
+                type="button"
+                data-testid="fulfil-print-a4-labels"
+                disabled={pending}
+                className="text-sm rounded-full px-4 py-2 bg-deep-navy text-white disabled:opacity-60"
+                onClick={() => {
+                  window.open(
+                    "/api/fulfil/delhivery-labels-a4?tab=todays-dispatch",
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                Print labels (2 / A4)
+              </button>
+              <label className="text-xs text-charcoal/60">
+                Pickup date
+                <input
+                  type="date"
+                  className="mt-1 block text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                  value={pickupDate}
+                  disabled={pending}
+                  onChange={(e) => setPickupDate(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-charcoal/60">
+                Time (IST)
+                <input
+                  type="time"
+                  className="mt-1 block text-sm border border-border rounded-md px-2 py-1.5 disabled:opacity-50"
+                  value={pickupTime}
+                  disabled={pending}
+                  onChange={(e) => setPickupTime(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="fulfil-schedule-delhivery-pickup"
+                disabled={pending}
+                className="text-sm rounded-full px-4 py-2 border border-border disabled:opacity-50"
+                onClick={() => {
+                  const withAwb = rows.filter(
+                    (r) =>
+                      r.awb &&
+                      (r.shippingMethod === "delhivery-surface" ||
+                        r.shippingMethod === "delhivery-express"),
+                  );
+                  runAction("Scheduling Delhivery pickup…", async () => {
+                    const res = await scheduleDelhiveryPickupAction({
+                      pickupDate,
+                      pickupTime,
+                      expectedPackageCount: Math.max(1, withAwb.length),
+                      tab: "todays-dispatch",
+                    });
+                    if (!res.ok) {
+                      setError(res.error);
+                      return;
+                    }
+                    setStatus(
+                      `Pickup ${res.data.pickupId} · ${res.data.pickupDate} ${res.data.pickupTime} · ${res.data.expectedPackageCount} packages${
+                        res.data.incomingCenterName
+                          ? ` · ${res.data.incomingCenterName}`
+                          : ""
+                      }`,
+                    );
+                  });
+                }}
+              >
+                Schedule Delhivery pickup
+              </button>
+            </div>
+            <p className="text-xs text-charcoal/55">
+              {
+                rows.filter(
+                  (r) =>
+                    r.awb &&
+                    (r.shippingMethod === "delhivery-surface" ||
+                      r.shippingMethod === "delhivery-express"),
+                ).length
+              }{" "}
+              Delhivery order(s) with AWB in this tab will be included.
+            </p>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
           <div className="lg:col-span-2 space-y-2" data-testid="fulfil-order-list">

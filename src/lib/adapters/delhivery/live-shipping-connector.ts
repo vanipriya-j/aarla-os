@@ -7,6 +7,8 @@ import type {
   DelhiveryCreateShipmentResult,
   DelhiveryPackingSlipOptions,
   DelhiveryPackingSlipPackage,
+  DelhiveryPickupRequestInput,
+  DelhiveryPickupRequestResult,
   DelhiveryRateQuote,
   DelhiveryRateQuoteInput,
   DelhiveryShippingConfig,
@@ -315,6 +317,81 @@ export class LiveDelhiveryShippingConnector implements DelhiveryShippingConnecto
       originPin,
       destinationPin,
       weightG,
+      raw: json,
+    };
+  }
+
+  async schedulePickup(
+    input: DelhiveryPickupRequestInput,
+  ): Promise<DelhiveryPickupRequestResult> {
+    const pickupLocation =
+      input.pickupLocation?.trim() || this.config.pickupName?.trim() || "";
+    if (!pickupLocation) {
+      throw new Error(
+        "Pickup location missing — set DELHIVERY_PICKUP_NAME (registered warehouse).",
+      );
+    }
+    const body = {
+      pickup_time: input.pickupTime,
+      pickup_date: input.pickupDate,
+      pickup_location: pickupLocation,
+      expected_package_count: Math.max(1, Math.round(input.expectedPackageCount)),
+    };
+    const res = await fetch(`${this.config.baseUrl}/fm/request/new/`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(this.config.apiToken),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json: unknown = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(
+        `Delhivery pickup request failed (${res.status}): ${text.slice(0, 240) || res.statusText}`,
+      );
+    }
+    if (!res.ok) {
+      const root = json as Record<string, unknown>;
+      const msg =
+        (typeof root.error === "string" && root.error) ||
+        (typeof root.pickup_location === "string" && root.pickup_location) ||
+        (typeof root.detail === "string" && root.detail) ||
+        JSON.stringify(json).slice(0, 280);
+      throw new Error(`Delhivery pickup request failed (${res.status}): ${msg}`);
+    }
+    const root = json as Record<string, unknown>;
+    const pickupId =
+      root.pickup_id != null
+        ? String(root.pickup_id)
+        : root.pickupId != null
+          ? String(root.pickupId)
+          : "";
+    if (!pickupId) {
+      throw new Error(
+        `Delhivery did not return a pickup_id. ${JSON.stringify(json).slice(0, 280)}`,
+      );
+    }
+    return {
+      pickupId,
+      pickupDate:
+        (typeof root.pickup_date === "string" && root.pickup_date) || input.pickupDate,
+      pickupTime:
+        (typeof root.pickup_time === "string" && root.pickup_time) || input.pickupTime,
+      pickupLocation:
+        (typeof root.pickup_location_name === "string" && root.pickup_location_name) ||
+        pickupLocation,
+      expectedPackageCount:
+        typeof root.expected_package_count === "number"
+          ? root.expected_package_count
+          : body.expected_package_count,
+      incomingCenterName:
+        typeof root.incoming_center_name === "string"
+          ? root.incoming_center_name
+          : null,
       raw: json,
     };
   }
