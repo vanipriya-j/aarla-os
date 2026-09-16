@@ -32,8 +32,9 @@ Fulfil order
       → save AWB on fulfilment_orders
   → Print label
       → GET /api/fulfil/:id/delhivery-label
-          → GET /api/p/packing_slip?wbns=AWB  (JSON)
-          → printable HTML packing slip
+          → GET /api/p/packing_slip?wbns=AWB&pdf=true&pdf_size=4R
+          → official Delhivery shipping-label PDF (barcode) when account returns pdf_download_link
+          → else HTML Code 128 packing slip fallback
 ```
 
 Requires a synced Shopify shipping address on `external_orders` (`shipping_name`, `shipping_address1`, city, province, zip, phone). Re-sync Shopify orders after deploy so open Fulfil rows get addresses.
@@ -64,7 +65,7 @@ Auth: `Authorization: Token <DELHIVERY_API_TOKEN>`
 Tracking: `GET /api/v1/packages/json/?waybill=awb1,awb2&verbose=2` (max 30 AWBs)  
 Create: `POST /api/cmu/create.json` with `format=json&data=<json>`  
 Rates: `GET /api/kinko/v1/invoice/charges/.json?md=S|E&cgm=&o_pin=&d_pin=&ss=Delivered`  
-Packing slip: `GET /api/p/packing_slip?wbns=<awb>` (JSON only — Aarla renders HTML for print)
+Packing slip / label: `GET /api/p/packing_slip?wbns=<awb>&pdf=true&pdf_size=4R` (official PDF when supported; otherwise JSON → HTML Code 128)
 
 ## Status mapping
 

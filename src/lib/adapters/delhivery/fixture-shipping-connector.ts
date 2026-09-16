@@ -1,6 +1,7 @@
 import type {
   DelhiveryCreateShipmentInput,
   DelhiveryCreateShipmentResult,
+  DelhiveryPackingSlipOptions,
   DelhiveryPackingSlipPackage,
   DelhiveryRateQuote,
   DelhiveryRateQuoteInput,
@@ -22,7 +23,11 @@ export class FixtureDelhiveryShippingConnector implements DelhiveryShippingConne
     };
   }
 
-  async fetchPackingSlip(awb: string): Promise<DelhiveryPackingSlipPackage> {
+  async fetchPackingSlip(
+    awb: string,
+    options?: DelhiveryPackingSlipOptions,
+  ): Promise<DelhiveryPackingSlipPackage> {
+    const wantPdf = options?.pdf !== false;
     return {
       awb,
       orderId: "FIXTURE-ORDER",
@@ -35,7 +40,9 @@ export class FixtureDelhiveryShippingConnector implements DelhiveryShippingConne
       shippingMode: "Surface",
       sortCode: "BLR/FIX",
       oid: "FIXTURE-ORDER",
-      raw: { packages: [{ wbn: awb, name: "Fixture Consignee" }] },
+      // Fixture has no real S3 PDF — callers fall back to HTML Code128 label.
+      pdfDownloadLink: wantPdf ? null : null,
+      raw: { packages: [{ wbn: awb, name: "Fixture Consignee", pdf: wantPdf }] },
     };
   }
 
