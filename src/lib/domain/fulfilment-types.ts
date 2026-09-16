@@ -73,6 +73,25 @@ export const SHOPIFY_OPEN_FULFILMENT_STATUSES = [
   "partially fulfilled",
 ] as const;
 
+/**
+ * Active Fulfil queue statuses (not yet Completed). When Shopify is no longer
+ * Unfulfilled/Partial, these rows should be auto-archived to `dispatched`.
+ */
+export const FULFILMENT_ACTIVE_QUEUE_STATUSES = [
+  "received",
+  "stock-check",
+  "stock-exception",
+  "waiting-for-partner-stock",
+  "waiting-for-founder-decision",
+  "waiting-for-customer",
+  "ready-to-pick",
+  "ready-to-pack",
+  "ready-to-ship",
+  "ready-for-handover",
+  "ready-for-pickup",
+  "refund-required",
+] as const satisfies readonly FulfilmentStatus[];
+
 export function fulfilmentStatusLabel(status: FulfilmentStatus): string {
   const labels: Record<FulfilmentStatus, string> = {
     received: "Received",

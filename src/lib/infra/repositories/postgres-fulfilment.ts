@@ -2,6 +2,7 @@ import type { QueryResultRow } from "pg";
 import { ORG_ID } from "@/lib/infra/db/ids";
 import { query as poolQuery } from "@/lib/infra/db/pool";
 import {
+  FULFILMENT_ACTIVE_QUEUE_STATUSES,
   SHOPIFY_OPEN_FULFILMENT_STATUSES,
   statusesForTab,
   type FulfilmentStatus,
@@ -295,34 +296,37 @@ export function createFulfilmentRepository(): FulfilmentRepository {
     },
 
     async listEarlyQueueOrderNumbers(limit = 80) {
+      const activeStatuses = [...FULFILMENT_ACTIVE_QUEUE_STATUSES];
       const rows = await q<{ order_number: string }>(
         `select o.order_number
          from fulfilment_orders fo
          join external_orders o on o.id = fo.external_order_id
          where fo.organization_id = $1
-           and fo.status in ('received', 'stock-check')
+           and fo.status = any($2::text[])
            and nullif(btrim(o.order_number), '') is not null
          order by o.order_date asc
-         limit $2`,
-        [ORG_ID, Math.max(1, Math.min(limit, 200))],
+         limit $3`,
+        [ORG_ID, activeStatuses, Math.max(1, Math.min(limit, 200))],
       );
       return rows.map((r) => String(r.order_number));
     },
 
     async archiveAlreadyShippedStockChecks() {
-      // Drop early-queue rows that are no longer Unfulfilled / Partially fulfilled in Shopify.
+      // Drop any active-queue row that is no longer Unfulfilled / Partially fulfilled in Shopify
+      // (Stock Check through Ready to Ship / Today's Dispatch — not only early queue).
       const openStatuses = [...SHOPIFY_OPEN_FULFILMENT_STATUSES];
+      const activeStatuses = [...FULFILMENT_ACTIVE_QUEUE_STATUSES];
       const rows = await q<{ id: string; order_number: string }>(
         `select fo.id, o.order_number
          from fulfilment_orders fo
          join external_orders o on o.id = fo.external_order_id
          where fo.organization_id = $1
-           and fo.status in ('received', 'stock-check')
+           and fo.status = any($2::text[])
            and (
              o.cancelled_at is not null
-             or lower(coalesce(o.fulfilment_status, '')) <> all($2::text[])
+             or lower(coalesce(o.fulfilment_status, '')) <> all($3::text[])
            )`,
-        [ORG_ID, openStatuses],
+        [ORG_ID, activeStatuses, openStatuses],
       );
       for (const row of rows) {
         await q(

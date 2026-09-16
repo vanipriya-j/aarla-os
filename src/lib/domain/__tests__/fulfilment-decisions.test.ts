@@ -7,6 +7,7 @@ import {
   buildPackingActual,
 } from "@/lib/domain/fulfilment-decisions";
 import {
+  FULFILMENT_ACTIVE_QUEUE_STATUSES,
   isPastFulfilmentCutoff,
   istMinutesSinceMidnight,
   statusesForTab,
@@ -117,6 +118,14 @@ describe("fulfilment tabs and cut-off", () => {
   it("maps needs-attention statuses", () => {
     expect(statusesForTab("needs-attention")).toContain("stock-exception");
     expect(statusesForTab("completed")).toEqual(["dispatched", "cancelled"]);
+  });
+
+  it("treats ready-to-ship / dispatch as active for Shopify auto-archive", () => {
+    expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).toContain("ready-to-ship");
+    expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).toContain("ready-to-pack");
+    expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).toContain("ready-for-handover");
+    expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).not.toContain("dispatched");
+    expect(FULFILMENT_ACTIVE_QUEUE_STATUSES).not.toContain("cancelled");
   });
 
   it("computes IST minutes", () => {

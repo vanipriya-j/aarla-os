@@ -1,6 +1,7 @@
 /**
- * Live Shopify order watch — refresh current opens + re-check existing Stock Check
- * rows so Shopify-fulfilled orders leave the queue (without Sync All).
+ * Live Shopify order watch — refresh current opens + re-check active Fulfil
+ * queue rows so Shopify-fulfilled orders leave Stock Check through Dispatch
+ * (without Sync All).
  */
 import "server-only";
 import {
@@ -38,7 +39,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 /**
  * One live-desk tick:
  * 1) Pull current Shopify Unfulfilled/Partial opens
- * 2) Re-fetch early Fulfil queue orders by name (status catch-up for already-shipped)
+ * 2) Re-fetch active Fulfil queue orders by name (status catch-up for already-shipped)
  * 3) Ingest new opens + auto-archive rows no longer open in Shopify
  */
 export async function runLiveOrdersTick(input: {
@@ -89,9 +90,9 @@ export async function runLiveOrdersTick(input: {
     }
 
     // Status catch-up: open-fulfilment only returns still-open Shopify orders.
-    // Rows already in Stock Check that Shopify fulfilled later must be re-fetched
-    // by name so archiveAlreadyShippedStockChecks can clear them.
-    const earlyNumbers = await repo.listEarlyQueueOrderNumbers(80);
+    // Active Fulfil rows (Stock Check → Dispatch) that Shopify fulfilled later
+    // must be re-fetched by name so archiveAlreadyShippedStockChecks can clear them.
+    const earlyNumbers = await repo.listEarlyQueueOrderNumbers(120);
     for (const batch of chunk(earlyNumbers, 10)) {
       const searchQuery = shopifyOrdersByNamesQuery(batch);
       if (!searchQuery) continue;
