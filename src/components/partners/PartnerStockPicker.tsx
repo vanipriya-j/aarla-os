@@ -63,9 +63,13 @@ export function PartnerStockPicker({
     });
   }, [resultKeys]);
 
-  const selectedOptions = results.filter((o) => checked.has(optionKey(o)));
+  const selectedOptions = results.filter(
+    (o) => o.available > 0 && checked.has(optionKey(o)),
+  );
+  const selectableResults = results.filter((o) => o.available > 0);
   const allVisibleChecked =
-    results.length > 0 && results.every((o) => checked.has(optionKey(o)));
+    selectableResults.length > 0 &&
+    selectableResults.every((o) => checked.has(optionKey(o)));
 
   const toggle = (key: string) => {
     setChecked((prev) => {
@@ -80,11 +84,11 @@ export function PartnerStockPicker({
     setChecked((prev) => {
       if (allVisibleChecked) {
         const next = new Set(prev);
-        for (const o of results) next.delete(optionKey(o));
+        for (const o of selectableResults) next.delete(optionKey(o));
         return next;
       }
       const next = new Set(prev);
-      for (const o of results) next.add(optionKey(o));
+      for (const o of selectableResults) next.add(optionKey(o));
       return next;
     });
   };
@@ -122,7 +126,7 @@ export function PartnerStockPicker({
                 onChange={toggleAllVisible}
                 data-testid={`${testIdPrefix}-select-all`}
               />
-              Select all visible ({results.length})
+              Select all available ({selectableResults.length})
             </label>
             <span className="text-xs text-charcoal/55">{checked.size} selected</span>
           </div>
@@ -144,11 +148,16 @@ export function PartnerStockPicker({
             results.map((o) => {
               const key = optionKey(o);
               const isChecked = checked.has(key);
+              const unavailable = o.available <= 0;
               return (
                 <label
                   key={key}
-                  className={`flex items-start gap-3 px-3 py-2.5 text-sm cursor-pointer transition ${
-                    isChecked ? "bg-aarla-red/5" : "hover:bg-pale-cream"
+                  className={`flex items-start gap-3 px-3 py-2.5 text-sm transition ${
+                    unavailable
+                      ? "opacity-55 cursor-not-allowed"
+                      : isChecked
+                        ? "bg-aarla-red/5 cursor-pointer"
+                        : "hover:bg-pale-cream cursor-pointer"
                   }`}
                   data-testid={`${testIdPrefix}-option`}
                 >
@@ -156,7 +165,10 @@ export function PartnerStockPicker({
                     type="checkbox"
                     className="mt-1"
                     checked={isChecked}
-                    onChange={() => toggle(key)}
+                    disabled={unavailable}
+                    onChange={() => {
+                      if (!unavailable) toggle(key);
+                    }}
                     data-testid={`${testIdPrefix}-option-check`}
                   />
                   <span className="min-w-0 flex-1">
@@ -168,9 +180,10 @@ export function PartnerStockPicker({
                       </span>
                     </span>
                     <span className="block text-xs text-charcoal/55 mt-0.5">
-                      {o.available > 0 ? `Available ${o.available}` : null}
-                      {o.available > 0 && o.sku ? " · " : null}
-                      {o.sku ? `SKU ${o.sku}` : null}
+                      {unavailable
+                        ? "No qty here — can't add until stock is available"
+                        : `Available ${o.available}`}
+                      {o.sku ? ` · SKU ${o.sku}` : null}
                     </span>
                   </span>
                 </label>
