@@ -12,6 +12,8 @@ Input a theme (e.g. Muruga). Output groups: Worlds, Stories, Objects, Experience
 
 Capture client brief (occasion, story, qty, budget, deadline, location, branding, personalisation). Generate three hamper options with products, packaging, cost, sell price, margin, inventory, manufacture needs, lead time. Convert selection to project.
 
+**Inbound leads (GYVFT):** `POST /api/integrations/story/leads` — see [gyvft-story-leads-api.md](./gyvft-story-leads-api.md). Public forms post into `story_leads` with Bearer/HMAC machine auth (no Aarla cookies).
+
 ## 4. Manufacture / Reorder (`/manufacture`)
 
 Modes: new / reorder / quick. Vendor forms for bottles and magnets. Previews: PO, spec sheet, email, WhatsApp, attachment checklist. Approve and Send simulation.

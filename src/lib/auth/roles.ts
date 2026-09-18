@@ -32,6 +32,8 @@ const PUBLIC_PATH_PREFIXES = [
   // Machine callers (Shopify) — route still gated by SHOPIFY_INTEGRATION_SECRET.
   "/api/integrations/shopify/reservations",
   "/api/integrations/shopify/commerce-events",
+  // Machine callers (GYVFT) — gated by STORY_LEADS_API_KEY / HMAC.
+  "/api/integrations/story/leads",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {
