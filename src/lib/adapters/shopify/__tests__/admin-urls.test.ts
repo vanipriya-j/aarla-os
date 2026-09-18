@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shopifyAdminProductUrl } from "@/lib/adapters/shopify/admin-urls";
+import {
+  shopifyAdminDraftOrderUrl,
+  shopifyAdminProductUrl,
+} from "@/lib/adapters/shopify/admin-urls";
 
 describe("shopifyAdminProductUrl", () => {
   const env = {
@@ -22,5 +25,17 @@ describe("shopifyAdminProductUrl", () => {
     expect(shopifyAdminProductUrl("123", {} as NodeJS.ProcessEnv)).toBeNull();
     expect(shopifyAdminProductUrl("prod-tote", env)).toBeNull();
     expect(shopifyAdminProductUrl(null, env)).toBeNull();
+  });
+});
+
+describe("shopifyAdminDraftOrderUrl", () => {
+  const env = {
+    SHOPIFY_STORE_DOMAIN: "aarla.myshopify.com",
+  } as NodeJS.ProcessEnv;
+
+  it("builds an Admin draft order URL", () => {
+    expect(shopifyAdminDraftOrderUrl("gid://shopify/DraftOrder/99", env)).toBe(
+      "https://admin.shopify.com/store/aarla/draft_orders/99",
+    );
   });
 });

@@ -229,6 +229,33 @@ export type ShopifyCreateOrderFulfilmentResult = {
   alreadyFulfilled?: boolean;
 };
 
+export type ShopifyDraftOrderLineInput = {
+  title: string;
+  quantity: number;
+  /** Unit price in shop currency (INR). */
+  price: string;
+  custom?: boolean;
+};
+
+export type ShopifyCreateDraftOrderInput = {
+  email?: string | null;
+  phone?: string | null;
+  note?: string | null;
+  tags?: string[];
+  /** Customer display name — used for note / shipping name when no customer id. */
+  customerName?: string | null;
+  organisationName?: string | null;
+  lineItems: ShopifyDraftOrderLineInput[];
+};
+
+export type ShopifyCreateDraftOrderResult = {
+  ok: boolean;
+  draftOrderId: string | null;
+  draftOrderName: string | null;
+  invoiceUrl: string | null;
+  errors: string[];
+};
+
 export interface ShopifyConnector {
   readonly provider: "shopify";
   /** Full fetch (fixtures / small stores). Live connector may still page internally. */
@@ -271,6 +298,13 @@ export interface ShopifyConnector {
   createOrderFulfilment?(
     input: ShopifyCreateOrderFulfilmentInput,
   ): Promise<ShopifyCreateOrderFulfilmentResult>;
+  /**
+   * Create a draft order (institutional / story lead closed-won).
+   * Requires write_draft_orders (soft-fail upstream when missing).
+   */
+  createDraftOrder?(
+    input: ShopifyCreateDraftOrderInput,
+  ): Promise<ShopifyCreateDraftOrderResult>;
   /**
    * Total orders matching an optional search query (for “Loaded X of Y” progress).
    * Optional — UI falls back to Loaded X orders when missing.

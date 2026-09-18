@@ -96,7 +96,7 @@ export const createNav: NavItem[] = [
     label: "Your Story. Our Telling.",
     href: "/story",
     icon: BookOpen,
-    description: "Design hampers and institutional gifts.",
+    description: "Story leads CRM, hampers and institutional gifts.",
   },
   {
     label: "Content Studio",

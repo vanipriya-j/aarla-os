@@ -14,6 +14,8 @@ import type {
   ShopifyAbandonedCheckoutPage,
   ShopifyAbandonedCheckoutRecord,
   ShopifyConnector,
+  ShopifyCreateDraftOrderInput,
+  ShopifyCreateDraftOrderResult,
   ShopifyCreateOrderFulfilmentInput,
   ShopifyCreateOrderFulfilmentResult,
   ShopifyCustomerCallPage,
@@ -768,6 +770,19 @@ mutation FulfillmentCreate($fulfillment: FulfillmentInput!) {
 }
 `;
 
+const DRAFT_ORDER_CREATE = `
+mutation DraftOrderCreate($input: DraftOrderInput!) {
+  draftOrderCreate(input: $input) {
+    draftOrder {
+      id
+      name
+      invoiceUrl
+    }
+    userErrors { field message }
+  }
+}
+`;
+
 type OrderFulfillmentOrdersData = {
   order: {
     id: string;
@@ -1409,6 +1424,108 @@ export class LiveShopifyGraphqlConnector implements ShopifyConnector {
       };
     }
     return { ok: true, fulfilmentId, errors: [] };
+  }
+
+  /**
+   * Create a Shopify draft order for a closed-won story lead.
+   * Soft-fail upstream when write_draft_orders is missing.
+   */
+  async createDraftOrder(
+    input: ShopifyCreateDraftOrderInput,
+  ): Promise<ShopifyCreateDraftOrderResult> {
+    assertServerOnly();
+    const lineItems = (input.lineItems ?? [])
+      .filter((l) => l.title.trim() && l.quantity > 0)
+      .map((l) => ({
+        title: l.title.trim(),
+        quantity: Math.max(1, Math.floor(l.quantity)),
+        originalUnitPrice: String(l.price),
+        custom: l.custom !== false,
+      }));
+    if (!lineItems.length) {
+      return {
+        ok: false,
+        draftOrderId: null,
+        draftOrderName: null,
+        invoiceUrl: null,
+        errors: ["At least one line item is required"],
+      };
+    }
+
+    const tags = [
+      "aarla-story-lead",
+      ...(input.tags ?? []).map((t) => t.trim()).filter(Boolean),
+    ];
+    const noteParts = [
+      input.note?.trim() || null,
+      input.customerName?.trim()
+        ? `Contact: ${input.customerName.trim()}`
+        : null,
+      input.organisationName?.trim()
+        ? `Organisation: ${input.organisationName.trim()}`
+        : null,
+    ].filter(Boolean);
+
+    try {
+      const data = await this.graphql<{
+        draftOrderCreate: {
+          draftOrder: {
+            id: string;
+            name: string | null;
+            invoiceUrl: string | null;
+          } | null;
+          userErrors: Array<{ field: string[] | null; message: string }>;
+        };
+      }>(DRAFT_ORDER_CREATE, {
+        input: {
+          email: input.email?.trim() || null,
+          phone: input.phone?.trim() || null,
+          note: noteParts.length ? noteParts.join("\n") : null,
+          tags,
+          lineItems,
+          taxExempt: false,
+        },
+      });
+
+      const errors = (data.draftOrderCreate?.userErrors ?? []).map(
+        (e) => e.message,
+      );
+      const draft = data.draftOrderCreate?.draftOrder;
+      const draftOrderId = draft?.id
+        ? shopifyGidToExternalId(draft.id) ?? draft.id
+        : null;
+      if (errors.length || !draftOrderId) {
+        return {
+          ok: false,
+          draftOrderId,
+          draftOrderName: draft?.name ?? null,
+          invoiceUrl: draft?.invoiceUrl ?? null,
+          errors: errors.length
+            ? errors
+            : ["Shopify draftOrderCreate returned no draft order"],
+        };
+      }
+      return {
+        ok: true,
+        draftOrderId,
+        draftOrderName: draft?.name ?? null,
+        invoiceUrl: draft?.invoiceUrl ?? null,
+        errors: [],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const scopeHint =
+        /access denied|insufficient|not authorized|scope/i.test(message)
+          ? " — needs write_draft_orders on the Shopify app token."
+          : "";
+      return {
+        ok: false,
+        draftOrderId: null,
+        draftOrderName: null,
+        invoiceUrl: null,
+        errors: [`${message}${scopeHint}`],
+      };
+    }
   }
 }
 
